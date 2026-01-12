@@ -2,9 +2,14 @@ const express = require("express");
 const app = express();
 const path = require("path");
 const cors = require('cors')
+const axios = require('axios');
 
 const bodyParser = require("body-parser");
 const cookieParser = require("cookie-parser");
+
+// require("dotenv").config();
+
+require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
 const config = require("./config/key");
 
@@ -14,14 +19,14 @@ const config = require("./config/key");
 //   .then(() => console.log("DB connected"))
 //   .catch(err => console.error(err));
 
-const mongoose = require("mongoose");
-const connect = mongoose.connect(config.mongoURI,
-  {
-    useNewUrlParser: true, useUnifiedTopology: true,
-    useCreateIndex: true, useFindAndModify: false
-  })
-  .then(() => console.log('MongoDB Connected...'))
-  .catch(err => console.log(err));
+// const mongoose = require("mongoose");
+// const connect = mongoose.connect(config.mongoURI,
+//   {
+//     useNewUrlParser: true, useUnifiedTopology: true,
+//     useCreateIndex: true, useFindAndModify: false
+//   })
+//   .then(() => console.log('MongoDB Connected...'))
+//   .catch(err => console.log(err));
 
 app.use(cors())
 
@@ -40,7 +45,23 @@ app.use(function (req, res, next) {
 })
 
 // app.use('/api/users', require('./routes/users'));
-app.use('/api/upload', require('./routes/upload'));
+// app.use('/api/upload', require('./routes/upload'));
+const authModule = require("./routes/auth");
+app.use("/api/auth", authModule.router);
+
+(async () => {
+  try {
+    const token = await authModule.devAutoLogin();
+    if (token && process.env.NODE_ENV !== "production") {
+      console.log("[APP] ✅ JWT ready:", token);
+    } else {
+      console.log("[APP] (dev) JWT not generated (missing env or failed login)");
+    }
+  } catch (e) {
+    console.error("[APP] dev auto login failed:", e?.message || e);
+  }
+})();
+
 
 //use this to show the image you have in node js server to client (react js)
 //https://stackoverflow.com/questions/48914987/send-image-path-from-node-js-express-server-to-react-client
@@ -60,8 +81,33 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-const port = process.env.PORT || 5000
+const port = process.env.PORT || 8000
+
+// MQTT 라우터 및 초기화
+const mqttModule = require("./routes/mqtt");
+const { disconnect } = require("./routes/Mqtt/MqttClient");
+
+// 마운트된 라우터 (예: /api/publish)
+app.use('/', mqttModule.router);
+
+// 서버 시작 전에 MQTT 초기화 시도
+mqttModule.init().catch((e) => {
+  console.error('[APP] MQTT init during server start failed:', e?.message || e);
+});
 
 app.listen(port, () => {
   console.log(`Server Listening on ${port}`)
+});
+
+// Graceful shutdown for MQTT client
+process.on("SIGINT", async () => {
+  console.log("\n[APP] SIGINT received. Shutting down...");
+  try { await disconnect(); } catch (e) { console.error(e); }
+  process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+  console.log("\n[APP] SIGTERM received. Shutting down...");
+  try { await disconnect(); } catch (e) { console.error(e); }
+  process.exit(0);
 });
