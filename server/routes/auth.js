@@ -1,3 +1,4 @@
+// 파이썬에서 import하는 부분
 const express = require("express");
 const axios = require("axios");
 const config = require("../config/key");
@@ -7,13 +8,13 @@ const router = express.Router();
 const external = axios.create({
   baseURL: config.restApi,
   timeout: 10000,
-  headers: { "Content-Type": "application/json" },
+  headers: { "Content-Type": "application/json" }, // 토큰 인증 시 사용
   withCredentials: false,
 });
 
-// dev에서 자동으로 받아둘 토큰(메모리 저장)
-let cachedToken = null;
-let cachedRaw = null;
+// ✅ dev에서 자동으로 받아둘 토큰(메모리 저장)
+let cachedToken = null; // 개발용 토큰
+let cachedRaw = null; // 응답 원본
 
 async function devAutoLogin() {
   if (process.env.NODE_ENV === "production") return null;
