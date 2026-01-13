@@ -10,7 +10,7 @@ const external = axios.create({
 });
 
 // ✅ 외부 API 호출 함수
-async function RestAPIClientProductList({
+async function ProductList({
   division_idx = config.divisionIdx,
   device_idx = null,
   product_idx = null,
@@ -43,7 +43,7 @@ async function RestAPIClientProductList({
   return r.data;
 }
 
-module.exports = { RestAPIClientProductList };
+module.exports = { ProductList };
 
 // event 없이 'node ./server/routes/RestAPI/RestAPIClient.js'로 실행
 if (require.main === module) {
@@ -63,7 +63,7 @@ if (require.main === module) {
       console.log("[RestAPIClient] JWT_TOKEN set");
 
       // 3️⃣ REST API 호출
-      const data = await RestAPIClientProductList({
+      const data = await ProductList({
         division_idx: config.divisionIdx,
       });
 
