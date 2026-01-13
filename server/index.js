@@ -77,7 +77,7 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-const port = process.env.PORT || 4488
+const port = process.env.PORT || 8888
 
 // MQTT 
 // 라우터 및 초기화
