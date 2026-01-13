@@ -4,5 +4,8 @@ module.exports = {
     mqttID: 'pnt',
     mqttPW: 'chai',
     divisionIdx: 'DI17647205538493077',
-    externalApi: 'https://apichaidev.atcrk.co.kr/api/v1',
+    deviceIdx: 'DE17560868094789999',
+    restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
+    userId: 'admin',
+    userPassword: 'carrier041!'
 }

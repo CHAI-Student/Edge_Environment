@@ -52,11 +52,6 @@ app.use("/api/auth", authModule.router);
 (async () => {
   try {
     const token = await authModule.devAutoLogin();
-    if (token && process.env.NODE_ENV !== "production") {
-      console.log("[APP] ✅ JWT ready:", token);
-    } else {
-      console.log("[APP] (dev) JWT not generated (missing env or failed login)");
-    }
   } catch (e) {
     console.error("[APP] dev auto login failed:", e?.message || e);
   }
@@ -83,7 +78,8 @@ if (process.env.NODE_ENV === "production") {
 
 const port = process.env.PORT || 8000
 
-// MQTT 라우터 및 초기화
+// MQTT 
+// 라우터 및 초기화
 const mqttModule = require("./routes/mqtt");
 const { disconnect } = require("./routes/Mqtt/MqttClient");
 
