@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const { HealthMqtt } = require("./Mqtt/HealthMqtt");
+const { RebootMqtt } = require('./Mqtt/RebootMqtt')
 const { publish } = require("./Mqtt/MqttClient");
 
 const router = express.Router();
@@ -24,6 +25,7 @@ router.post("/api/publish", async (req, res) => {
 async function init() {
   try {
     await HealthMqtt();
+    await RebootMqtt();
     console.log("[APP] MQTT init done");
   } catch (e) {
     console.error("[APP] MQTT init failed:", e?.message || e);

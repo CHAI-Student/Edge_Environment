@@ -10,5 +10,11 @@ module.exports = {
     deviceIdx: 'DE17560868094789999',
     restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
     userId: 'admin',
-    userPassword: 'carrier041!'
+    userPassword: 'carrier041!',
+    get jwtToken() {
+        return process.env.JWT_TOKEN;
+    },
+    get jwtTokenAt() {
+        return process.env.JWT_TOKEN_AT;
+    },
 }
