@@ -8,9 +8,9 @@ function createMqttClient() {
   if (!config.mqttID) throw new Error("Missing config.mqttID");
   if (!config.mqttPW) throw new Error("Missing config.mqttPW");
 
-  const clientId = `edge-logic-${config.divisionIdx || "x"}-${Math.random()
-    .toString(16)
-    .slice(2)}`;
+  const deviceIdx = config.deviceIdx
+
+  const clientId = deviceIdx
 
   // ⚠️ broker가 사설 인증서(TLS)라서 self-signed 이면 rejectUnauthorized:false가 필요할 수 있음(테스트 용도)
   const options = {
