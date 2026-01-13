@@ -8,7 +8,6 @@ module.exports = {
     // 매장 번호
     divisionIdx: 'DI17647205538493077',
     deviceIdx: 'DE17560868094789999',
-    // 외부 REST API 기반 URL
     restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
     userId: 'admin',
     userPassword: 'carrier041!'

@@ -11,10 +11,10 @@ const external = axios.create({
   headers: { "Content-Type": "application/json" }, // 토큰 인증 시 사용
   withCredentials: false,
 });
+
 // ✅ dev에서 자동으로 받아둘 토큰(메모리 저장)
 let cachedToken = null; // 개발용 토큰
 let cachedRaw = null; // 응답 원본
-
 
 async function devAutoLogin() {
   if (process.env.NODE_ENV === "production") return null;

@@ -13,7 +13,6 @@ async function RebootMqtt() {
     const deviceIdx = config.deviceIdx
     const divisionIdx = config.divisionIdx
   
-    // publish
     const rebootPub = `chai/device/${deviceIdx}/ack/reboot` // reboot 후 subscribe 발행
     
     // subscribe
