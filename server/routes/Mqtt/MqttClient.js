@@ -12,7 +12,7 @@ function createMqttClient() {
 
   const clientId = deviceIdx
 
-  // ⚠️ broker가 사설 인증서(TLS)라서 self-signed 이면 rejectUnauthorized:false가 필요할 수 있음(테스트 용도)
+  // broker가 사설 인증서(TLS)라서 self-signed 이면 rejectUnauthorized:false가 필요할 수 있음(테스트 용도)
   const options = {
     clientId,
     username: config.mqttID,
@@ -32,17 +32,17 @@ function createMqttClient() {
   client = mqtt.connect(config.mqttURL, options);
 
   client.on("connect", () => {
-    console.log(`[MQTT] ✅ connected (${config.mqttURL}) clientId=${clientId}`);
+    console.log(`[MQTT] connected (${config.mqttURL}) clientId=${clientId}`);
   });
-  client.on("reconnect", () => console.log("[MQTT] 🔄 reconnecting..."));
-  client.on("offline", () => console.log("[MQTT] ⚠️ offline"));
+  client.on("reconnect", () => console.log("[MQTT] reconnecting..."));
+  client.on("offline", () => console.log("[MQTT] offline"));
   client.on("close", () => console.log("[MQTT] close"));
-  client.on("end", () => console.log("[MQTT] ℹ️ end"));
-  client.on("error", (err) => console.error("[MQTT] ⛔ error:", err?.message || err));
+  client.on("end", () => console.log("[MQTT] end"));
+  client.on("error", (err) => console.error("[MQTT] error:", err?.message || err));
 
   // 공통 수신 로깅(원하면 여기서 topic 라우팅도 가능)
   client.on("message", (topic, payload) => {
-    console.log(`[MQTT] 📩 topic=${topic} payload=${payload.toString()}`);
+    console.log(`[MQTT] topic=${topic} payload=${payload.toString()}`);
   });
 
   return client;
@@ -74,13 +74,13 @@ async function subscribe(topics, qos = 0) {
   const c = getClient();
   const list = Array.isArray(topics) ? topics : [topics];
 
-  await waitForConnect(c); // ✅ 연결 보장
+  await waitForConnect(c); // 연결 보장
 
   return new Promise((resolve, reject) => {
     // QoS는 요구사항에 맞게 조절 (0/1/2)
     c.subscribe(list, { qos: 0 }, (err, granted) => {
       if (err) return reject(err);
-      console.log("[MQTT] ✅ subscribed:", granted);
+      console.log("[MQTT] subscribed:", granted);
       resolve(granted);
     });
   });
@@ -108,7 +108,7 @@ function disconnect() {
 
   return new Promise((resolve) => {
     client.end(true, () => {
-      console.log("[MQTT] ✅ disconnected");
+      console.log("[MQTT] disconnected");
       client = null;
       resolve(true);
     });

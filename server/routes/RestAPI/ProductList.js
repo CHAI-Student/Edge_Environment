@@ -9,7 +9,7 @@ const external = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-// ✅ 외부 API 호출 함수
+// 외부 API 호출 함수
 async function ProductList({
   division_idx = config.divisionIdx,
   device_idx = null,
@@ -51,18 +51,18 @@ if (require.main === module) {
     try {
       console.log("[RestAPIClient] standalone start");
 
-      // 1️⃣ 로그인 → 토큰 발급
+      // 로그인 → 토큰 발급
       const token = await devAutoLogin();
       if (!token) {
         throw new Error("devAutoLogin failed");
       }
 
-      // 2️⃣ env에 토큰 세팅
+      // env에 토큰 세팅
       process.env.JWT_TOKEN = token;
       process.env.JWT_TOKEN_AT = Date.now().toString();
       console.log("[RestAPIClient] JWT_TOKEN set");
 
-      // 3️⃣ REST API 호출
+      // REST API 호출
       const data = await ProductList({
         division_idx: config.divisionIdx,
       });
