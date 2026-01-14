@@ -1,69 +1,129 @@
-const config = require("../../config/key");
-const { getClient, subscribe } = require("./MqttClient");
-const { v4: uuidv4 } = require("uuid");
 const path = require("path");
 const fs = require("fs/promises");
+const { v4: uuidv4 } = require("uuid");
+const { getClient, publish } = require("./MqttClient");
+const config = require("../../config/key");
+const { exec } = require("child_process");
 
-console.log(path.join(__dirname))
+// ✅ 실코드/테스트 동일 경로로 고정
+const REBOOT_FLAG = path.resolve(__dirname, "../../log/reboot.flag");
 
-const REBOOT_FLAG = path.join(__dirname, "..", "reboot.flag"); // 위치는 편한 곳으로
-
-async function RebootMqtt() {
-  // divisionIdx 기준으로 토픽 네이밍 예시
-    const deviceIdx = config.deviceIdx
-    const divisionIdx = config.divisionIdx
-  
-    const rebootPub = `chai/device/${deviceIdx}/ack/reboot` // reboot 후 subscribe 발행
-    
-    // subscribe
-    const rebootSub = `chai/device/${deviceIdx}/cmd/reboot`
-  
-    const client = getClient(); // 연결 시작
-    client.on("connect", () => {
-      console.log("[MQTT] connected");
-  
-      // ✅ subscribe
-      client.subscribe(topics, { qos: 0 }, (err, granted) => {
-        if (err) console.error("[MQTT] subscribe error:", err.message);
-        else console.log("[MQTT] subscribed:", granted);
-      });
-  
-      // ✅ health publish interval (connect 이후 시작)
-      setInterval(() => {
-        const timestamp = Date.now();
-  
-        const header = {
-          IF_ID: "IF_01",
-          IF_SYSID: uuidv4(),
-          IF_HOST: "DEVICE",
-          IF_DATE: timestamp,
-        };
-  
-        const body = {
-          device_idx: deviceIdx,
-          division_idx: divisionIdx,
-          result: 'S',
-          message: 'reboot accepted'
-        };
-  
-        const payload = JSON.stringify({ HEADER: header, DATA: body });
-        console.log('Reboot ----> ', payload)
-  
-        client.publish(rebootPub, payload, { qos: 0, retain: false }, (e) => {
-          if (e) console.error("[MQTT] publish error:", e.message);
-        });
-      }, 10000);
-    });
-  
-    // ✅ subscribe 메시지 핸들링
-    client.on("message", (topic, payload) => {
-      const msg = payload.toString();
-      console.log("[MQTT] message", topic, msg);
-  
-      // TODO: topic별 처리
-      // if (topic.endsWith("/cmd/reboot")) ...
-    });
-
+async function fileExists(p) {
+  try { await fs.stat(p); return true; } catch { return false; }
 }
 
-module.exports = { RebootMqtt };
+function runReboot() {
+  // 개발(Mac)에서는 실제 reboot 스킵
+  if (process.platform === "darwin") {
+    console.log("[REBOOT] (dev/mac) would reboot now. (skip)");
+    return;
+  }
+
+  console.log("[REBOOT] rebooting now...");
+  // Linux에서 실제 재부팅 (sudo 권한 필요할 수 있음)
+  // exec("sudo reboot", (err, stdout, stderr) => {
+  //   if (err) console.error("[REBOOT] reboot command failed:", err.message);
+  //   if (stdout) console.log("[REBOOT] stdout:", stdout);
+  //   if (stderr) console.log("[REBOOT] stderr:", stderr);
+  // });
+}
+
+// ✅ 부팅 직후: flag가 있으면 ack 1회 발행하고 flag 삭제
+async function publishRebootAckOnce(client, deviceIdx, divisionIdx) {
+  if (!(await fileExists(REBOOT_FLAG))) return;
+
+  let flag = {};
+  try {
+    const raw = await fs.readFile(REBOOT_FLAG, "utf-8");
+    flag = JSON.parse(raw);
+  } catch {
+    flag = {};
+  }
+
+  const ifSysId = flag?.ifSysId || uuidv4();
+  const timestamp = Date.now();
+
+  const rebootPub = `chai/device/${deviceIdx}/ack/reboot`;
+
+  const header = {
+    IF_ID: "IF_01",
+    IF_SYSID: ifSysId,
+    IF_HOST: "DEVICE",
+    IF_DATE: timestamp,
+  };
+
+  const body = {
+    device_idx: deviceIdx,
+    division_idx: divisionIdx,
+    result: "S",
+    message: "reboot completed",
+  };
+
+  const payload = { HEADER: header, DATA: body };
+
+  try {
+    await publish(rebootPub, payload, { qos: 1, retain: false });
+    console.log("[REBOOT] ✅ reboot ack published:", rebootPub);
+  } catch (e) {
+    console.error("[REBOOT] ⛔ reboot ack publish failed:", e?.message || e);
+  } finally {
+    // ✅ 요구사항: ack publish만 하고 끝내자 → flag는 무조건 제거
+    await fs.unlink(REBOOT_FLAG).catch(() => {});
+  }
+}
+
+async function RebootMqtt() {
+  const deviceIdx = config.deviceIdx;
+  const divisionIdx = config.divisionIdx;
+
+  if (!deviceIdx || !divisionIdx) {
+    console.error("[REBOOT] Missing deviceIdx/divisionIdx in config");
+    return;
+  }
+
+  const rebootSub = `chai/device/${deviceIdx}/cmd/reboot`; // PNT -> Edge
+  const client = getClient();
+
+  // ✅ message 핸들러 (cmd/reboot 수신)
+  client.on("message", async (topic, payload) => {
+    if (topic !== rebootSub) return;
+
+    const text = payload.toString();
+    let msg = {};
+    try { msg = JSON.parse(text); } catch {}
+
+    const ifSysId = msg?.HEADER?.IF_SYSID || uuidv4();
+    console.log("[MQTT] 📩 reboot cmd received. IF_SYSID=", ifSysId);
+
+    // ✅ reboot 예약 플래그 저장 (부팅 후 ack를 위해)
+    await fs.mkdir(path.dirname(REBOOT_FLAG), { recursive: true });
+    await fs.writeFile(
+      REBOOT_FLAG,
+      JSON.stringify({ requestedAt: Date.now(), ifSysId }),
+      "utf-8"
+    );
+
+    console.log("[REBOOT] flag saved. rebooting...");
+    runReboot();
+  });
+
+  const onReady = async () => {
+    console.log("[MQTT] ✅ connected (reboot)");
+
+    // ✅ 부팅 직후: flag 있으면 ack 1회 발행 후 삭제
+    await publishRebootAckOnce(client, deviceIdx, divisionIdx);
+    console.log("[REBOOT] publishReboot done");
+
+    console.log("[MQTT] subscribing...", rebootSub);
+    client.subscribe(rebootSub, { qos: 1 }, (err, granted) => {
+      if (err) console.error("[MQTT] ⛔ reboot subscribe error:", err.message);
+      else console.log("[MQTT] ✅ subscribed:", granted);
+    });
+  };
+
+  // ✅ connect 이벤트 놓침 방지
+  if (client.connected) onReady();
+  else client.once("connect", onReady);
+}
+
+module.exports = { RebootMqtt, REBOOT_FLAG };

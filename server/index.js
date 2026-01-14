@@ -29,6 +29,7 @@ const config = require("./config/key");
 //   .catch(err => console.log(err));
 
 app.use(cors())
+app.use(express.json());
 
 //to not get any deprecation warning or error
 //support parsing of application/x-www-form-urlencoded post data
@@ -76,7 +77,7 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-const port = process.env.PORT || 8000
+const port = process.env.PORT || 8888
 
 // MQTT 
 // 라우터 및 초기화

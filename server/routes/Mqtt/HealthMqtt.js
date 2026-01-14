@@ -13,7 +13,7 @@ async function HealthMqtt() {
   const client = getClient(); // 연결 시작
   client.on("connect", () => {
     console.log("[MQTT] connected");
-
+    
     // ✅ health publish interval (connect 이후 시작)
     setInterval(() => {
       const timestamp = Date.now();
@@ -28,10 +28,11 @@ async function HealthMqtt() {
       const body = {
         device_idx: deviceIdx,
         division_idx: divisionIdx,
-        camera_sta: "09",
-        deadbolt_sta: "19",
-        loadcell_sta: "29",
-        card_terminal_sta: "39",
+        camera_status: "09",
+        deadbolt_status: "19",
+        loadcell_status: "29",
+        card_terminal_status: "39",
+        // edgepc_status: "49"
       };
 
       const payload = JSON.stringify({ HEADER: header, DATA: body });
@@ -40,7 +41,7 @@ async function HealthMqtt() {
       client.publish(healthCheck, payload, { qos: 0, retain: false }, (e) => {
         if (e) console.error("[MQTT] publish error:", e.message);
       });
-    }, 30000);
+    }, 60000);
   });
 }
 

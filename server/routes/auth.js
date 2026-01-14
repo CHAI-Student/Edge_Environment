@@ -13,8 +13,8 @@ const external = axios.create({
 });
 
 // ✅ dev에서 자동으로 받아둘 토큰(메모리 저장)
-let cachedToken = null; // 개발용 토큰
-let cachedRaw = null; // 응답 원본
+let cachedToken = ''; // 개발용 토큰
+let cachedRaw = ''; // 응답 원본
 
 async function devAutoLogin() {
   if (process.env.NODE_ENV === "production") return null;
@@ -33,11 +33,15 @@ async function devAutoLogin() {
   const token = r.data.accessToken
 
   if (!token) return null;
-
-  cachedToken = token;
-  cachedRaw = r.data;
-  console.log('Token', cachedToken);
-  return token; // ✅ 토큰 반환
+  else {
+    cachedToken = token;
+    cachedRaw = r.data;
+    // console.log('Token', cachedToken);
+    process.env.JWT_TOKEN = cachedToken;
+    process.env.JWT_TOKEN_AT = Date.now().toString(); // (선택) 발급시각
+    console.log('jwtToken', process.env.JWT_TOKEN);
+    return cachedToken; // ✅ 토큰 반환
+  }
 }
 
 module.exports = { router, devAutoLogin };

@@ -7,5 +7,6 @@ module.exports = {
     deviceIdx: process.env.DEVICE_IDX,
     restApi: process.env.REST_API,
     userId: process.env.USER_ID,
-    userPassword: process.env.USER_PASSWORD
+    userPassword: process.env.USER_PASSWORD,
+    jwtToken: process.env.JWT_TOKEN
 }
