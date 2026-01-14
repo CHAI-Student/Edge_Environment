@@ -8,9 +8,9 @@ function createMqttClient() {
   if (!config.mqttID) throw new Error("Missing config.mqttID");
   if (!config.mqttPW) throw new Error("Missing config.mqttPW");
 
-  const clientId = `edge-logic-${config.divisionIdx || "x"}-${Math.random()
-    .toString(16)
-    .slice(2)}`;
+  const deviceIdx = config.deviceIdx
+
+  const clientId = deviceIdx
 
   // ⚠️ broker가 사설 인증서(TLS)라서 self-signed 이면 rejectUnauthorized:false가 필요할 수 있음(테스트 용도)
   const options = {
@@ -34,38 +34,15 @@ function createMqttClient() {
   client.on("connect", () => {
     console.log(`[MQTT] ✅ connected (${config.mqttURL}) clientId=${clientId}`);
   });
+  client.on("reconnect", () => console.log("[MQTT] 🔄 reconnecting..."));
+  client.on("offline", () => console.log("[MQTT] ⚠️ offline"));
+  client.on("close", () => console.log("[MQTT] close"));
+  client.on("end", () => console.log("[MQTT] ℹ️ end"));
+  client.on("error", (err) => console.error("[MQTT] ⛔ error:", err?.message || err));
 
-  client.on("reconnect", () => {
-    console.log("[MQTT] 🔄 reconnecting...");
-  });
-
-  client.on("offline", () => {
-    console.log("[MQTT] ⚠️ offline");
-  });
-
-  client.on("close", () => {
-    console.log("[MQTT] ℹ️ connection closed");
-  });
-
-  client.on("error", (err) => {
-    console.error("[MQTT] ⛔ error:", err?.message || err);
-    // error 이벤트만으로는 자동 종료 안 하니, 필요한 경우 여기서 정책 처리
-  });
-  client.on("disconnect", (packet) => {
-    console.log("[MQTT] ⚠️ disconnect packet:", packet);
-  });
-  client.on("end", () => {
-    console.log("[MQTT] ℹ️ end");
-  });
-
-
-  // 메시지 수신은 여기서 공통 핸들링
-  client.on("message", (topic, payload, packet) => {
-    const msg = payload.toString();
-    console.log(`[MQTT] 📩 topic=${topic} payload=${msg}`);
-
-    // TODO: 여기서 topic별 라우팅/모델 호출/DB 저장 등 연결 가능
-    // handleIncomingMessage(topic, msg, packet);
+  // 공통 수신 로깅(원하면 여기서 topic 라우팅도 가능)
+  client.on("message", (topic, payload) => {
+    console.log(`[MQTT] 📩 topic=${topic} payload=${payload.toString()}`);
   });
 
   return client;
@@ -76,9 +53,28 @@ function getClient() {
   return client;
 }
 
-function subscribe(topics) {
+function waitForConnect(c, timeoutMs = 8000) {
+  if (c.connected) return Promise.resolve(true);
+
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("MQTT connect timeout")), timeoutMs);
+
+    c.once("connect", () => {
+      clearTimeout(t);
+      resolve(true);
+    });
+    c.once("error", (e) => {
+      clearTimeout(t);
+      reject(e);
+    });
+  });
+}
+
+async function subscribe(topics, qos = 0) {
   const c = getClient();
   const list = Array.isArray(topics) ? topics : [topics];
+
+  await waitForConnect(c); // ✅ 연결 보장
 
   return new Promise((resolve, reject) => {
     // QoS는 요구사항에 맞게 조절 (0/1/2)

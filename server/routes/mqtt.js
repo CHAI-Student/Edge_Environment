@@ -1,7 +1,8 @@
 require("dotenv").config();
 
 const express = require("express");
-const { initMqtt } = require("./Mqtt/InitMqtt");
+const { HealthMqtt } = require("./Mqtt/HealthMqtt");
+const { RebootMqtt } = require('./Mqtt/RebootMqtt')
 const { publish } = require("./Mqtt/MqttClient");
 
 const router = express.Router();
@@ -20,10 +21,11 @@ router.post("/api/publish", async (req, res) => {
   }
 });
 
-// initMqtt은 서버 시작 시 호출되어야 합니다.
+// HealthMqtt는 서버 시작 시 호출
 async function init() {
   try {
-    await initMqtt();
+    await HealthMqtt();
+    await RebootMqtt();
     console.log("[APP] MQTT init done");
   } catch (e) {
     console.error("[APP] MQTT init failed:", e?.message || e);
