@@ -7,10 +7,10 @@ module.exports = {
     mqttPW: 'chai',
     // 매장 번호
     divisionIdx: 'DI17647205538493077',
-    deviceIdx: 'DE17560868094789999',
-    // deviceIdx: 'DE17683631997086480',
+    // deviceIdx: 'DE17560868094789999',
+    deviceIdx: 'DE17683631997086480',
     restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
-    userId: 'admin',
+    userId: 'chai',
     userPassword: 'carrier041!',
     get jwtToken() {
         return process.env.JWT_TOKEN;
