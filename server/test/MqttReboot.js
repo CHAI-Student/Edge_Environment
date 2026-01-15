@@ -5,16 +5,16 @@ const { spawn } = require("child_process");
 const mqtt = require("mqtt");
 const config = require('../config/key')
 
-// ✅ 너 프로젝트에 맞게 조정
+// 프로젝트에 맞게 조정
 const SERVER_ENTRY = path.resolve(__dirname, "../index.js");
 
-// ✅ RebootMqtt에서 쓰는 reboot.flag 경로와 반드시 동일해야 함
+// RebootMqtt에서 쓰는 reboot.flag 경로와 반드시 동일해야 함
 const REBOOT_FLAG = path.resolve(__dirname, "../log/reboot.flag");
 
-// ✅ 환경변수(또는 config/key가 읽는 값)에서 가져오기
+// 환경변수(또는 config/key가 읽는 값)에서 가져오기
 const MQTT_URL = config.mqttURL;   // 예: mqtt://chaidev.atcrk.co.kr:1883
-const MQTT_USER = config.mqttID; // 예: pnt
-const MQTT_PASS = config.mqttPW; // 예: chai
+const MQTT_USER = config.mqttID;   // 예: pnt
+const MQTT_PASS = config.mqttPW;   // 예: chai
 const DEVICE_IDX = config.deviceIdx; // 예: DE17560868094789999
 const DIVISION_IDX = config.divisionIdx; // 예: DI17647205538493077
 
@@ -32,7 +32,7 @@ function startServer() {
     env: {
       ...process.env,
       NODE_ENV: "development",
-      PORT: "8888",            // ✅ 테스트 전용 포트 (원하는 값)
+      PORT: "8888",            // 테스트 전용 포트 (원하는 값)
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -166,7 +166,7 @@ async function waitForAck(mqttClient, timeoutMs = 10000) {
   if (!(await fileExists(REBOOT_FLAG))) {
     throw new Error("reboot.flag not created (cmd not handled)");
   }
-  console.log("[TEST] ✅ reboot.flag created");
+  console.log("[TEST] reboot.flag created");
 
   // 5) “재부팅” 대신 서버 재시작
   await stopServer(server);
@@ -178,12 +178,12 @@ async function waitForAck(mqttClient, timeoutMs = 10000) {
   if (await fileExists(REBOOT_FLAG)) {
     throw new Error("reboot.flag still exists (ack flow not completed)");
   }
-  console.log("[TEST] ✅ reboot flow PASS (flag cleared)");
+  console.log("[TEST] reboot flow PASS (flag cleared)");
 
   // cleanup
   mqttClient.end(true);
   await stopServer(server);
 
-  console.log("\n[TEST] ✅ E2E reboot flow PASS");
+  console.log("\n[TEST] E2E reboot flow PASS");
   process.exit(0);
 });

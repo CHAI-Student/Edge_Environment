@@ -12,7 +12,7 @@ const external = axios.create({
   withCredentials: false,
 });
 
-// ✅ dev에서 자동으로 받아둘 토큰(메모리 저장)
+// dev에서 자동으로 받아둘 토큰(메모리 저장)
 let cachedToken = ''; // 개발용 토큰
 let cachedRaw = ''; // 응답 원본
 
@@ -40,7 +40,7 @@ async function devAutoLogin() {
     process.env.JWT_TOKEN = cachedToken;
     process.env.JWT_TOKEN_AT = Date.now().toString(); // (선택) 발급시각
     console.log('jwtToken', process.env.JWT_TOKEN);
-    return cachedToken; // ✅ 토큰 반환
+    return cachedToken; // 토큰 반환
   }
 }
 

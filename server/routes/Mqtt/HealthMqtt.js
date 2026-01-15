@@ -14,7 +14,7 @@ async function HealthMqtt() {
   client.on("connect", () => {
     console.log("[MQTT] connected");
     
-    // ✅ health publish interval (connect 이후 시작)
+    // health publish interval (connect 이후 시작)
     setInterval(() => {
       const timestamp = Date.now();
 
@@ -32,7 +32,7 @@ async function HealthMqtt() {
         deadbolt_status: "19",
         loadcell_status: "29",
         card_terminal_status: "39",
-        // edgepc_status: "49"
+        edgepc_status: "49"
       };
 
       const payload = JSON.stringify({ HEADER: header, DATA: body });

@@ -10,10 +10,10 @@ const external = axios.create({
 });
 
 // 외부 API 호출 함수
-async function ProductList({
-  division_idx = config.divisionIdx,
-  device_idx = null,
-  product_idx = null,
+async function ModelBrunchEdit({
+  divisionIdx = config.divisionIdx,
+  deviceIdx = null,
+  productIdx = null,
 } = {}) {
   const token = process.env.JWT_TOKEN;
   if (!token) {
@@ -22,19 +22,26 @@ async function ProductList({
 
   const payload = {
     HEADER: {
-      IF_ID: "IF_11",
+      IF_ID: "IF_14",
       IF_SYSID: uuidv4(),
       IF_HOST: "CHAI",
       IF_DATE: Date.now(),
     },
     DATA: {
-      division_idx,
-      device_idx,
-      product_idx,
+      device_list: [
+        {
+            division_idx: divisionIdx,
+            device_idx: deviceIdx,
+            brunch_name: 'FEB_001',
+            brunch_update: Date.now(),
+            model_version: "v"+'26.2.1',
+            model_update_date: Date.now()
+        }
+      ]
     },
   };
 
-  const r = await external.post("/chai/product/list", payload, {
+  const r = await external.post("/chai/device/store", payload, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -43,27 +50,19 @@ async function ProductList({
   return r.data;
 }
 
-module.exports = { ProductList };
+module.exports = { ModelBrunchEdit };
 
-// event 없이 'node ./server/routes/RestAPI/RestAPIClient.js'로 실행
 if (require.main === module) {
   (async () => {
     try {
       console.log("[RestAPIClient] standalone start");
-
-      // 로그인 → 토큰 발급
-      const token = await devAutoLogin();
-      if (!token) {
-        throw new Error("devAutoLogin failed");
-      }
-
-      // env에 토큰 세팅
+      
       process.env.JWT_TOKEN = token;
       process.env.JWT_TOKEN_AT = Date.now().toString();
       console.log("[RestAPIClient] JWT_TOKEN set");
 
       // REST API 호출
-      const data = await ProductList({
+      const data = await ModelBrunchEdit({
         division_idx: config.divisionIdx,
       });
 
