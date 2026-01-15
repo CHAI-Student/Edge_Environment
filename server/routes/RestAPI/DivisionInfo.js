@@ -10,10 +10,9 @@ const external = axios.create({
 });
 
 // ✅ 외부 API 호출 함수
-async function ProductList({
+async function DeviceInfo({
   division_idx = config.divisionIdx,
-  device_idx = null,
-  product_idx = null,
+  device_idx = config.deviceIdx,
 } = {}) {
   const token = process.env.JWT_TOKEN;
   if (!token) {
@@ -22,19 +21,18 @@ async function ProductList({
 
   const payload = {
     HEADER: {
-      IF_ID: "IF_11",
+      IF_ID: "IF_13",
       IF_SYSID: uuidv4(),
       IF_HOST: "CHAI",
       IF_DATE: Date.now(),
     },
     DATA: {
       division_idx,
-      device_idx,
-      product_idx,
+      device_idx
     },
   };
 
-  const r = await external.post("/chai/product/list", payload, {
+  const r = await external.post("/chai/device/info", payload, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -43,7 +41,7 @@ async function ProductList({
   return r.data;
 }
 
-module.exports = { ProductList };
+module.exports = { DeviceInfo };
 
 // event 없이 'node ./server/routes/RestAPI/RestAPIClient.js'로 실행
 if (require.main === module) {
@@ -60,10 +58,10 @@ if (require.main === module) {
       // 2️⃣ env에 토큰 세팅
       process.env.JWT_TOKEN = token;
       process.env.JWT_TOKEN_AT = Date.now().toString();
-      console.log("[RestAPIClient] JWT_TOKEN set");
+      console.log("[RestAPIClient] JWT_TOKEN set..",token);
 
       // 3️⃣ REST API 호출
-      const data = await ProductList({
+      const data = await DeviceInfo({
         division_idx: config.divisionIdx,
         device_idx: config.deviceIdx
       });
