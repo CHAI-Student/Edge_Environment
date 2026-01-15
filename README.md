@@ -123,4 +123,9 @@ Edge Environment setting for CHAI project - main server(js)
     ]
   }
 }
-***
+```
+
+**IF03-Door Manual**
+```
+{"HEADER":{"IF_ID":"IF_03","IF_SYSID":"c8297fe7-bd9f-46de-9501-de3a27f6d36f","IF_HOST":"CHAI","IF_DATE":"1768386459953"},"DATA":{"division_idx":"DI17647205538493077","device_idx":"DE17560868094789999","door_state":"CLOSE","result_cd":"S","result_msg":"Door is closed"}}
+```
