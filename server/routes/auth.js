@@ -24,7 +24,7 @@ async function devAutoLogin() {
   if (!userId || !userPassword) return null;
 
   const r = await external.post("/auth/login", {
-    loginType: "admin",
+    loginType: "chai",
     userId: userId,
     userPassword: userPassword,
     ipaddress: "",
