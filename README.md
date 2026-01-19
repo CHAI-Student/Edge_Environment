@@ -93,22 +93,23 @@ Edge Environment setting for CHAI project - main server(js)
 {
   HEADER: {
     IF_ID: 'IF_11',
-    IF_SYSID: 'efdeec7c-4294-4a59-b2c5-7525ff39daa1',
+    IF_SYSID: '514d7c58-2d5c-4c20-bb5a-51666b1feb06',
     IF_HOST: 'CHAI',
-    IF_DATE: '1768311647245'
+    IF_DATE: '1768790290402'
   },
   DATA: {
     result_cd: 'S',
     result_msg: '조회 성공',
     product_list: [
       {
-        division_idx: 'division_idx',
-        device_idx: 'device_idx',
-        product_idx: 'product_idx',
-        product_name: '광동) 옥수수수염차 500ml',
+        division_idx: 'DI17647205538493077',
+        device_idx: 'DE17683631997086480',
+        product_idx: 'P17355176364813008',
+        product_name: '페리에 330ml',
         category_idx: null,
         supply_price: 2000,
-        sale_price: 2000,
+        sale_price: 1985,
+        stock_qty: 12,
         expired_date: null,
         reference_id: null,
         provider: null,
@@ -116,7 +117,107 @@ Edge Environment setting for CHAI project - main server(js)
         is_new: null,
         product_width: null,
         product_height: null,
-        product_weight: '529',
+        product_weight: '550',
+        storage_type: null,
+        has_loadcell: null
+      },
+      {
+        division_idx: 'DI17647205538493077',
+        device_idx: 'DE17683631997086480',
+        product_idx: 'P17355176391055026',
+        product_name: '하겐다즈 그린티&아몬드 80ml',
+        category_idx: null,
+        supply_price: 4300,
+        sale_price: 4300,
+        stock_qty: 10,
+        expired_date: null,
+        reference_id: null,
+        provider: null,
+        status: null,
+        is_new: null,
+        product_width: null,
+        product_height: null,
+        product_weight: '77',
+        storage_type: null,
+        has_loadcell: null
+      },
+      {
+        division_idx: 'DI17647205538493077',
+        device_idx: 'DE17683631997086480',
+        product_idx: 'P17355176388041427',
+        product_name: '하겐다즈 딸기 80ml',
+        category_idx: null,
+        supply_price: 4300,
+        sale_price: 4300,
+        stock_qty: 15,
+        expired_date: null,
+        reference_id: null,
+        provider: null,
+        status: null,
+        is_new: null,
+        product_width: null,
+        product_height: null,
+        product_weight: '75',
+        storage_type: null,
+        has_loadcell: null
+      },
+      {
+        division_idx: 'DI17647205538493077',
+        device_idx: 'DE17683631997086480',
+        product_idx: 'P17355176392597310',
+        product_name: '하겐다즈 바닐라 카라멜 아몬드 80ml',
+        category_idx: null,
+        supply_price: 4300,
+        sale_price: 4300,
+        stock_qty: 10,
+        expired_date: null,
+        reference_id: null,
+        provider: null,
+        status: null,
+        is_new: null,
+        product_width: null,
+        product_height: null,
+        product_weight: '75',
+        storage_type: null,
+        has_loadcell: null
+      },
+      {
+        division_idx: 'DI17647205538493077',
+        device_idx: 'DE17683631997086480',
+        product_idx: 'P17355176389520600',
+        product_name: '하겐다즈 쿠키&크림 80ml',
+        category_idx: null,
+        supply_price: 4300,
+        sale_price: 4300,
+        stock_qty: 11,
+        expired_date: null,
+        reference_id: null,
+        provider: null,
+        status: null,
+        is_new: null,
+        product_width: null,
+        product_height: null,
+        product_weight: '76',
+        storage_type: null,
+        has_loadcell: null
+      },
+      {
+        division_idx: 'DI17647205538493077',
+        device_idx: 'DE17683631997086480',
+        product_idx: 'P17355176370426534',
+        product_name: '해태) 홈런볼 41g',
+        category_idx: null,
+        supply_price: 200,
+        sale_price: 2000,
+        stock_qty: 12,
+        expired_date: null,
+        reference_id: null,
+        provider: null,
+        status: null,
+        is_new: null,
+        product_width: null,
+        product_height: null,
+        product_weight: '50',
         storage_type: null,
         has_loadcell: null
       }
@@ -127,6 +228,11 @@ Edge Environment setting for CHAI project - main server(js)
 
 **IF03-Door Manual**
 ```
+[MQTT] topic=chai/device/DE17683631997086480/cmd/door/manual payload={"HEADER":{"IF_ID":"IF_03","IF_SYSID":"41523224-79bb-48a5-b6cc-db10b4dbc45a","IF_HOST":"PNT","IF_DATE":"20260119113540"},"DATA":{"division_idx":"DI17647205538493077","device_idx":"DE17683631997086480","door_state":"OPEN"}}
+[DOOR] cmd received. IF_SYSID= 41523224-79bb-48a5-b6cc-db10b4dbc45a doorState= OPEN
+[DOOR] ack published: chai/device/DE17683631997086480/ack/door/manual IF_SYSID= 41523224-79bb-48a5-b6cc-db10b4dbc45a
+
+//Response to PNT
 {"HEADER":{"IF_ID":"IF_03","IF_SYSID":"c8297fe7-bd9f-46de-9501-de3a27f6d36f","IF_HOST":"CHAI","IF_DATE":"1768386459953"},"DATA":{"division_idx":"DI17647205538493077","device_idx":"DE17560868094789999","door_state":"CLOSE","result_cd":"S","result_msg":"Door is closed"}}
 ```
 

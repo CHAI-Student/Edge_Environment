@@ -45,22 +45,23 @@ async function ProductList({
 
 module.exports = { ProductList };
 
-// event 없이 'node ./server/routes/RestAPI/RestAPIClient.js'로 실행
+// event 없이 'node ./server/routes/RestAPI/ProductList.js'로 실행
 if (require.main === module) {
   (async () => {
     try {
-      console.log("[RestAPIClient] standalone start");
+      console.log("[ProductList] standalone start");
 
-      // 로그인 → 토큰 발급
+      // 로그인 → 토큰 발급 (나중에 삭제 필요 -> 결제 시엔 이미 발급된 config 토큰 활용)
       const token = await devAutoLogin();
       if (!token) {
         throw new Error("devAutoLogin failed");
       }
+      // const token = process.env.JWT_TOKEN;
 
-      // env에 토큰 세팅
+      // env에 토큰 세팅 (나중에 삭제 필요 -> 결제 시엔 이미 발급된 config 토큰 활용)
       process.env.JWT_TOKEN = token;
       process.env.JWT_TOKEN_AT = Date.now().toString();
-      console.log("[RestAPIClient] JWT_TOKEN set");
+      console.log("[ProductList] JWT_TOKEN set");
 
       // REST API 호출
       const data = await ProductList({
@@ -68,10 +69,10 @@ if (require.main === module) {
         device_idx: config.deviceIdx
       });
 
-      console.log("[RestAPIClient] response:");
+      console.log("[ProductList] response:");
       console.dir(data, { depth: null });
     } catch (err) {
-      console.error("[RestAPIClient] error:");
+      console.error("[ProductList] error:");
       console.error(err.message);
       if (err.response) {
         console.error(err.response.data);
