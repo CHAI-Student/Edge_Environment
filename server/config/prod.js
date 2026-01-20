@@ -8,5 +8,9 @@ module.exports = {
     restApi: process.env.REST_API,
     userId: process.env.USER_ID,
     userPassword: process.env.USER_PASSWORD,
-    jwtToken: process.env.JWT_TOKEN
+    jwtToken: process.env.JWT_TOKEN,
+    minioAccessKey: process.env.MINIO_ACCESS_KEY,
+    minioSecretKey: process.env.MINIO_SECRET_KEY,
+    minioURL: process.env.MINIO_URL,
+    sensorAPI: process.env.SENSOR_API,
 }

@@ -99,7 +99,7 @@ async function ManualDoor() {
     // ---------------------------------------------------------
     // [API 통신 및 결과 처리]
     // ---------------------------------------------------------
-    let finalState = "UNKNOWN";
+    let finalState = "";
     let resultCd = "S"; 
     let resultMsg = "";
 

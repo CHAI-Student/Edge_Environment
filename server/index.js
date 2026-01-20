@@ -7,26 +7,39 @@ const axios = require('axios');
 const bodyParser = require("body-parser");
 const cookieParser = require("cookie-parser");
 
-// require("dotenv").config();
-
-require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
+require("dotenv").config();
 
 const config = require("./config/key");
 
-// const mongoose = require("mongoose");
-// mongoose
-//   .connect(config.mongoURI, { useNewUrlParser: true })
-//   .then(() => console.log("DB connected"))
-//   .catch(err => console.error(err));
+//mongoDB 연결
+const mongoose = require("mongoose");
+mongoose
+  .connect(config.mongoURI)
+  .then(() => console.log("[MONGO-DB] DB connected"))
+  .catch(err => console.error(err));
 
-// const mongoose = require("mongoose");
-// const connect = mongoose.connect(config.mongoURI,
-//   {
-//     useNewUrlParser: true, useUnifiedTopology: true,
-//     useCreateIndex: true, useFindAndModify: false
-//   })
-//   .then(() => console.log('MongoDB Connected...'))
-//   .catch(err => console.log(err));
+//MinIO 연결
+const Minio = require("minio");
+
+const minioClient = new Minio.Client({
+  endPoint: config.minioURL,
+  port: 9000,
+  useSSL: false,
+  accessKey: config.minioAccessKey,
+  secretKey: config.minioSecretKey,
+});
+
+app.locals.minioClient = minioClient;
+app.locals.minioBucket = "chaiimage"; // 또는 config로
+
+(async () => {
+  try {
+    const buckets = await minioClient.listBuckets();
+    console.log("[MINIO] Buckets:", buckets);
+  } catch (err) {
+    console.error("[MINIO] error:", err);
+  }
+})();
 
 app.use(cors())
 app.use(express.json());
@@ -61,8 +74,12 @@ app.use("/api/auth", authModule.router);
 
 //use this to show the image you have in node js server to client (react js)
 //https://stackoverflow.com/questions/48914987/send-image-path-from-node-js-express-server-to-react-client
-// app.use('/uploads', express.static('uploads'));
-// app.use('/images', express.static('images'));
+
+const productRouter = require("../server/routes/AIServer/Products"); // 네 라우터 파일 경로
+app.use("/api", productRouter);
+
+app.use('/products', express.static('uploads'));
+app.use('/uploads/images', express.static('images'));
 
 // Serve static assets if in production
 if (process.env.NODE_ENV === "production") {
