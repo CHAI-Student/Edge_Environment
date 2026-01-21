@@ -1,9 +1,6 @@
 /node_modules
 /build
 
-
-
-
 .DS_Store
 .env
 
@@ -12,3 +9,19 @@ yarn-debug.kog*
 yarn-error.log*
 
 .vscode
+
+# Deprecated services (replaced/integrated)
+services/deadbolt_driver/
+services/loadcell_driver/
+services/product_judge/
+
+# Temporary/garbage files
+nul
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+venv/
+.venv/
