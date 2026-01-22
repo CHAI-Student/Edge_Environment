@@ -117,6 +117,7 @@ async function HealthMqtt() {
         IF_DATE: timestamp,
       };
 
+      // IO 보드 상태값도 보내줘야할지 판단 필요
       const IOBoardStatus = (apiDeadboltStatus == "19" && apiLoadcellStatus == "29") ? "49" : "41";
 
       const body = {
@@ -126,7 +127,8 @@ async function HealthMqtt() {
         deadbolt_status: apiDeadboltStatus,
         loadcell_status: apiLoadcellStatus,
         CardTerminalStatus: apiCardTerminalStatus,
-        ioboard_status: IOBoardStatus
+        ioboard_status: IOBoardStatus,
+        edgepc_status: '49'
       };
 
       const payload = JSON.stringify({ HEADER: header, DATA: body });
@@ -139,4 +141,4 @@ async function HealthMqtt() {
   });
 }
 
-module.exports = { HealthMqtt };
+module.exports = { HealthMqtt, callCardTerminalStatusApi, callIOStatusApi };

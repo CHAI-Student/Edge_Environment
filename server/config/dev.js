@@ -26,4 +26,5 @@ module.exports = {
         return process.env.JWT_TOKEN_AT;
     },
     doorControlApi: "http://localhost:8000",
+    cameraControlApi: "http://localhost:8000",
 }
