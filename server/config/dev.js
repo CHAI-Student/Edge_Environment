@@ -5,6 +5,7 @@ module.exports = {
     minioAccessKey: 'admin',
     minioSecretKey: 'CrkMinio2026',
     minioURL: '139.150.8.82',
+    minioBucket: 'chaiimage',
     // MQTT 브로커 접속
     mqttURL: 'mqtt://chaidev.atcrk.co.kr:1883',
     mqttID: 'pnt',

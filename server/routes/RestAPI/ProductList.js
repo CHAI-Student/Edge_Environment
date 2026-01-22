@@ -1,3 +1,4 @@
+require("dotenv").config();
 const axios = require("axios");
 const config = require("../../config/key");
 const { v4: uuidv4 } = require("uuid");
@@ -15,7 +16,9 @@ async function ProductList({
   device_idx = null,
   product_idx = null,
 } = {}) {
-  const token = process.env.JWT_TOKEN;
+  const token = config.jwtToken
+  console.log("[test] JWT_TOKEN =", process.env.JWT_TOKEN);
+  console.log(token)
   if (!token) {
     throw new Error("JWT_TOKEN not set");
   }
@@ -45,7 +48,7 @@ async function ProductList({
 
 module.exports = { ProductList };
 
-// event 없이 'node ./server/routes/RestAPI/ProductList.js'로 실행
+// // event 없이 'node ./server/routes/RestAPI/ProductList.js'로 실행
 if (require.main === module) {
   (async () => {
     try {
