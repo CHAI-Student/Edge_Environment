@@ -4,12 +4,12 @@ Door Payment Controller
 카드 정보 수신 → 데드볼트 해제 → 문 닫힘 감지 → 데드볼트 잠금 → 결제 처리
 흐름을 관리하는 컨트롤러입니다.
 
-Note: 실제 결제 처리(card_terminal 연동)는 추후 다른 개발자가 구현할 예정입니다.
-      이 모듈은 기본 흐름과 상태 관리를 제공합니다.
+card_terminal 서비스(포트 8004)와 연동하여 실제 결제를 처리합니다.
 """
 
 import asyncio
 import logging
+import os
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -24,6 +24,7 @@ from .models import (
     TransactionResult,
     TransactionState,
 )
+from .payment_client import PaymentClient, PaymentResult, PaymentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -50,31 +51,40 @@ class DoorPaymentController:
     def __init__(
         self,
         io_board_url: str = "http://localhost:8001",
-        card_terminal_host: str = "127.0.0.1",
-        card_terminal_port: int = 5000,
+        card_terminal_url: str = "http://127.0.0.1:8004",
+        card_terminal_api_key: Optional[str] = None,
         lock_delay_seconds: float = 3.0,
         door_check_interval_seconds: float = 0.5,
         door_timeout_seconds: float = 120.0,
+        payment_timeout_seconds: float = 30.0,
     ):
         """
         Args:
             io_board_url: io_board 서비스 URL
-            card_terminal_host: card_terminal 서비스 호스트
-            card_terminal_port: card_terminal 서비스 포트
+            card_terminal_url: card_terminal REST API URL (기본값: http://127.0.0.1:8004)
+            card_terminal_api_key: card_terminal API 인증 키 (선택, 환경변수 CARD_TERMINAL_API_KEY 사용 가능)
             lock_delay_seconds: 문 닫힘 후 데드볼트 잠금까지 대기 시간 (초)
             door_check_interval_seconds: 도어 상태 체크 간격 (초)
             door_timeout_seconds: 도어 타임아웃 (초) - 이 시간 내에 문이 닫히지 않으면 에러
+            payment_timeout_seconds: 결제 처리 타임아웃 (초)
         """
         self.io_board_url = io_board_url.rstrip("/")
-        self.card_terminal_host = card_terminal_host
-        self.card_terminal_port = card_terminal_port
         self.lock_delay_seconds = lock_delay_seconds
         self.door_check_interval_seconds = door_check_interval_seconds
         self.door_timeout_seconds = door_timeout_seconds
 
+        # card_terminal REST API 클라이언트 초기화
+        api_key = card_terminal_api_key or os.getenv("CARD_TERMINAL_API_KEY")
+        self._payment_client = PaymentClient(
+            base_url=card_terminal_url,
+            api_key=api_key,
+            timeout=payment_timeout_seconds,
+        )
+
         # 현재 거래 상태
         self._current_state = TransactionState.IDLE
         self._current_transaction_id: Optional[str] = None
+        self._last_payment_result: Optional[PaymentResult] = None
 
     @property
     def current_state(self) -> TransactionState:
@@ -286,8 +296,7 @@ class DoorPaymentController:
         """
         결제 처리
 
-        Note: 이 메서드는 현재 스텁 구현입니다.
-              실제 card_terminal 연동은 추후 구현 예정입니다.
+        card_terminal REST API를 호출하여 토큰 결제를 처리합니다.
 
         Args:
             card_info: 카드 정보
@@ -296,31 +305,57 @@ class DoorPaymentController:
         Returns:
             bool: 결제 성공 여부
         """
-        # TODO: card_terminal 서비스와 연동하여 실제 결제 처리
-        # 현재는 시뮬레이션을 위해 항상 성공 반환
         logger.info(
             f"[결제 처리] 카드: {card_info.card_number}, "
-            f"금액: {total_amount}원 - 결제 시뮬레이션"
+            f"금액: {total_amount}원"
         )
 
-        # 결제 처리 시뮬레이션 (실제 구현 시 제거)
-        await asyncio.sleep(0.5)
+        try:
+            # card_terminal REST API를 통한 토큰 결제 승인
+            result = await self._payment_client.approve_token_payment(
+                amount=str(total_amount)
+            )
 
-        # TODO: 아래 코드로 card_terminal 연동 구현 필요
-        # try:
-        #     reader, writer = await asyncio.open_connection(
-        #         self.card_terminal_host,
-        #         self.card_terminal_port
-        #     )
-        #     # ... 결제 요청 전송 및 응답 수신 ...
-        #     writer.close()
-        #     await writer.wait_closed()
-        #     return True
-        # except Exception as e:
-        #     logger.error(f"결제 처리 실패: {e}")
-        #     return False
+            # 결제 결과 저장 (취소/조회용)
+            self._last_payment_result = result
 
-        return True  # 시뮬레이션: 항상 성공
+            if result.success:
+                logger.info(
+                    f"[결제 성공] 승인번호: {result.authorization_number}, "
+                    f"응답: {result.response_code_name}"
+                )
+                return True
+            else:
+                logger.warning(
+                    f"[결제 실패] 응답코드: {result.response_code} "
+                    f"({result.response_code_name}), 메시지: {result.message}"
+                )
+                return False
+
+        except Exception as e:
+            logger.error(f"결제 처리 중 예외 발생: {e}", exc_info=True)
+            self._last_payment_result = PaymentResult(
+                success=False,
+                status=PaymentStatus.ERROR,
+                response_code=-1,
+                response_code_name="EXCEPTION",
+                message=str(e),
+            )
+            return False
+
+    @property
+    def last_payment_result(self) -> Optional[PaymentResult]:
+        """마지막 결제 결과 조회"""
+        return self._last_payment_result
+
+    async def check_payment_service(self) -> bool:
+        """
+        결제 서비스 상태 확인
+
+        Returns:
+            bool: 서비스 정상 여부
+        """
+        return await self._payment_client.health_check()
 
     async def cancel_transaction(self) -> bool:
         """

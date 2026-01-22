@@ -163,7 +163,7 @@ def init_routes(product_db: ProductDatabase, decision_engine: ProductDecisionEng
 
     # Initialize advanced modules
     _event_tracker = EventTracker(max_history=100)
-    _return_detector = ReturnDetector(time_window=60.0)
+    _return_detector = ReturnDetector(return_window=60.0)
     _cross_zone_detector = CrossZoneDetector()
     _baseline_manager = BaselineManager(drift_rate=0.5, zone_count=5)
     _rapid_pickup_handler = RapidPickupHandler(buffer_window=3.0)
@@ -272,6 +272,18 @@ async def judge_products(request: JudgeRequest):
             f"Judge result: status={result.status.value}, "
             f"products={len(result.products)}, totalPrice={result.total_price}"
         )
+
+        # 5. 성공적인 픽업 이벤트 기록 (반환 감지용)
+        if result.is_success and result.products and delta_weight < 0 and _return_detector:
+            for p in result.products:
+                _return_detector.record_pickup(
+                    zone_id=request.zone_id,
+                    weight=abs(delta_weight),
+                    product_id=p.product_id,
+                    product_name=p.name,
+                    count=p.count,
+                )
+            logger.debug(f"Recorded {len(result.products)} pickup events for return detection")
 
         return response
 
