@@ -13,7 +13,9 @@ Vision 후보군 + 무게 검증을 결합하여 최종 상품과 개수를 결�
 5. Node.js 응답 형식으로 결과 반환
 """
 
-from typing import List, Optional
+from __future__ import annotations
+
+from typing import List, Optional, TYPE_CHECKING
 import logging
 import time
 
@@ -24,11 +26,25 @@ from .models import (
     JudgmentResult,
     JudgmentStatus,
 )
-from ..database.product_db import ProductDatabase
-from ..weight.count_calculator import WeightBasedCountCalculator
 from ..config import config
 
+# Lazy import to avoid circular dependency
+if TYPE_CHECKING:
+    from ..database.product_db import ProductDatabase
+
 logger = logging.getLogger(__name__)
+
+
+def _get_product_database():
+    """Lazy import ProductDatabase to avoid circular import."""
+    from ..database.product_db import ProductDatabase
+    return ProductDatabase
+
+
+def _get_count_calculator():
+    """Lazy import WeightBasedCountCalculator to avoid circular import."""
+    from ..weight.count_calculator import WeightBasedCountCalculator
+    return WeightBasedCountCalculator
 
 
 class ProductDecisionEngine:
@@ -63,13 +79,18 @@ class ProductDecisionEngine:
             min_weight_change: 최소 무게 변화량 (기본값 5g)
             partial_threshold: PARTIAL/UNCERTAIN 구분 임계값 (기본값 0.7)
         """
-        self.product_db = product_db or ProductDatabase()
+        if product_db is None:
+            ProductDatabase = _get_product_database()
+            self.product_db = ProductDatabase()
+        else:
+            self.product_db = product_db
         self.tolerance_percent = tolerance_percent or config.tolerance_percent
         self.confidence_threshold = confidence_threshold
         self.max_combination_size = max_combination_size or config.max_combination_size
         self.min_weight_change = min_weight_change or config.min_weight_change
         self.partial_threshold = partial_threshold
 
+        WeightBasedCountCalculator = _get_count_calculator()
         self.count_calculator = WeightBasedCountCalculator(
             product_db=self.product_db,
             tolerance_percent=self.tolerance_percent,

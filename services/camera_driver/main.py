@@ -32,8 +32,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.include_router(router, tags=["camera"])
-app.include_router(streaming_router, tags=["streaming"])
+app.include_router(router, prefix="/api", tags=["camera"])
+app.include_router(streaming_router, prefix="/stream", tags=["streaming"])
 
 
 if __name__ == "__main__":
