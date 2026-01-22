@@ -1,27 +1,149 @@
-/node_modules
+# =============================================================================
+# Node.js
+# =============================================================================
+node_modules/
 /build
-
-.DS_Store
-.env
-
 npm-debug.log*
-yarn-debug.kog*
+yarn-debug.log*
 yarn-error.log*
+package-lock.json
 
-.vscode
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+*.manifest
+*.spec
 
-# Deprecated services (replaced/integrated)
+# Virtual environments
+venv/
+.venv/
+ENV/
+env/
+.python-version
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# =============================================================================
+# IDE / Editor
+# =============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# =============================================================================
+# OS Generated
+# =============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Windows temporary files
+nul
+*.tmp
+*.temp
+
+# =============================================================================
+# Archive / Deprecated (통합되어 더 이상 사용하지 않는 서비스)
+# =============================================================================
+services/_archive/
 services/deadbolt_driver/
 services/loadcell_driver/
 services/product_judge/
 
-# Temporary/garbage files
-nul
+# =============================================================================
+# Test Results / Temporary Data (로컬 테스트 결과)
+# =============================================================================
+*_results.json
+test_results.json
+*.results.json
+viz_results/
+test_output/
 
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.eggs/
-venv/
-.venv/
+# =============================================================================
+# Environment / Secrets (보안 - 절대 커밋 금지)
+# =============================================================================
+.env
+.env.*
+!.env.example
+*.local
+
+# Credentials / API Keys
+credentials.json
+secrets.json
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+service-account*.json
+google-credentials*.json
+
+# =============================================================================
+# YOLO Model Files (별도 제공 - 용량 문제)
+# =============================================================================
+*.pt
+*.onnx
+*.engine
+*.trt
+
+# =============================================================================
+# Media / Large Files
+# =============================================================================
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+!client/public/**/*.png
+!client/public/**/*.jpg
+!client/src/**/*.png
+!client/src/**/*.svg
+
+# =============================================================================
+# Logs
+# =============================================================================
+*.log
+logs/
+*.log.*
+
+# =============================================================================
+# minkyu Branch Only (PR 제외 대상)
+# =============================================================================
+README_MINKYU.md
+INTEGRATION_GUIDE.md
+SECURITY_AUDIT_REPORT.md
+
+# =============================================================================
+# Jupyter Notebooks (체크포인트)
+# =============================================================================
+.ipynb_checkpoints/
