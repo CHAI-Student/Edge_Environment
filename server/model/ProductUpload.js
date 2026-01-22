@@ -4,11 +4,7 @@ const Schema = mongoose.Schema;
 const productUploadSchema = mongoose.Schema({
     //mongoDB 고유 id값
     productMetaIdx: mongoose.Schema.Types.ObjectId,
-    //PNT에 등록된 상품 고유번호
-    productIdx: {
-        type: String,
-    },
-    //PNT에 등록된 매장 고유번호
+    //PNT에 등록된 매장 고유번호 (FK)
     divisionIdx: {
         type: String,
     },
@@ -19,6 +15,10 @@ const productUploadSchema = mongoose.Schema({
     //매장 별 모델 배포 브런치 정보(CI/CD)
     brunchName: {
         type: String
+    },
+    //PNT에 등록된 상품 고유번호 (FK)
+    productIdx: {
+        type: String,
     },
     //PNT에 등록된 상품 이름(한글)
     productName: {
