@@ -1,0 +1,52 @@
+# Model Service Dockerfile (GPU/Jetson)
+# AI product judgment with YOLOv8, sensor fusion
+
+# Jetson Orin Nano용 L4T PyTorch 이미지
+# JetPack 6.2 호환 (L4T R36.2.0, CUDA 12.2)
+FROM nvcr.io/nvidia/l4t-pytorch:r36.2.0-pth2.1-py3
+
+LABEL service="model"
+LABEL version="1.0.0"
+LABEL description="AI product judgment service with YOLO and sensor fusion"
+
+WORKDIR /app
+
+# Install system dependencies for OpenCV
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy project files for installation
+COPY pyproject.toml ./
+RUN mkdir -p ./services
+COPY services/__init__.py ./services/
+COPY services/model ./services/model
+
+# Install Python dependencies (torch already in base image)
+RUN pip install --no-cache-dir . ultralytics
+
+# Create directories for runtime data
+RUN mkdir -p /app/data/snapshots /app/models
+
+# Set Python path
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# Service URLs (override in docker-compose)
+ENV IO_BOARD_URL=http://io_board:8001
+ENV CAMERA_DRIVER_URL=http://camera_driver:8003
+ENV NODEJS_URL=http://node_server:8888
+ENV YOLO_MODEL_PATH=/app/models/siyeon_best.pt
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8002/api/health || exit 1
+
+EXPOSE 8002
+
+CMD ["uvicorn", "services.model.main:app", "--host", "0.0.0.0", "--port", "8002"]

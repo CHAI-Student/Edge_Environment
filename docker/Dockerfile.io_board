@@ -1,0 +1,36 @@
+# IO Board Service Dockerfile
+# Serial communication with LoadCell + DeadBolt (STX/ETX/LRC protocol)
+
+FROM python:3.11-slim-bookworm
+
+LABEL service="io_board"
+LABEL version="1.0.0"
+LABEL description="IO Board service for LoadCell and DeadBolt control"
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy project files for installation
+COPY pyproject.toml ./
+RUN mkdir -p ./services
+COPY services/__init__.py ./services/
+COPY services/io_board ./services/io_board
+
+# Install Python dependencies
+RUN pip install --no-cache-dir .
+
+# Set Python path
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8001/health || exit 1
+
+EXPOSE 8001
+
+CMD ["uvicorn", "services.io_board.main:app", "--host", "0.0.0.0", "--port", "8001"]

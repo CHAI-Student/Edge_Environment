@@ -1,6 +1,6 @@
 // 외부 API 접근에 쓰는 값들
 module.exports = {
-    mongoURI: '', // MongoDB로 연결
+    mongoURI: process.env.MONGO_URI || 'mongodb://localhost:27017/chai',
     // MQTT 브로커 접속
     mqttURL: 'mqtt://chaidev.atcrk.co.kr:1883',
     mqttID: 'pnt',
@@ -18,4 +18,14 @@ module.exports = {
     get jwtTokenAt() {
         return process.env.JWT_TOKEN_AT;
     },
+    // MinIO 설정
+    minioEndpoint: process.env.MINIO_ENDPOINT || 'localhost',
+    minioPort: parseInt(process.env.MINIO_PORT) || 9000,
+    minioAccessKey: process.env.MINIO_ACCESS_KEY || 'minioadmin',
+    minioSecretKey: process.env.MINIO_SECRET_KEY || 'minioadmin',
+    minioUseSSL: process.env.MINIO_USE_SSL === 'true',
+    minioBucket: process.env.MINIO_BUCKET || 'chaiimage',
+    // IO Board API 설정
+    ioboardApiHost: process.env.IO_BOARD_URL || 'http://localhost:8001',
+    doorControlEndpoint: '/api/door/control',
 }
