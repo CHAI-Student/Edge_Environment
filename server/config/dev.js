@@ -25,4 +25,5 @@ module.exports = {
     get jwtTokenAt() {
         return process.env.JWT_TOKEN_AT;
     },
+    doorControlApi: "http://localhost:8000",
 }
