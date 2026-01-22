@@ -252,7 +252,7 @@ Edge Environment setting for CHAI project - main server(js)
 6. 데드볼트 open + 상단 카메라 on (하위폴더) (sensor)
 7. 로드셀 무게 정보 실시간 전달	(sensor → model)
 8. 로드셀 무게 변화 감지
-→ 폴더 생성 + 측면 카메라 on (sensor python → node → camera python)	→ 우리, 손우진 간 통신
+→ 폴더 생성 + 측면 카메라 on (sensor python → node → camera python)
 → 카메라 on event 요청 시 dir을 python에서
 loadcell event Y → N으로 바뀌면 cam python server
 req X → 10초 뒤에 카메라 off
