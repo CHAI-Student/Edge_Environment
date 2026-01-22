@@ -17,12 +17,71 @@
 
 ---
 
-## 1. Windows 직접 실행 환경 구성
+## 1. uv를 사용한 환경 구성 (권장)
 
-### 1.1 Python 환경 설정
+### 1.1 uv 설치
 
 ```powershell
-# Python 3.9+ 설치 확인
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# 또는 pip로 설치
+pip install uv
+
+# 설치 확인
+uv --version
+```
+
+### 1.2 Python + 가상환경 한번에 설정
+
+```powershell
+# Edge_Environment 폴더로 이동
+cd C:\Users\user\Desktop\VOICE\2026\crk\win_pc_test_sw2io_board\Edge_Environment
+
+# Python 3.11 + 가상환경 생성 + 의존성 설치 (한번에!)
+uv sync
+
+# 가상환경 활성화
+.venv\Scripts\Activate.ps1
+```
+
+### 1.3 선택적 의존성 설치
+
+```powershell
+# 테스트 도구 포함
+uv sync --extra test
+
+# AI/Vision 포함 (Jetson용, Windows에서는 선택)
+uv sync --extra ai
+
+# 개발 도구 전체
+uv sync --extra dev
+```
+
+### 1.4 uv 주요 명령어
+
+```powershell
+# 패키지 추가
+uv add <package>
+
+# 패키지 제거
+uv remove <package>
+
+# 의존성 업데이트
+uv lock --upgrade
+
+# 특정 Python 버전으로 실행
+uv run --python 3.11 python script.py
+```
+
+---
+
+## 2. 기존 pip 방식 (대안)
+
+### 2.1 Python 환경 설정
+
+```powershell
+# Python 3.10+ 설치 확인
 python --version
 
 # 가상환경 생성
@@ -30,28 +89,14 @@ python -m venv venv
 .\venv\Scripts\Activate.ps1
 
 # 의존성 설치
-pip install -r requirements.txt
-```
-
-### 1.2 필수 패키지
-
-```txt
-# requirements.txt
-fastapi>=0.100.0
-uvicorn>=0.22.0
-pydantic>=2.0.0
-pydantic-settings>=2.0.0
-opencv-python>=4.8.0
-numpy>=1.24.0
-httpx>=0.24.0
-aiohttp>=3.8.0
-pytest>=7.0.0
-pytest-asyncio>=0.21.0
+pip install -r services/model/requirements.txt
+pip install -r services/camera_driver/requirements.txt
+pip install -r services/io_board/requirements.txt
 ```
 
 ---
 
-## 2. 테스트 모드 설명
+## 3. 테스트 모드 설명
 
 ### 2.1 API 모드 (카메라 연결 필요)
 
@@ -87,7 +132,7 @@ frame = loader.get_frame(camera_id=0)
 
 ---
 
-## 3. 녹화 테스트
+## 4. 녹화 테스트
 
 ### 3.1 녹화 API 사용
 
@@ -144,7 +189,7 @@ recordings/
 
 ---
 
-## 4. 서비스별 테스트
+## 5. 서비스별 테스트
 
 ### 4.1 IO Board 서비스 (포트 8001)
 
@@ -183,7 +228,7 @@ curl http://localhost:8003/api/frame/0 --output frame.jpg
 
 ---
 
-## 5. 통합 테스트
+## 6. 통합 테스트
 
 ### 5.1 전체 플로우 테스트
 
@@ -199,24 +244,30 @@ curl http://localhost:8002/api/health
 curl http://localhost:8003/api/health
 ```
 
-### 5.2 Pytest 실행
+### 6.2 Pytest 실행
 
-```bash
-# 전체 테스트
-cd Edge_Environment
+```powershell
+cd C:\Users\user\Desktop\VOICE\2026\crk\win_pc_test_sw2io_board\Edge_Environment
+
+# uv 사용 (권장) - 가상환경 자동 감지
+uv run pytest services/model/tests/ -v
+uv run pytest services/camera_driver/tests/ -v
+
+# 또는 가상환경 활성화 후 직접 실행
+.venv\Scripts\Activate.ps1
 pytest services/model/tests/ -v
 pytest services/camera_driver/tests/ -v
 
 # 특정 테스트
-pytest services/model/tests/test_error_recovery.py -v
+uv run pytest services/model/tests/test_error_recovery.py -v
 
 # 커버리지
-pytest --cov=services --cov-report=html
+uv run pytest --cov=services --cov-report=html
 ```
 
 ---
 
-## 6. Docker 배포 (Jetson용)
+## 7. Docker 배포 (Jetson용)
 
 ### 6.1 Dockerfile 예시
 
@@ -265,7 +316,7 @@ services:
 
 ---
 
-## 7. 문제 해결
+## 8. 문제 해결
 
 ### 7.1 카메라 연결 안됨
 
@@ -295,7 +346,7 @@ taskkill /PID <PID> /F
 
 ---
 
-## 8. 테스트 체크리스트
+## 9. 테스트 체크리스트
 
 - [ ] Python 환경 설정 완료
 - [ ] 의존성 설치 완료

@@ -1,0 +1,90 @@
+[project]
+name = "ai-smart-vending"
+version = "1.0.0"
+description = "AI Smart Vending Machine System - Edge Environment"
+readme = "README.md"
+requires-python = ">=3.10,<3.12"
+license = { text = "MIT" }
+
+dependencies = [
+    # FastAPI 웹 프레임워크
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+
+    # HTTP 클라이언트 (비동기)
+    "httpx>=0.24.0",
+    "aiohttp>=3.8.0",
+    "httpx-sse>=0.3.0",
+
+    # 이미지 처리
+    "numpy>=1.24.0",
+    "opencv-python>=4.8.0",
+    "pillow>=10.0.0",
+
+    # 시리얼 통신 (IO Board)
+    "pyserial>=3.5",
+    "pyserial-asyncio>=0.6",
+
+    # 바이너리 프로토콜 파싱
+    "construct>=2.10.70",
+
+    # 데이터 처리
+    "pyyaml>=6.0.0",
+    "python-multipart>=0.0.6",
+]
+
+[project.optional-dependencies]
+# AI/Vision 추가 의존성 (Jetson용)
+ai = [
+    "ultralytics>=8.0.0",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+]
+
+# MQTT 클라이언트
+mqtt = [
+    "paho-mqtt>=1.6.0",
+]
+
+# 개발/테스트 도구
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+# 전체 설치 (Windows 테스트용 - AI 제외)
+test = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+]
+
+[tool.uv]
+# Python 버전 지정
+python = "3.11"
+
+[tool.uv.sources]
+# PyPI 기본 사용
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["services/model/tests", "services/camera_driver/tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
