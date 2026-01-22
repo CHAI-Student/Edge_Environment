@@ -765,3 +765,231 @@ async def reset_statistics():
         "message": "Statistics reset successfully",
         "timestamp": time.time(),
     }
+
+
+# =============================================================================
+# Door Payment Endpoints (도어 제어 + 결제 흐름)
+# =============================================================================
+# Note: 실제 결제 처리(card_terminal 연동)는 추후 구현 예정
+#       현재는 기본 흐름과 상태 관리만 제공합니다.
+# =============================================================================
+
+from ..door_payment import (
+    DoorPaymentController,
+    CardInfo,
+    ProductItem as DoorProductItem,
+    TransactionState,
+    TransactionResult,
+)
+
+# 도어 결제 컨트롤러 인스턴스
+_door_payment_controller: Optional[DoorPaymentController] = None
+
+
+def initialize_door_payment_controller(
+    io_board_url: str = "http://localhost:8001",
+    card_terminal_host: str = "127.0.0.1",
+    card_terminal_port: int = 5000,
+):
+    """도어 결제 컨트롤러 초기화."""
+    global _door_payment_controller
+    _door_payment_controller = DoorPaymentController(
+        io_board_url=io_board_url,
+        card_terminal_host=card_terminal_host,
+        card_terminal_port=card_terminal_port,
+    )
+    logger.info("Door payment controller initialized")
+
+
+# Request/Response Models for Door Payment
+class DoorPaymentProductItem(BaseModel):
+    """상품 항목 (도어 결제용)."""
+    product_id: str = Field(..., description="상품 ID")
+    name: str = Field(..., description="상품명")
+    price: int = Field(..., description="단가 (원)")
+    quantity: int = Field(1, description="수량")
+
+
+class DoorPaymentRequest(BaseModel):
+    """도어 결제 요청."""
+    card_number: str = Field(..., description="카드 번호 (마스킹)")
+    card_type: str = Field("CREDIT", description="카드 종류")
+    issuer: str = Field("", description="발급사")
+    products: List[DoorPaymentProductItem] = Field(..., description="구매 상품 목록")
+    total_amount: int = Field(..., description="총 결제 금액")
+
+
+class DoorPaymentResponse(BaseModel):
+    """도어 결제 응답."""
+    success: bool = Field(..., description="성공 여부")
+    transaction_id: str = Field(..., description="거래 ID")
+    state: str = Field(..., description="거래 상태")
+    products: List[dict] = Field(..., description="상품 목록")
+    total_amount: int = Field(..., description="총 금액")
+    paid_amount: int = Field(..., description="결제 금액")
+    error_message: str = Field("", description="에러 메시지")
+    duration_seconds: Optional[float] = Field(None, description="소요 시간 (초)")
+
+
+class DoorStatusResponse(BaseModel):
+    """도어 상태 응답."""
+    current_state: str = Field(..., description="현재 거래 상태")
+    door_state: str = Field(..., description="도어 상태")
+    deadbolt_state: str = Field(..., description="데드볼트 상태")
+
+
+@router.post("/door/transaction", response_model=DoorPaymentResponse)
+async def start_door_transaction(request: DoorPaymentRequest):
+    """
+    도어 결제 거래 시작.
+
+    카드 정보와 상품 목록을 받아 결제 흐름을 시작합니다.
+
+    흐름:
+    1. 카드 정보 수신 → 데드볼트 해제
+    2. 문 열림/닫힘 대기
+    3. 일정 시간 후 데드볼트 잠금
+    4. 결제 처리
+
+    Args:
+        request: 도어 결제 요청
+
+    Returns:
+        DoorPaymentResponse: 거래 결과
+    """
+    global _door_payment_controller
+
+    if _door_payment_controller is None:
+        # 컨트롤러 미초기화 시 자동 초기화
+        initialize_door_payment_controller()
+
+    logger.info(f"Door transaction request: {request.total_amount}원, {len(request.products)}개 상품")
+
+    try:
+        card_info = CardInfo(
+            card_number=request.card_number,
+            card_type=request.card_type,
+            issuer=request.issuer,
+        )
+
+        products = [
+            DoorProductItem(
+                product_id=p.product_id,
+                name=p.name,
+                price=p.price,
+                quantity=p.quantity,
+            )
+            for p in request.products
+        ]
+
+        result = await _door_payment_controller.process_transaction(
+            card_info=card_info,
+            products=products,
+            total_amount=request.total_amount,
+        )
+
+        return DoorPaymentResponse(
+            success=result.success,
+            transaction_id=result.transaction_id,
+            state=result.state.value,
+            products=[
+                {
+                    "product_id": p.product_id,
+                    "name": p.name,
+                    "price": p.price,
+                    "quantity": p.quantity,
+                    "subtotal": p.subtotal,
+                }
+                for p in result.products
+            ],
+            total_amount=result.total_amount,
+            paid_amount=result.paid_amount,
+            error_message=result.error_message,
+            duration_seconds=result.duration_seconds,
+        )
+
+    except Exception as e:
+        logger.error(f"Door transaction failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/door/status", response_model=DoorStatusResponse)
+async def get_door_status():
+    """
+    현재 도어/거래 상태 조회.
+
+    Returns:
+        DoorStatusResponse: 도어 및 거래 상태
+    """
+    global _door_payment_controller
+
+    if _door_payment_controller is None:
+        initialize_door_payment_controller()
+
+    try:
+        door_state = await _door_payment_controller._get_door_state()
+        deadbolt_state = await _door_payment_controller._get_deadbolt_state()
+
+        return DoorStatusResponse(
+            current_state=_door_payment_controller.current_state.value,
+            door_state=door_state.value,
+            deadbolt_state=deadbolt_state.value,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to get door status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/door/cancel")
+async def cancel_door_transaction():
+    """
+    현재 진행 중인 도어 거래 취소.
+
+    Returns:
+        dict: 취소 결과
+    """
+    global _door_payment_controller
+
+    if _door_payment_controller is None:
+        raise HTTPException(status_code=400, detail="No active transaction")
+
+    try:
+        success = await _door_payment_controller.cancel_transaction()
+
+        return {
+            "success": success,
+            "message": "Transaction cancelled" if success else "No active transaction to cancel",
+            "timestamp": time.time(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to cancel transaction: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/door/emergency-lock")
+async def emergency_lock_door():
+    """
+    긴급 잠금 (데드볼트 즉시 잠금).
+
+    Returns:
+        dict: 잠금 결과
+    """
+    global _door_payment_controller
+
+    if _door_payment_controller is None:
+        initialize_door_payment_controller()
+
+    try:
+        success = await _door_payment_controller.emergency_lock()
+
+        return {
+            "success": success,
+            "message": "Emergency lock executed" if success else "Emergency lock failed",
+            "timestamp": time.time(),
+        }
+
+    except Exception as e:
+        logger.error(f"Emergency lock failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

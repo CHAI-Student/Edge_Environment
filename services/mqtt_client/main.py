@@ -14,8 +14,25 @@ from fastapi import FastAPI
 from .config import settings
 from .core import core
 
-# Import protocols to register handlers
-from .protocol import IF01, IF02, IF03, IF04
+# =============================================================================
+# Protocol Imports (Handler Registration)
+# =============================================================================
+# NOTE: Node.js 서버가 IF01, IF02, IF03를 담당합니다.
+#       Python mqtt_client는 IF04 및 향후 추가되는 인터페이스만 담당합니다.
+#
+# Node.js 담당 (server/routes/Mqtt/):
+#   - IF01 (Reboot): RebootMqtt.js
+#   - IF02 (Health Check): HealthMqtt.js
+#   - IF03 (Manual Door): ManualDoor.js
+#
+# Python 담당:
+#   - IF04 (Collect Door): 수거함 도어 제어
+#   - IF05+ (향후 추가)
+# =============================================================================
+# from .protocol import IF01  # Node.js 담당 (RebootMqtt.js)
+# from .protocol import IF02  # Node.js 담당 (HealthMqtt.js)
+# from .protocol import IF03  # Node.js 담당 (ManualDoor.js)
+from .protocol import IF04  # Python 담당 - Collect Door
 
 
 mqtt_client_task: asyncio.Task | None = None

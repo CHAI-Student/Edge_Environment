@@ -23,7 +23,7 @@ HEADER = {
 
 class MonitorReqData(ReqData):
     camera_status: str
-    deadbox_status: str
+    deadbolt_status: str
     loadcell_status: str
     card_terminal_status: str
 
@@ -39,7 +39,7 @@ class MonitorReqMessage(BaseModel):
 )
 async def monitor_handler():
     camera_status = "OK"  # TODO: check actual status
-    deadbox_status = "OK"
+    deadbolt_status = "OK"
     loadcell_status = "OK"
     card_terminal_status = "OK"
 
@@ -50,7 +50,7 @@ async def monitor_handler():
                 "division_idx": settings.division_idx,
                 "device_idx": settings.device_idx,
                 "camera_status": camera_status,
-                "deadbox_status": deadbox_status,
+                "deadbolt_status": deadbolt_status,
                 "loadcell_status": loadcell_status,
                 "card_terminal_status": card_terminal_status,
             },
