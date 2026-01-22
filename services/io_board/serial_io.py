@@ -1,140 +1,236 @@
-import asyncio
+"""
+Serial communication layer for IO Board.
 
-import construct
+This module provides async serial communication with the IO Board device,
+including retry logic with exponential backoff, structured logging, and
+comprehensive error handling.
+"""
+
+import asyncio
+from typing import Optional
+
 import serial
 import serial_asyncio
-from protocol import RequestProtocol, ResponseProtocol
 
-serial_mutex = asyncio.Lock()
+from .config import SerialConfig
+from .exceptions import ErrorCode, SerialCommunicationError
+from .logging_config import PerformanceLogger, get_logger, log_payload
 
-configuration = {
-    "url": "/dev/ttyUSB0",
-    "baudrate": 38400,
-}
+logger = get_logger(__name__)
 
-
-class SerialIOError(Exception):
-    pass
+# Global serial configuration and mutex
+_serial_config: Optional[SerialConfig] = None
+_serial_mutex = asyncio.Lock()
 
 
-def configure_serial(url: str, baudrate: int):
-    configuration["url"] = url
-    configuration["baudrate"] = baudrate
+def configure_serial(config: SerialConfig) -> None:
+    """
+    Configure serial communication parameters.
+
+    Args:
+        config: Serial configuration object
+    """
+    global _serial_config
+    _serial_config = config
+    logger.info(
+        f"Serial configured: port={config.port} baudrate={config.baudrate} "
+        f"timeouts=({config.header_timeout}s/{config.body_timeout}s/{config.checksum_timeout}s) "
+        f"retries={config.max_retries}"
+    )
 
 
-async def _fetch(
-    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, message: bytes
+def get_serial_config() -> SerialConfig:
+    """
+    Get current serial configuration.
+
+    Returns:
+        Serial configuration object
+
+    Raises:
+        SerialCommunicationError: If serial not configured
+    """
+    if _serial_config is None:
+        raise SerialCommunicationError(
+            "Serial communication not configured",
+            ErrorCode.SERIAL_CONNECTION_FAILED,
+            {"reason": "configure_serial() must be called before use"}
+        )
+    return _serial_config
+
+
+async def _fetch_with_timeout(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    message: bytes
 ) -> bytes:
+    """
+    Send message and receive response with appropriate timeouts.
+
+    This internal function handles the low-level serial I/O with timeouts
+    for each phase of the protocol frame.
+
+    Args:
+        reader: Async stream reader for serial port
+        writer: Async stream writer for serial port
+        message: Binary message to send
+
+    Returns:
+        Complete binary response message
+
+    Raises:
+        asyncio.TimeoutError: If any read operation times out
+        asyncio.IncompleteReadError: If connection closes before response complete
+    """
+    config = get_serial_config()
+
+    # Send request message
+    log_payload(logger, "TX", message, "request")
     writer.write(message)
     await writer.drain()
+
+    # Read response frame in three phases with appropriate timeouts
     response = b""
+
+    # Phase 1: Read STX (Start of Text) byte
     response += await asyncio.wait_for(
-        asyncio.create_task(reader.readexactly(1)), timeout=0.5
-    )  # Read Start of Text
+        reader.readexactly(1),
+        timeout=config.header_timeout
+    )
+
+    # Phase 2: Read until ETX (End of Text) byte
     response += await asyncio.wait_for(
-        asyncio.create_task(reader.readuntil(b"\x03")), timeout=2.0
-    )  # Read until Start of Text
+        reader.readuntil(b"\x03"),
+        timeout=config.body_timeout
+    )
+
+    # Phase 3: Read checksum byte
     response += await asyncio.wait_for(
-        asyncio.create_task(reader.readexactly(1)), timeout=0.5
-    )  # Read ETX and LRC
+        reader.readexactly(1),
+        timeout=config.checksum_timeout
+    )
+
+    log_payload(logger, "RX", response, "response")
     return response
 
 
 async def fetch(message: bytes) -> bytes:
-    async with serial_mutex:
-        try:
-            reader, writer = await serial_asyncio.open_serial_connection(
-                url=configuration["url"],
-                baudrate=configuration["baudrate"],
-            )
-        except serial.SerialException as e:
-            raise SerialIOError(
-                f"Serial IO Error: Failed to open serial port {configuration['url']}"
-            ) from e
-        try:
-            retry = 1
-            while not writer.is_closing() and retry <= 3:
-                try:
-                    response = await _fetch(reader, writer, message)
-                    return response
-                except (asyncio.IncompleteReadError, asyncio.TimeoutError) as e:
-                    print(f"Serial IO Warning: Retry {retry} fetching data")
-                    if retry >= 3:
-                        raise SerialIOError(
-                            "Serial IO Error: Failed to fetch data"
-                        ) from e
-                retry += 1
-                await asyncio.sleep(0.1)
-        finally:
-            writer.close()
-            await writer.wait_closed()
-    raise SerialIOError("Serial IO Error: Failed to fetch data")
+    """
+    Send message to IO Board and receive response with retry logic.
 
+    This function implements thread-safe serial communication with:
+    - Mutex-based exclusive access
+    - Exponential backoff retry strategy
+    - Comprehensive error handling and logging
+    - Automatic connection management
 
-async def _io_board_send_command(command: str, subcommand: str, data: dict):
-    try:
-        req_message = RequestProtocol.build(
-            dict(COMMAND=command, SUBCOMMAND=subcommand, DATA=data)
-        )
-    except construct.ConstructError as e:
-        raise SerialIOError("Serial IO Error: Failed to build IO Board request") from e
-    resp_message = await fetch(req_message)
-    try:
-        resp = ResponseProtocol.parse(resp_message)
-    except construct.ConstructError as e:
-        raise SerialIOError("Serial IO Error: Failed to parse IO Board response") from e
-    return resp
+    Args:
+        message: Binary protocol message to send
 
+    Returns:
+        Binary protocol response from device
 
-async def io_board_init():
-    resp = await _io_board_send_command("MC", "PD", {})
+    Raises:
+        SerialCommunicationError: If communication fails after all retries
+    """
+    config = get_serial_config()
 
+    async with _serial_mutex:
+        with PerformanceLogger(logger, "serial_fetch", port=config.port):
+            # Open serial connection
+            try:
+                logger.debug(f"Opening serial port: {config.port} @ {config.baudrate} baud")
+                reader, writer = await serial_asyncio.open_serial_connection(
+                    url=config.port,
+                    baudrate=config.baudrate,
+                )
+            except serial.SerialException as e:
+                error_msg = str(e).lower()
 
-async def io_board_set_door(state: str):
-    resp = await _io_board_send_command("MC", "DC", dict(DOOR=state))
-    return resp.DATA.DOOR
+                # Categorize serial errors
+                if "access is denied" in error_msg or "permission" in error_msg:
+                    raise SerialCommunicationError(
+                        f"Permission denied accessing serial port",
+                        ErrorCode.SERIAL_PORT_PERMISSION_DENIED,
+                        {"port": config.port}
+                    ) from e
+                elif "cannot find" in error_msg or "does not exist" in error_msg:
+                    raise SerialCommunicationError(
+                        f"Serial port not found",
+                        ErrorCode.SERIAL_PORT_NOT_FOUND,
+                        {"port": config.port}
+                    ) from e
+                elif "busy" in error_msg or "in use" in error_msg:
+                    raise SerialCommunicationError(
+                        f"Serial port busy or already in use",
+                        ErrorCode.SERIAL_PORT_BUSY,
+                        {"port": config.port}
+                    ) from e
+                else:
+                    raise SerialCommunicationError(
+                        f"Failed to open serial port",
+                        ErrorCode.SERIAL_CONNECTION_FAILED,
+                        {"port": config.port, "error": str(e)}
+                    ) from e
 
+            try:
+                # Retry loop with exponential backoff
+                retry_delay = config.initial_retry_delay
+                last_exception: Optional[Exception] = None
 
-async def io_board_calibrate():
-    resp = await _io_board_send_command("MC", "LZ", {})
+                for attempt in range(1, config.max_retries + 1):
+                    try:
+                        logger.debug(f"Attempt {attempt}/{config.max_retries}")
+                        response = await _fetch_with_timeout(reader, writer, message)
+                        logger.debug(f"Fetch successful on attempt {attempt}")
+                        return response
 
+                    except asyncio.TimeoutError as e:
+                        last_exception = e
+                        logger.warning(
+                            f"Timeout on attempt {attempt}/{config.max_retries} "
+                            f"(will retry in {retry_delay:.3f}s)"
+                        )
 
-async def io_board_set_manufacturing_number(manufacturing_number: str):
-    resp = await _io_board_send_command(
-        "MC", "WP", dict(PRODUCT_ID=manufacturing_number)
-    )
-    return resp.DATA.PRODUCT_ID
+                        if attempt < config.max_retries:
+                            await asyncio.sleep(retry_delay)
+                            retry_delay *= config.retry_backoff_multiplier
 
+                    except asyncio.IncompleteReadError as e:
+                        last_exception = e
+                        logger.warning(
+                            f"Incomplete read on attempt {attempt}/{config.max_retries}: "
+                            f"expected={e.expected} received={len(e.partial)} "
+                            f"(will retry in {retry_delay:.3f}s)"
+                        )
 
-async def io_board_clear_errors():
-    resp = await _io_board_send_command("MC", "EZ", {})
+                        if attempt < config.max_retries:
+                            await asyncio.sleep(retry_delay)
+                            retry_delay *= config.retry_backoff_multiplier
 
+                # All retries exhausted
+                if isinstance(last_exception, asyncio.TimeoutError):
+                    raise SerialCommunicationError(
+                        f"Serial read timeout after {config.max_retries} attempts",
+                        ErrorCode.SERIAL_TIMEOUT,
+                        {
+                            "port": config.port,
+                            "attempts": config.max_retries,
+                            "message_hex": message.hex()
+                        }
+                    ) from last_exception
+                else:
+                    raise SerialCommunicationError(
+                        f"Incomplete serial read after {config.max_retries} attempts",
+                        ErrorCode.SERIAL_INCOMPLETE_READ,
+                        {
+                            "port": config.port,
+                            "attempts": config.max_retries,
+                            "message_hex": message.hex()
+                        }
+                    ) from last_exception
 
-async def io_board_reboot():
-    resp = await _io_board_send_command("MC", "RT", {})
-
-
-async def io_board_get_product_info():
-    resp = await _io_board_send_command("RQ", "MI", {})
-    return dict(
-        product_id=resp.DATA.PRODUCT_ID,
-        sw_version=resp.DATA.SW_VERSION,
-    )
-
-
-async def io_board_get_loadcells():
-    resp = await _io_board_send_command("RQ", "IW", {})
-    return list(resp.DATA.LOADCELLS)
-
-
-async def io_board_get_status():
-    resp = await _io_board_send_command("RQ", "ID", {})
-    return dict(
-        door=resp.DATA.DOOR,
-        deadbolt=resp.DATA.DEADBOLT,
-    )
-
-
-async def io_board_get_errors():
-    resp = await _io_board_send_command("RQ", "ER", {})
-    return list(resp.DATA.ERRORS)
+            finally:
+                # Always close the connection
+                logger.debug("Closing serial port")
+                writer.close()
+                await writer.wait_closed()

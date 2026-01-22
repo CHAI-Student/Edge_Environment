@@ -9,8 +9,12 @@ Vision 후보군 + 무게 검증을 결합하여 최종 상품과 개수를 결�
 1. 단일 상품 매칭 우선 시도
 2. 실패 시 다중 상품 조합 시도
 3. 완전/불완전 상태 판별
-4. Vision 실패 시 Loadcell-only 폴백 (무게로 최근접 상품 추정)
-5. Node.js 응답 형식으로 결과 반환
+4. Node.js 응답 형식으로 결과 반환
+
+사용 예시:
+    engine = ProductDecisionEngine(product_db)
+    result = engine.judge(candidates, delta_weight=-365.0)
+    response = result.to_node_response()
 """
 
 from typing import List, Optional
@@ -26,7 +30,6 @@ from .models import (
 )
 from ..database.product_db import ProductDatabase
 from ..weight.count_calculator import WeightBasedCountCalculator
-from ..config import config
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,14 @@ class ProductDecisionEngine:
     최종 상품 결정 엔진.
 
     Vision 후보군과 무게 검증을 결합하여 최종 상품을 결정합니다.
+
+    Attributes:
+        product_db: 상품 데이터베이스
+        count_calculator: 개수 계산기
+        tolerance_percent: 허용 오차 비율
+        confidence_threshold: 최소 신뢰도 임계값
+        min_weight_change: 최소 무게 변화량 (g)
+        partial_threshold: PARTIAL/UNCERTAIN 구분 임계값
     """
 
     # 신뢰도 가중치
@@ -45,11 +56,11 @@ class ProductDecisionEngine:
 
     def __init__(
         self,
-        product_db: Optional[ProductDatabase] = None,
-        tolerance_percent: Optional[float] = None,
+        product_db: ProductDatabase,
+        tolerance_percent: float = 0.10,
         confidence_threshold: float = 0.3,
-        max_combination_size: Optional[int] = None,
-        min_weight_change: Optional[float] = None,
+        max_combination_size: int = 2,
+        min_weight_change: float = 5.0,
         partial_threshold: float = 0.7,
     ):
         """
@@ -63,16 +74,16 @@ class ProductDecisionEngine:
             min_weight_change: 최소 무게 변화량 (기본값 5g)
             partial_threshold: PARTIAL/UNCERTAIN 구분 임계값 (기본값 0.7)
         """
-        self.product_db = product_db or ProductDatabase()
-        self.tolerance_percent = tolerance_percent or config.tolerance_percent
+        self.product_db = product_db
+        self.tolerance_percent = tolerance_percent
         self.confidence_threshold = confidence_threshold
-        self.max_combination_size = max_combination_size or config.max_combination_size
-        self.min_weight_change = min_weight_change or config.min_weight_change
+        self.max_combination_size = max_combination_size
+        self.min_weight_change = min_weight_change
         self.partial_threshold = partial_threshold
 
         self.count_calculator = WeightBasedCountCalculator(
-            product_db=self.product_db,
-            tolerance_percent=self.tolerance_percent,
+            product_db=product_db,
+            tolerance_percent=tolerance_percent,
         )
 
     def judge(
@@ -98,10 +109,10 @@ class ProductDecisionEngine:
             f"delta_weight={delta_weight:.1f}g"
         )
 
-        # 1. 후보군이 없는 경우 → Loadcell-only 폴백
+        # 1. 후보군이 없는 경우
         if not vision_candidates:
-            logger.warning("No vision candidates provided, trying loadcell-only fallback")
-            return self.judge_by_weight_only(delta_weight, timestamp)
+            logger.warning("No vision candidates provided")
+            return self._create_no_detection_result(delta_weight, timestamp)
 
         # 2. 무게 변화가 없는 경우
         if abs_weight < self.min_weight_change:
@@ -112,8 +123,8 @@ class ProductDecisionEngine:
         estimates = self.count_calculator.calculate(vision_candidates, delta_weight)
 
         if not estimates:
-            logger.warning("No valid count estimates, trying loadcell-only fallback")
-            return self.judge_by_weight_only(delta_weight, timestamp)
+            logger.warning("No valid count estimates")
+            return self._create_no_detection_result(delta_weight, timestamp)
 
         # 4. 단일 상품 매칭 시도
         single_result = self._try_single_product_match(
@@ -136,122 +147,6 @@ class ProductDecisionEngine:
         logger.info("Returning partial/uncertain result")
         return self._create_partial_result(estimates, delta_weight, timestamp)
 
-    def judge_by_weight_only(
-        self,
-        delta_weight: float,
-        timestamp: Optional[float] = None,
-    ) -> JudgmentResult:
-        """
-        무게만으로 가장 가까운 상품 추정 (Vision 실패 시 폴백).
-
-        모든 상품 중 무게 변화량과 가장 유사한 무게를 가진 상품을 찾습니다.
-        tolerance_percent 범위 내에서 매칭하며, 개수도 추정합니다.
-
-        Args:
-            delta_weight: 무게 변화량 (음수 = 제거)
-            timestamp: 판단 시각 (기본값: 현재 시각)
-
-        Returns:
-            JudgmentResult (status: PARTIAL 또는 UNCERTAIN)
-        """
-        if timestamp is None:
-            timestamp = time.time()
-
-        abs_weight = abs(delta_weight)
-
-        logger.info(f"Loadcell-only fallback: delta_weight={delta_weight:.1f}g")
-
-        # 무게 변화가 너무 작은 경우
-        if abs_weight < self.min_weight_change:
-            logger.info(f"Weight change too small for fallback: {abs_weight:.1f}g")
-            return self._create_no_detection_result(delta_weight, timestamp)
-
-        # 모든 상품에서 가장 가까운 무게 찾기
-        all_products = self.product_db.get_all_products()
-
-        if not all_products:
-            logger.warning("No products in database for fallback")
-            return self._create_no_detection_result(delta_weight, timestamp)
-
-        best_match = None
-        best_error = float('inf')
-        best_count = 0
-
-        for product in all_products:
-            if product.weight <= 0:
-                continue
-
-            # 개수 계산: count = round(delta / unit_weight)
-            estimated_count = max(1, round(abs_weight / product.weight))
-            expected_weight = product.weight * estimated_count
-            error = abs(abs_weight - expected_weight)
-            error_rate = error / expected_weight if expected_weight > 0 else 1.0
-
-            # tolerance 범위 내에서 더 좋은 매칭 찾기
-            if error_rate <= self.tolerance_percent and error < best_error:
-                best_match = product
-                best_error = error
-                best_count = estimated_count
-
-        if best_match is None:
-            # tolerance 범위 밖이라도 가장 가까운 상품 반환 (UNCERTAIN)
-            logger.info("No product within tolerance, finding closest match")
-            for product in all_products:
-                if product.weight <= 0:
-                    continue
-
-                estimated_count = max(1, round(abs_weight / product.weight))
-                expected_weight = product.weight * estimated_count
-                error = abs(abs_weight - expected_weight)
-
-                if error < best_error:
-                    best_match = product
-                    best_error = error
-                    best_count = estimated_count
-
-        if best_match is None:
-            logger.warning("Could not find any matching product by weight")
-            return self._create_no_detection_result(delta_weight, timestamp)
-
-        expected_weight = best_match.weight * best_count
-        error_rate = best_error / expected_weight if expected_weight > 0 else 1.0
-        match_score = max(0.0, 1.0 - error_rate)
-
-        # 상태 결정: tolerance 범위 내면 PARTIAL, 아니면 UNCERTAIN
-        if error_rate <= self.tolerance_percent:
-            status = JudgmentStatus.PARTIAL
-            confidence = match_score * 0.7  # Vision 없이 최대 70%
-        else:
-            status = JudgmentStatus.UNCERTAIN
-            confidence = match_score * 0.5  # tolerance 밖이면 최대 50%
-
-        logger.info(
-            f"Loadcell-only result: {best_match.name} x {best_count}, "
-            f"expected={expected_weight:.1f}g, actual={abs_weight:.1f}g, "
-            f"error={best_error:.1f}g ({error_rate*100:.1f}%), status={status.value}"
-        )
-
-        product_judgment = ProductJudgment(
-            product_id=best_match.product_id,
-            name=best_match.name,
-            count=best_count,
-            unit_price=best_match.price,
-            total_price=best_match.price * best_count,
-            confidence=confidence,
-            unit_weight=best_match.weight,
-        )
-
-        return JudgmentResult(
-            products=[product_judgment],
-            total_price=product_judgment.total_price,
-            confidence=confidence,
-            status=status,
-            weight_delta=delta_weight,
-            weight_explained=expected_weight,
-            weight_residual=best_error,
-            timestamp=timestamp,
-        )
-
     def _try_single_product_match(
         self,
         estimates: List[CountEstimate],
@@ -262,26 +157,40 @@ class ProductDecisionEngine:
         단일 상품 매칭 시도.
 
         검증된(validated=True) 추정 중 가장 높은 match_score를 선택.
+
+        Args:
+            estimates: CountEstimate 리스트
+            delta_weight: 무게 변화량
+            timestamp: 타임스탬프
+
+        Returns:
+            JudgmentResult 또는 None
         """
+        # 검증된 추정 필터링
         validated_estimates = [e for e in estimates if e.validated]
 
         if not validated_estimates:
             return None
 
-        best = validated_estimates[0]
+        # 최고 점수 선택
+        best = validated_estimates[0]  # 이미 match_score 정렬됨
 
+        # confidence 계산
         confidence = self._calculate_fusion_confidence(
             vision_score=best.vision_confidence,
             weight_score=best.match_score,
             count=best.count,
         )
 
+        # 최소 신뢰도 체크
         if confidence < self.confidence_threshold:
             logger.debug(f"Confidence too low: {confidence:.3f} < {self.confidence_threshold}")
             return None
 
+        # ProductJudgment 생성
         product = self._create_product_judgment(best, confidence)
 
+        # JudgmentResult 생성
         return JudgmentResult(
             products=[product],
             total_price=product.total_price,
@@ -299,7 +208,17 @@ class ProductDecisionEngine:
         delta_weight: float,
         timestamp: float,
     ) -> Optional[JudgmentResult]:
-        """다중 상품 조합 매칭 시도."""
+        """
+        다중 상품 조합 매칭 시도.
+
+        Args:
+            candidates: Vision 후보군
+            delta_weight: 무게 변화량
+            timestamp: 타임스탬프
+
+        Returns:
+            JudgmentResult 또는 None
+        """
         combination = self.count_calculator.calculate_combination(
             candidates=candidates,
             delta_weight=delta_weight,
@@ -309,6 +228,7 @@ class ProductDecisionEngine:
         if not combination:
             return None
 
+        # 각 상품에 대해 ProductJudgment 생성
         products = []
         total_price = 0
         total_explained = 0.0
@@ -324,6 +244,7 @@ class ProductDecisionEngine:
             total_price += product.total_price
             total_explained += estimate.expected_weight
 
+        # 전체 confidence는 개별 confidence의 평균
         avg_confidence = sum(p.confidence for p in products) / len(products)
 
         return JudgmentResult(
@@ -343,23 +264,39 @@ class ProductDecisionEngine:
         delta_weight: float,
         timestamp: float,
     ) -> JudgmentResult:
-        """불완전 결과 생성."""
+        """
+        불완전 결과 생성.
+
+        검증되지 않았지만 가장 높은 match_score를 가진 추정을 사용.
+
+        Args:
+            estimates: CountEstimate 리스트
+            delta_weight: 무게 변화량
+            timestamp: 타임스탬프
+
+        Returns:
+            JudgmentResult (status=PARTIAL 또는 UNCERTAIN)
+        """
         if not estimates:
             return self._create_no_detection_result(delta_weight, timestamp)
 
+        # 최고 점수 선택
         best = estimates[0]
 
+        # confidence 계산
         confidence = self._calculate_fusion_confidence(
             vision_score=best.vision_confidence,
             weight_score=best.match_score,
             count=best.count,
         )
 
+        # 상태 결정 (partial_threshold 기준)
         if best.match_score > self.partial_threshold:
             status = JudgmentStatus.PARTIAL
         else:
             status = JudgmentStatus.UNCERTAIN
 
+        # ProductJudgment 생성
         product = self._create_product_judgment(best, confidence)
 
         return JudgmentResult(
@@ -395,7 +332,16 @@ class ProductDecisionEngine:
         estimate: CountEstimate,
         confidence: float,
     ) -> ProductJudgment:
-        """CountEstimate에서 ProductJudgment 생성."""
+        """
+        CountEstimate에서 ProductJudgment 생성.
+
+        Args:
+            estimate: CountEstimate 인스턴스
+            confidence: 계산된 신뢰도
+
+        Returns:
+            ProductJudgment 인스턴스
+        """
         price = self.product_db.get_price(estimate.product_id)
         total_price = price * estimate.count
 
@@ -422,15 +368,29 @@ class ProductDecisionEngine:
         - Vision 신뢰도: 40%
         - 무게 매칭 점수: 50%
         - 개수 합리성: 10%
+
+        Args:
+            vision_score: Vision 신뢰도 (0.0 ~ 1.0)
+            weight_score: 무게 매칭 점수 (0.0 ~ 1.0)
+            count: 추정 개수
+
+        Returns:
+            퓨전 신뢰도 (0.0 ~ 1.0)
         """
+        # Vision 점수 정규화
         vision_normalized = min(max(vision_score, 0.0), 1.0)
+
+        # 무게 매칭 점수 정규화
         weight_normalized = min(max(weight_score, 0.0), 1.0)
 
+        # 개수 합리성 점수
+        # 1~3개면 1.0, 그 이상은 점차 감소
         if count <= 3:
             count_score = 1.0
         else:
             count_score = max(0.0, 1.0 - (count - 3) * 0.1)
 
+        # 가중 평균
         confidence = (
             self.VISION_WEIGHT * vision_normalized +
             self.WEIGHT_MATCH_WEIGHT * weight_normalized +
@@ -438,3 +398,40 @@ class ProductDecisionEngine:
         )
 
         return min(confidence, 1.0)
+
+    def judge_with_request(
+        self,
+        vision_candidates: List[EnsembleResult],
+        loadcell_weights: List[float],
+        baseline_weights: List[float],
+        zone_id: Optional[int] = None,
+    ) -> JudgmentResult:
+        """
+        요청 데이터로 판단 수행.
+
+        JudgmentRequest 대신 개별 파라미터로 호출.
+
+        Args:
+            vision_candidates: Vision 후보군
+            loadcell_weights: 현재 로드셀 무게 (10채널)
+            baseline_weights: 기준 로드셀 무게 (10채널)
+            zone_id: Zone ID (옵션)
+
+        Returns:
+            JudgmentResult
+        """
+        # 무게 변화량 계산
+        deltas = [
+            curr - base
+            for curr, base in zip(loadcell_weights, baseline_weights)
+        ]
+
+        if zone_id is not None:
+            # 특정 Zone의 무게 변화량
+            start_idx = zone_id * 2
+            delta_weight = sum(deltas[start_idx:start_idx + 2])
+        else:
+            # 전체 무게 변화량
+            delta_weight = sum(deltas)
+
+        return self.judge(vision_candidates, delta_weight)

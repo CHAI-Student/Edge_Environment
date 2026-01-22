@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "product-judge"
+version = "1.0.0"
+description = "AI Smart Vending Machine Product Judgment Service - Vision + Weight Fusion"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "CRK Team"}
+]
+keywords = [
+    "vending-machine",
+    "product-detection",
+    "yolo",
+    "weight-sensor",
+    "sensor-fusion",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.22.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+yolo = [
+    "ultralytics>=8.0.0",
+    "opencv-python>=4.8.0",
+    "torch>=2.0.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.24.0",
+    "black>=23.0.0",
+    "mypy>=1.0.0",
+]
+all = [
+    "product-judge[yolo,dev]",
+]
+
+[project.urls]
+Homepage = "https://github.com/crk-team/product-judge"
+Repository = "https://github.com/crk-team/product-judge.git"
+Documentation = "https://github.com/crk-team/product-judge#readme"
+
+[project.scripts]
+product-judge = "product_judge.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.setuptools.package-data]
+product_judge = ["*.yaml", "*.json"]
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

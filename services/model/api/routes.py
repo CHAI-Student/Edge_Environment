@@ -7,9 +7,12 @@ REST API 엔드포인트 정의.
 - GET /api/health: 헬스 체크
 - POST /api/judge: 상품 판단 요청 (Node.js에서 호출)
 - GET /api/products: 상품 목록
+- POST /api/judge/multi-zone: 다중 Zone 동시 판단
+- POST /api/judge/with-history: 히스토리 기반 판단 (반환/연속픽업)
+- GET /api/stats/recognition-rate: 인식률 통계
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 import logging
@@ -18,6 +21,31 @@ import time
 from ..config import config
 from ..database.product_db import ProductDatabase
 from ..engine import ProductDecisionEngine, EnsembleResult, JudgmentStatus
+from ..engine.event_tracker import EventTracker, EventDirection
+from ..engine.advanced import (
+    ReturnDetector,
+    CrossZoneDetector,
+    BaselineManager,
+    RapidPickupHandler,
+)
+from ..weight import MultiZoneWeightMonitor
+
+from .models import (
+    # Multi-Zone
+    MultiZoneJudgeRequest,
+    MultiZoneJudgeResponse,
+    ZoneJudgmentResult,
+    CrossZoneMovementResult,
+    JudgmentStatusEnum,
+    # History
+    HistoryJudgeRequest,
+    HistoryJudgeResponse,
+    ReturnDetectionResult,
+    RapidPickupResult as RapidPickupResultModel,
+    # Stats
+    RecognitionRateResponse,
+    ZoneStatistics,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,13 +124,52 @@ class ProductInfoResponse(BaseModel):
 _product_db: Optional[ProductDatabase] = None
 _decision_engine: Optional[ProductDecisionEngine] = None
 
+# Advanced modules (고급 기능)
+_event_tracker: Optional[EventTracker] = None
+_return_detector: Optional[ReturnDetector] = None
+_cross_zone_detector: Optional[CrossZoneDetector] = None
+_baseline_manager: Optional[BaselineManager] = None
+_rapid_pickup_handler: Optional[RapidPickupHandler] = None
+_multi_zone_monitor: Optional[MultiZoneWeightMonitor] = None
+
+# Statistics counters
+_stats: Dict[str, int] = {
+    "total_events": 0,
+    "successful_judgments": 0,
+    "failed_judgments": 0,
+    "return_events": 0,
+    "cross_zone_moves": 0,
+}
+_zone_stats: Dict[int, Dict[str, int]] = {
+    i: {
+        "total_events": 0,
+        "successful_judgments": 0,
+        "failed_judgments": 0,
+        "return_events": 0,
+        "cross_zone_moves": 0,
+    }
+    for i in range(5)
+}
+
 
 def init_routes(product_db: ProductDatabase, decision_engine: ProductDecisionEngine):
     """라우터 초기화 (main.py에서 호출)."""
     global _product_db, _decision_engine
+    global _event_tracker, _return_detector, _cross_zone_detector
+    global _baseline_manager, _rapid_pickup_handler, _multi_zone_monitor
+
     _product_db = product_db
     _decision_engine = decision_engine
-    logger.info("API routes initialized")
+
+    # Initialize advanced modules
+    _event_tracker = EventTracker(max_history=100)
+    _return_detector = ReturnDetector(time_window=60.0)
+    _cross_zone_detector = CrossZoneDetector()
+    _baseline_manager = BaselineManager(drift_rate=0.5, zone_count=5)
+    _rapid_pickup_handler = RapidPickupHandler(buffer_window=3.0)
+    _multi_zone_monitor = MultiZoneWeightMonitor(zone_count=5)
+
+    logger.info("API routes initialized with advanced modules")
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -316,3 +383,385 @@ def _parse_weight_str(weight_str: str) -> float:
     except (ValueError, TypeError):
         logger.warning(f"Failed to parse weight string: {weight_str}")
         return 0.0
+
+
+# ===== Advanced Endpoints =====
+
+@router.post("/judge/multi-zone", response_model=MultiZoneJudgeResponse)
+async def judge_multi_zone(request: MultiZoneJudgeRequest):
+    """
+    다중 Zone 동시 판단.
+
+    여러 Zone에서 동시에 발생한 무게 변화를 판단하고,
+    Cross-Zone 이동을 감지합니다.
+
+    Args:
+        request: 다중 Zone 판단 요청
+
+    Returns:
+        MultiZoneJudgeResponse: 다중 Zone 판단 결과
+    """
+    global _decision_engine, _cross_zone_detector, _baseline_manager
+    global _multi_zone_monitor, _stats, _zone_stats
+
+    if _decision_engine is None:
+        raise HTTPException(status_code=503, detail="Decision engine not initialized")
+
+    current_time = time.time()
+    logger.info(f"Multi-zone judge request: {len(request.zone_deltas)} zones")
+
+    try:
+        zone_results: List[ZoneJudgmentResult] = []
+        total_price = 0
+
+        # 각 Zone 처리
+        for zone_delta in request.zone_deltas:
+            zone_id = zone_delta.zone_id
+            delta = zone_delta.delta
+
+            # Drift 보정 (도어 오픈 시간이 있는 경우)
+            if request.door_open_duration and _baseline_manager:
+                delta = _baseline_manager.get_long_open_correction(
+                    zone_id=zone_id,
+                    door_open_duration=request.door_open_duration,
+                    current_weight=delta,  # 이 경우 delta가 현재 무게로 사용됨
+                )
+
+            # Multi-zone monitor 업데이트
+            if _multi_zone_monitor:
+                _multi_zone_monitor.update(zone_id, delta)
+
+            # Zone별 Vision 후보군 필터링
+            zone_candidates = []
+            if request.vision_candidates:
+                zone_candidates = [
+                    EnsembleResult(
+                        class_id=c.class_id,
+                        class_name=c.class_name,
+                        top_confidence=c.confidence,
+                        side_confidence=c.confidence,
+                        combined_confidence=c.confidence,
+                        vote_count=1,
+                    )
+                    for c in request.vision_candidates
+                    if c.zone_id is None or c.zone_id == zone_id
+                ]
+
+            # 판단 수행
+            result = _decision_engine.judge(
+                vision_candidates=zone_candidates,
+                delta_weight=delta,
+            )
+
+            # 통계 업데이트
+            _stats["total_events"] += 1
+            _zone_stats[zone_id]["total_events"] += 1
+
+            if result.is_success:
+                _stats["successful_judgments"] += 1
+                _zone_stats[zone_id]["successful_judgments"] += 1
+            else:
+                _stats["failed_judgments"] += 1
+                _zone_stats[zone_id]["failed_judgments"] += 1
+
+            # 결과 생성
+            zone_result = ZoneJudgmentResult(
+                zone_id=zone_id,
+                products=[
+                    {
+                        "productId": p.product_id,
+                        "name": p.name,
+                        "count": p.count,
+                        "unitPrice": p.unit_price,
+                        "totalPrice": p.total_price,
+                        "confidence": round(p.confidence, 2),
+                    }
+                    for p in result.products
+                ],
+                total_price=result.total_price,
+                status=JudgmentStatusEnum(result.status.value),
+                confidence=round(result.confidence, 2),
+                weight_delta=round(delta, 1),
+                weight_explained=round(result.weight_explained, 1),
+            )
+
+            zone_results.append(zone_result)
+            total_price += result.total_price
+
+        # Cross-Zone 이동 감지
+        cross_zone_result = None
+        if request.check_cross_zone and _multi_zone_monitor:
+            movement = _multi_zone_monitor.detect_cross_zone_movement()
+            if movement.detected:
+                _stats["cross_zone_moves"] += 1
+                cross_zone_result = CrossZoneMovementResult(
+                    detected=True,
+                    source_zone=movement.source_zone,
+                    target_zone=movement.target_zone,
+                    weight=round(movement.weight, 1),
+                    match_score=round(movement.match_score, 3),
+                )
+                logger.info(
+                    f"Cross-zone movement detected: "
+                    f"Zone {movement.source_zone} -> Zone {movement.target_zone}"
+                )
+
+        response = MultiZoneJudgeResponse(
+            success=True,
+            zone_results=zone_results,
+            cross_zone_movement=cross_zone_result,
+            total_price=total_price,
+            timestamp=current_time,
+        )
+
+        logger.info(
+            f"Multi-zone judge completed: {len(zone_results)} zones, "
+            f"total_price={total_price}"
+        )
+
+        return response
+
+    except Exception as e:
+        logger.error(f"Multi-zone judge failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/judge/with-history", response_model=HistoryJudgeResponse)
+async def judge_with_history(request: HistoryJudgeRequest):
+    """
+    히스토리 기반 판단.
+
+    최근 이벤트 히스토리를 고려하여 반환 감지 및 연속 픽업을 처리합니다.
+
+    Args:
+        request: 히스토리 기반 판단 요청
+
+    Returns:
+        HistoryJudgeResponse: 히스토리 기반 판단 결과
+    """
+    global _decision_engine, _return_detector, _rapid_pickup_handler
+    global _event_tracker, _stats
+
+    if _decision_engine is None:
+        raise HTTPException(status_code=503, detail="Decision engine not initialized")
+
+    current_time = request.current_request.timestamp or time.time()
+    logger.info(f"History-based judge request: zone={request.current_request.zone_id}")
+
+    try:
+        current_req = request.current_request
+        delta_weight = current_req.delta_weight
+        zone_id = current_req.zone_id
+
+        # 반환 감지
+        return_detection = None
+        is_return_event = False
+
+        if request.check_return and _return_detector and delta_weight > 0:
+            # 이전 픽업 이벤트와 매칭
+            for event in request.recent_events:
+                if event.direction.value == "pickup" and event.zone_id == zone_id:
+                    # 무게 매칭 확인
+                    weight_diff = abs(abs(event.delta_weight) - delta_weight)
+                    tolerance = abs(event.delta_weight) * 0.15  # 15% 허용
+
+                    if weight_diff <= tolerance:
+                        match_score = 1.0 - (weight_diff / abs(event.delta_weight))
+                        return_detection = ReturnDetectionResult(
+                            detected=True,
+                            original_pickup_timestamp=event.timestamp,
+                            returned_product_id=event.product_id,
+                            returned_product_name=event.product_name,
+                            weight_match_score=round(match_score, 3),
+                        )
+                        is_return_event = True
+                        _stats["return_events"] += 1
+                        logger.info(
+                            f"Return detected: product={event.product_name}, "
+                            f"match_score={match_score:.3f}"
+                        )
+                        break
+
+        # 연속 픽업 감지
+        rapid_pickup = None
+
+        if request.check_rapid_pickup and _rapid_pickup_handler:
+            _rapid_pickup_handler.add_event(
+                delta_weight=delta_weight,
+                timestamp=current_time,
+                zone_id=zone_id,
+            )
+
+            if _rapid_pickup_handler.is_settled(current_time):
+                buffer_result = _rapid_pickup_handler.peek_buffer()
+                if buffer_result.event_count > 1:
+                    rapid_pickup = RapidPickupResultModel(
+                        detected=True,
+                        event_count=buffer_result.event_count,
+                        total_delta=round(buffer_result.total_delta, 1),
+                        duration=round(buffer_result.duration, 2),
+                        is_settled=True,
+                    )
+                    logger.info(
+                        f"Rapid pickup detected: {buffer_result.event_count} events, "
+                        f"total_delta={buffer_result.total_delta:.1f}g"
+                    )
+                    # 버퍼 사용 (flush)
+                    delta_weight = _rapid_pickup_handler.flush_buffer().total_delta
+
+        # 판단 수행 (반환 이벤트가 아닌 경우)
+        if is_return_event:
+            # 반환 이벤트는 가격 0, 상품 없음
+            products = []
+            total_price = 0
+            status = JudgmentStatusEnum.COMPLETE
+            confidence = return_detection.weight_match_score if return_detection else 0.0
+        else:
+            # Vision 후보군 처리
+            vision_candidates = []
+            if current_req.vision_candidates:
+                vision_candidates = [
+                    EnsembleResult(
+                        class_id=c.class_id,
+                        class_name=c.class_name,
+                        top_confidence=c.confidence,
+                        side_confidence=c.confidence,
+                        combined_confidence=c.confidence,
+                        vote_count=1,
+                    )
+                    for c in current_req.vision_candidates
+                ]
+
+            result = _decision_engine.judge(
+                vision_candidates=vision_candidates,
+                delta_weight=delta_weight,
+            )
+
+            products = [
+                {
+                    "productId": p.product_id,
+                    "name": p.name,
+                    "count": p.count,
+                    "unitPrice": p.unit_price,
+                    "totalPrice": p.total_price,
+                    "confidence": round(p.confidence, 2),
+                }
+                for p in result.products
+            ]
+            total_price = result.total_price
+            status = JudgmentStatusEnum(result.status.value)
+            confidence = round(result.confidence, 2)
+
+        response = HistoryJudgeResponse(
+            success=True,
+            products=products,
+            total_price=total_price,
+            status=status,
+            confidence=confidence,
+            return_detection=return_detection,
+            rapid_pickup=rapid_pickup,
+            is_return_event=is_return_event,
+            timestamp=current_time,
+        )
+
+        logger.info(
+            f"History-based judge completed: "
+            f"is_return={is_return_event}, products={len(products)}"
+        )
+
+        return response
+
+    except Exception as e:
+        logger.error(f"History-based judge failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/stats/recognition-rate", response_model=RecognitionRateResponse)
+async def get_recognition_rate():
+    """
+    인식률 통계 조회.
+
+    전체 및 Zone별 인식률 통계를 반환합니다.
+
+    Returns:
+        RecognitionRateResponse: 인식률 통계
+    """
+    global _stats, _zone_stats
+
+    current_time = time.time()
+
+    # 전체 인식률 계산
+    total = _stats["total_events"]
+    successful = _stats["successful_judgments"]
+    overall_rate = successful / total if total > 0 else 0.0
+
+    # Zone별 통계 생성
+    zone_statistics = []
+    for zone_id in range(5):
+        zone_data = _zone_stats[zone_id]
+        zone_total = zone_data["total_events"]
+        zone_successful = zone_data["successful_judgments"]
+        zone_rate = zone_successful / zone_total if zone_total > 0 else 0.0
+
+        zone_statistics.append(
+            ZoneStatistics(
+                zone_id=zone_id,
+                total_events=zone_total,
+                successful_judgments=zone_successful,
+                failed_judgments=zone_data["failed_judgments"],
+                return_events=zone_data["return_events"],
+                cross_zone_moves=zone_data["cross_zone_moves"],
+                recognition_rate=round(zone_rate, 3),
+            )
+        )
+
+    response = RecognitionRateResponse(
+        overall_recognition_rate=round(overall_rate, 3),
+        total_events=total,
+        successful_judgments=successful,
+        zone_statistics=zone_statistics,
+        recent_period_hours=24.0,  # 현재는 세션 기반, 추후 시간 기반으로 확장 가능
+        timestamp=current_time,
+    )
+
+    logger.info(f"Recognition rate: {overall_rate:.1%} ({successful}/{total})")
+
+    return response
+
+
+@router.post("/stats/reset")
+async def reset_statistics():
+    """
+    통계 초기화.
+
+    모든 인식률 통계를 초기화합니다.
+
+    Returns:
+        dict: 초기화 결과
+    """
+    global _stats, _zone_stats
+
+    _stats = {
+        "total_events": 0,
+        "successful_judgments": 0,
+        "failed_judgments": 0,
+        "return_events": 0,
+        "cross_zone_moves": 0,
+    }
+
+    for zone_id in range(5):
+        _zone_stats[zone_id] = {
+            "total_events": 0,
+            "successful_judgments": 0,
+            "failed_judgments": 0,
+            "return_events": 0,
+            "cross_zone_moves": 0,
+        }
+
+    logger.info("Statistics reset")
+
+    return {
+        "success": True,
+        "message": "Statistics reset successfully",
+        "timestamp": time.time(),
+    }

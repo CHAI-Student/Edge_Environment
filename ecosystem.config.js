@@ -62,12 +62,29 @@ module.exports = {
       restart_delay: 2000,
     },
 
-    // Python product_judge 서비스 (포트 8002)
+    // Python model 서비스 (포트 8002) - AI 상품 판단
     {
-      name: "product-judge",
-      cwd: "./services/product_judge",
+      name: "model",
+      cwd: "./services/model",
       script: "python",
-      args: "-m uvicorn product_judge.main:app --host 0.0.0.0 --port 8002",
+      args: "-m uvicorn main:app --host 0.0.0.0 --port 8002",
+      interpreter: "none",
+      env: {
+        PYTHONUNBUFFERED: "1",
+        YOLO_MODEL_PATH: "../../../siyeon_best.pt",
+      },
+      watch: false,
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 2000,
+    },
+
+    // Python camera_driver 서비스 (포트 8003) - 6대 카메라 관리
+    {
+      name: "camera-driver",
+      cwd: "./services/camera_driver",
+      script: "python",
+      args: "-m uvicorn main:app --host 0.0.0.0 --port 8003",
       interpreter: "none",
       env: {
         PYTHONUNBUFFERED: "1",

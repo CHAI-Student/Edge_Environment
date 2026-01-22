@@ -1,25 +1,28 @@
 """
-Event Tracker.
+Event Tracker for Weight Events.
 
-Zone별 이벤트 상태 추적 및 관리.
+시간 기반 무게 이벤트 추적 시스템.
 
 핵심 기능:
 1. 무게 변화 이벤트 기록 (pickup/return/move)
 2. 이벤트 안정화 감지 (settling_time 기반)
 3. 반납 이벤트 매칭 (최근 픽업과 비교)
 4. 이벤트 히스토리 관리
+
+사용 예시:
+    tracker = EventTracker(settling_time=2.0)
+    event = tracker.add_event(zone_id=0, delta=-365.0)
+    return_match = tracker.detect_return(new_event)
 """
 
 from dataclasses import dataclass, field
+from typing import List, Optional, Literal
 from enum import Enum
-from typing import Dict, List, Optional
 import time
 import logging
 
 logger = logging.getLogger(__name__)
 
-
-# ========== Event Direction & Weight Event (for advanced modules) ==========
 
 class EventDirection(str, Enum):
     """이벤트 방향."""
@@ -120,94 +123,41 @@ class ReturnResult:
         }
 
 
-# ========== Zone Event State (for zone-based tracking) ==========
-
-class EventState(Enum):
-    """이벤트 상태."""
-    IDLE = "idle"
-    ACTIVE = "active"  # 무게 변화 감지됨, 카메라 활성화
-    PROCESSING = "processing"  # Vision 추론 중
-    COMPLETED = "completed"  # 판단 완료
-    TIMEOUT = "timeout"  # 타임아웃
-
-
-@dataclass
-class ZoneEvent:
-    """Zone별 이벤트."""
-    zone_id: int
-    state: EventState = EventState.IDLE
-    start_time: Optional[float] = None
-    delta_weight: float = 0.0
-    last_update_time: Optional[float] = None
-    stable_since: Optional[float] = None  # 안정화 시작 시각
-    judgment_result: Optional[dict] = None
-
-
-@dataclass
-class EventTrackerConfig:
-    """이벤트 트래커 설정."""
-    stability_threshold: float = 2.0  # 무게 안정화 대기 시간 (초)
-    event_timeout: float = 30.0  # 이벤트 타임아웃 (초)
-    camera_off_delay: float = 10.0  # 카메라 off 지연 (초)
-    settling_time: float = 2.0  # 이벤트 안정화 시간 (초)
-    return_window: float = 30.0  # 반납 감지 시간 윈도우 (초)
-    match_tolerance: float = 0.15  # 반납 무게 매칭 허용 오차 (비율)
-    max_history: int = 100  # 최대 히스토리 크기
-
-
 class EventTracker:
     """
-    이벤트 트래커.
+    시간 기반 무게 이벤트 추적기.
 
-    Zone별 이벤트 상태를 추적합니다.
+    이벤트 히스토리를 관리하고 반납/이동 등의 특수 이벤트를 감지합니다.
+
+    Attributes:
+        settling_time: 이벤트 안정화 시간 (초)
+        return_window: 반납 감지 시간 윈도우 (초)
+        match_tolerance: 반납 무게 매칭 허용 오차 (비율)
+        max_history: 최대 히스토리 크기
     """
 
     def __init__(
         self,
-        config: Optional[EventTrackerConfig] = None,
         settling_time: float = 2.0,
         return_window: float = 30.0,
         match_tolerance: float = 0.15,
         max_history: int = 100,
     ):
         """
-        초기화.
+        이벤트 추적기 초기화.
 
         Args:
-            config: 트래커 설정 (우선 사용)
-            settling_time: 이벤트 안정화 시간 (초) - config 없을 때 사용
+            settling_time: 이벤트 안정화 시간 (초)
             return_window: 반납 감지 시간 윈도우 (초)
             match_tolerance: 반납 무게 매칭 허용 오차 (비율)
             max_history: 최대 히스토리 크기
         """
-        if config:
-            self.config = config
-            self.settling_time = config.settling_time
-            self.return_window = config.return_window
-            self.match_tolerance = config.match_tolerance
-            self.max_history = config.max_history
-        else:
-            self.config = EventTrackerConfig(
-                settling_time=settling_time,
-                return_window=return_window,
-                match_tolerance=match_tolerance,
-                max_history=max_history,
-            )
-            self.settling_time = settling_time
-            self.return_window = return_window
-            self.match_tolerance = match_tolerance
-            self.max_history = max_history
+        self.settling_time = settling_time
+        self.return_window = return_window
+        self.match_tolerance = match_tolerance
+        self.max_history = max_history
 
-        # Zone-based tracking
-        self.zones: Dict[int, ZoneEvent] = {}
-        # 5개 Zone 초기화
-        for zone_id in range(5):
-            self.zones[zone_id] = ZoneEvent(zone_id=zone_id)
-
-        # Event history (for advanced features)
         self.events: List[WeightEvent] = []
-
-    # ========== Event History Methods (for advanced modules) ==========
 
     def add_event(
         self,
@@ -441,151 +391,6 @@ class EventTracker:
 
         return removed
 
-    # ========== Zone-based Methods (original functionality) ==========
-
-    def on_weight_change(self, zone_id: int, delta_weight: float) -> ZoneEvent:
-        """
-        무게 변화 감지 시 호출.
-
-        Args:
-            zone_id: Zone ID
-            delta_weight: 무게 변화량
-
-        Returns:
-            업데이트된 ZoneEvent
-        """
-        now = time.time()
-        zone = self.zones.get(zone_id)
-
-        if not zone:
-            zone = ZoneEvent(zone_id=zone_id)
-            self.zones[zone_id] = zone
-
-        if zone.state == EventState.IDLE:
-            # 새 이벤트 시작
-            zone.state = EventState.ACTIVE
-            zone.start_time = now
-            zone.delta_weight = delta_weight
-            zone.last_update_time = now
-            zone.stable_since = None
-            logger.info(f"Zone {zone_id} event started: delta={delta_weight:.1f}g")
-        else:
-            # 기존 이벤트 업데이트
-            zone.delta_weight += delta_weight
-            zone.last_update_time = now
-            zone.stable_since = None  # 변화가 있으면 안정화 리셋
-            logger.debug(f"Zone {zone_id} event updated: total_delta={zone.delta_weight:.1f}g")
-
-        return zone
-
-    def on_weight_stable(self, zone_id: int) -> ZoneEvent:
-        """
-        무게 안정화 감지 시 호출.
-
-        Args:
-            zone_id: Zone ID
-
-        Returns:
-            업데이트된 ZoneEvent
-        """
-        now = time.time()
-        zone = self.zones.get(zone_id)
-
-        if not zone or zone.state == EventState.IDLE:
-            return zone
-
-        if zone.stable_since is None:
-            zone.stable_since = now
-            logger.debug(f"Zone {zone_id} weight stabilizing...")
-
-        # 안정화 시간 경과 체크
-        if now - zone.stable_since >= self.config.stability_threshold:
-            zone.state = EventState.PROCESSING
-            logger.info(f"Zone {zone_id} weight stable, ready for processing")
-
-        return zone
-
-    def on_processing_complete(
-        self,
-        zone_id: int,
-        result: dict,
-    ) -> ZoneEvent:
-        """
-        처리 완료 시 호출.
-
-        Args:
-            zone_id: Zone ID
-            result: 판단 결과
-
-        Returns:
-            업데이트된 ZoneEvent
-        """
-        zone = self.zones.get(zone_id)
-        if zone:
-            zone.state = EventState.COMPLETED
-            zone.judgment_result = result
-            logger.info(f"Zone {zone_id} processing completed")
-        return zone
-
-    def reset_zone(self, zone_id: int) -> ZoneEvent:
-        """
-        Zone 상태 리셋.
-
-        Args:
-            zone_id: Zone ID
-
-        Returns:
-            리셋된 ZoneEvent
-        """
-        zone = ZoneEvent(zone_id=zone_id)
-        self.zones[zone_id] = zone
-        logger.debug(f"Zone {zone_id} reset to IDLE")
-        return zone
-
-    def check_timeouts(self) -> List[int]:
-        """
-        타임아웃된 Zone 체크.
-
-        Returns:
-            타임아웃된 Zone ID 리스트
-        """
-        now = time.time()
-        timeout_zones = []
-
-        for zone_id, zone in self.zones.items():
-            if zone.state in [EventState.ACTIVE, EventState.PROCESSING]:
-                if zone.start_time and (now - zone.start_time) > self.config.event_timeout:
-                    zone.state = EventState.TIMEOUT
-                    timeout_zones.append(zone_id)
-                    logger.warning(f"Zone {zone_id} event timeout")
-
-        return timeout_zones
-
-    def get_active_zones(self) -> List[ZoneEvent]:
-        """
-        활성 상태인 Zone 리스트 반환.
-
-        Returns:
-            활성 ZoneEvent 리스트
-        """
-        return [
-            zone for zone in self.zones.values()
-            if zone.state in [EventState.ACTIVE, EventState.PROCESSING]
-        ]
-
-    def get_zone_state(self, zone_id: int) -> EventState:
-        """
-        Zone 상태 조회.
-
-        Args:
-            zone_id: Zone ID
-
-        Returns:
-            EventState
-        """
-        zone = self.zones.get(zone_id)
-        return zone.state if zone else EventState.IDLE
-
     def to_dict(self) -> dict:
         """상태 딕셔너리 변환."""
         return {
@@ -594,11 +399,4 @@ class EventTracker:
             "settling_time": self.settling_time,
             "return_window": self.return_window,
             "recent_events": [e.to_dict() for e in self.events[-5:]],
-            "zones": {
-                zone_id: {
-                    "state": zone.state.value,
-                    "delta_weight": round(zone.delta_weight, 1) if zone.delta_weight else 0,
-                }
-                for zone_id, zone in self.zones.items()
-            },
         }

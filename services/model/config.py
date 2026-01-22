@@ -111,7 +111,7 @@ class ModelServiceConfig:
     )
     hand_class_id: int = 0  # 손 클래스 ID
     max_distance_px: float = 150.0  # 손-상품 최대 거리 (픽셀)
-    top_k: int = 5  # 추출할 후보 수
+    top_k: int = 1  # 추출할 후보 수 (최고 confidence 클래스만)
 
     # 무게 검증 설정
     tolerance_percent: float = 0.10  # 허용 오차 10%
@@ -122,9 +122,9 @@ class ModelServiceConfig:
     camera_off_delay: float = 10.0  # 이벤트 종료 후 카메라 off 지연 (초)
     event_cooldown: float = 1.0  # 이벤트 쿨다운 (초)
 
-    # 앙상블 설정
-    top_weight: float = 0.4  # Top 카메라 가중치
-    side_weight: float = 0.6  # Side 카메라 가중치
+    # 앙상블 설정 (동일 가중치)
+    top_weight: float = 0.5  # Top 카메라 가중치
+    side_weight: float = 0.5  # Side 카메라 가중치
     common_class_bonus: float = 0.2  # 공통 클래스 보너스
 
     # 로깅

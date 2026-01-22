@@ -8,6 +8,7 @@ from .yolo_wrapper import YOLOWrapper, YOLODetection
 from .hand_filter import HandProximityFilter, FilterResult
 from .top5_extractor import Top5Extractor, ExtractionResult
 from .multi_view_ensemble import MultiViewEnsemble
+from .multi_hand_detector import MultiHandDetector, HandCluster, MultiHandFilterResult
 
 __all__ = [
     "YOLOWrapper",
@@ -17,4 +18,8 @@ __all__ = [
     "Top5Extractor",
     "ExtractionResult",
     "MultiViewEnsemble",
+    # Multi-hand detection (for multi-person scenarios)
+    "MultiHandDetector",
+    "HandCluster",
+    "MultiHandFilterResult",
 ]
