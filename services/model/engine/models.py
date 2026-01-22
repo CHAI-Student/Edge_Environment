@@ -240,12 +240,18 @@ class ProductInfo:
         category: 카테고리
         weight: 단위 무게 (g)
         price: 가격 (원)
+        barcode: 바코드 (선택)
+        stock: 재고 수량 (선택)
+        image_count: 등록된 이미지 수
     """
     product_id: int
     name: str
     category: str
     weight: float  # grams
     price: int     # won
+    barcode: Optional[str] = None
+    stock: int = 0
+    image_count: int = 0
 
     def to_dict(self) -> dict:
         """딕셔너리 변환."""
@@ -255,4 +261,7 @@ class ProductInfo:
             "category": self.category,
             "weight": self.weight,
             "price": self.price,
+            "barcode": self.barcode,
+            "stock": self.stock,
+            "image_count": self.image_count,
         }

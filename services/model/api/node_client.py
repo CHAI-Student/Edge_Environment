@@ -229,3 +229,132 @@ class NodeJSClient:
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Context manager 종료."""
         await self.stop()
+
+    # =========================================================================
+    # Product Sync (상품 동기화)
+    # =========================================================================
+
+    async def sync_products_to_server(self, products: list) -> bool:
+        """
+        상품 목록을 서버 DB로 전송.
+
+        Node.js Orchestrator가 서버 DB로 전달합니다.
+
+        Args:
+            products: 상품 정보 리스트 (export_all 형식)
+
+        Returns:
+            전송 성공 여부
+        """
+        if self._client is None:
+            await self.start()
+
+        endpoint = "/api/products/bulk"
+
+        payload = {
+            "products": products,
+            "count": len(products),
+            "syncType": "full",  # full 또는 incremental
+        }
+
+        try:
+            response = await self._client.post(endpoint, json=payload)
+
+            if response.status_code == 200:
+                logger.info(f"Products synced to server: {len(products)} products")
+                return True
+            else:
+                logger.warning(
+                    f"Server returned {response.status_code} for product sync"
+                )
+                return False
+
+        except httpx.TimeoutException:
+            logger.error("Timeout syncing products to server")
+            return False
+
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error syncing products: {e}")
+            return False
+
+        except Exception as e:
+            logger.error(f"Error syncing products: {e}", exc_info=True)
+            return False
+
+    async def sync_single_product(
+        self,
+        product: dict,
+        action: str = "upsert",  # upsert, delete
+    ) -> bool:
+        """
+        단일 상품 동기화.
+
+        Args:
+            product: 상품 정보
+            action: 동작 (upsert=등록/수정, delete=삭제)
+
+        Returns:
+            전송 성공 여부
+        """
+        if self._client is None:
+            await self.start()
+
+        endpoint = "/api/products/sync"
+
+        payload = {
+            "product": product,
+            "action": action,
+        }
+
+        try:
+            response = await self._client.post(endpoint, json=payload)
+
+            if response.status_code == 200:
+                logger.info(f"Product synced: {action} - {product.get('name')}")
+                return True
+            else:
+                logger.warning(
+                    f"Server returned {response.status_code} for product sync"
+                )
+                return False
+
+        except Exception as e:
+            logger.error(f"Error syncing product: {e}")
+            return False
+
+    async def notify_product_registered(
+        self,
+        product_id: int,
+        name: str,
+        price: int,
+    ) -> bool:
+        """
+        상품 등록 알림.
+
+        Args:
+            product_id: 상품 ID
+            name: 상품 이름
+            price: 가격
+
+        Returns:
+            전송 성공 여부
+        """
+        if self._client is None:
+            await self.start()
+
+        endpoint = "/api/events/product-registered"
+
+        payload = {
+            "eventType": "product_registered",
+            "productId": product_id,
+            "name": name,
+            "price": price,
+        }
+
+        try:
+            response = await self._client.post(endpoint, json=payload)
+            return response.status_code == 200
+
+        except Exception as e:
+            logger.debug(f"Product registration notification failed: {e}")
+            return False

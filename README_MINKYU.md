@@ -196,7 +196,13 @@ python -m pytest tests/ -v
 
 ## 변경 이력
 
-### 2026-01-22
+### 2026-01-22 (2차)
+- **IF11 상품 리스트 지원**: Node.js → Model 상품 동기화 (`/api/products/sync`)
+- **에러 복구 모듈**: `error_recovery/` (RecoveryManager, ErrorCode, ServiceError)
+- **카메라 디바이스 스캐너**: `device_scanner.py` (고유 ID 기반 재매핑)
+- **테스트 추가**: `test_error_recovery.py`, `test_product_registration.py` (36+ 테스트)
+
+### 2026-01-22 (1차)
 - **모델 교체**: `1224_v8n_img480_best_aug_segment.pt` → `siyeon_best.pt`
 - **클래스 확장**: 131개 → 133개 (hand + 132개 상품)
 - **ecosystem.config.js**: YOLO_MODEL_PATH 업데이트

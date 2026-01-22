@@ -3,8 +3,16 @@ Pytest Fixtures for Model Service Tests.
 """
 
 import pytest
+import sys
+import tempfile
 import numpy as np
+from pathlib import Path
 from typing import List, Dict, Any
+
+# Add parent directory to path for imports
+model_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(model_dir))
+
 
 # Test data fixtures
 
@@ -123,3 +131,68 @@ def zone_camera_map() -> Dict[int, int]:
         3: 4,
         4: 5,
     }
+
+
+# Product Registration fixtures
+
+
+@pytest.fixture
+def sample_product_data() -> Dict[str, Any]:
+    """샘플 상품 등록 데이터."""
+    return {
+        "name": "새우깡",
+        "category": "snack",
+        "weight": 90.0,
+        "price": 1500,
+        "barcode": "8801234567890",
+    }
+
+
+@pytest.fixture
+def temp_product_file():
+    """임시 상품 파일 경로."""
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        yield f.name
+    # Cleanup
+    import os
+    if os.path.exists(f.name):
+        os.unlink(f.name)
+
+
+@pytest.fixture
+def temp_image_dir():
+    """임시 이미지 디렉토리."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield tmpdir
+
+
+# Error Recovery fixtures
+
+
+@pytest.fixture
+def sample_error_codes() -> List[str]:
+    """샘플 에러 코드 목록."""
+    return [
+        "E2001",  # Serial port not found
+        "E2005",  # Timeout
+        "E3001",  # Camera connection failed
+        "E3002",  # Frame capture failed
+        "E4001",  # Model load failed
+        "E5001",  # SSE connection failed
+    ]
+
+
+@pytest.fixture
+def mock_recovery_handler():
+    """Mock 복구 핸들러."""
+    from unittest.mock import MagicMock
+    handler = MagicMock(return_value=True)
+    return handler
+
+
+@pytest.fixture
+def mock_async_recovery_handler():
+    """Mock 비동기 복구 핸들러."""
+    from unittest.mock import AsyncMock
+    handler = AsyncMock(return_value=True)
+    return handler

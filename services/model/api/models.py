@@ -219,3 +219,83 @@ class ErrorResponse(BaseModel):
     error: str
     error_code: Optional[str] = None
     timestamp: float
+
+
+# ===== Product Registration Models =====
+
+class ProductRegisterRequest(BaseModel):
+    """상품 등록 요청."""
+    name: str = Field(..., min_length=1, max_length=100, description="상품 이름")
+    category: str = Field(
+        ...,
+        description="카테고리 (beverage, snack, candy, food, dairy, health, etc)"
+    )
+    weight: float = Field(..., gt=0, description="단위 무게 (g)")
+    price: int = Field(..., ge=0, description="가격 (원)")
+    barcode: Optional[str] = Field(
+        None,
+        min_length=8,
+        max_length=14,
+        description="바코드 (선택, 8-14자리)"
+    )
+    stock: int = Field(0, ge=0, description="초기 재고 수량")
+
+
+class ProductRegisterResponse(BaseModel):
+    """상품 등록 응답."""
+    success: bool = True
+    product_id: int = Field(..., description="등록된 상품 ID")
+    name: str = Field(..., description="상품 이름")
+    status: str = Field("registered", description="상태")
+    timestamp: float
+
+
+class ProductUpdateRequest(BaseModel):
+    """상품 수정 요청."""
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    category: Optional[str] = None
+    weight: Optional[float] = Field(None, gt=0)
+    price: Optional[int] = Field(None, ge=0)
+    barcode: Optional[str] = Field(None, min_length=8, max_length=14)
+    stock: Optional[int] = Field(None, ge=0)
+
+
+class ProductUpdateResponse(BaseModel):
+    """상품 수정 응답."""
+    success: bool = True
+    product_id: int
+    message: str
+    timestamp: float
+
+
+class ProductDeleteResponse(BaseModel):
+    """상품 삭제 응답."""
+    success: bool = True
+    product_id: int
+    message: str
+    timestamp: float
+
+
+class ImageUploadResponse(BaseModel):
+    """이미지 업로드 응답."""
+    success: bool = True
+    product_id: int
+    camera_id: int
+    saved_count: int = Field(..., description="저장된 이미지 수")
+    save_path: str = Field(..., description="저장 경로")
+    total_images: int = Field(..., description="상품의 총 이미지 수")
+    timestamp: float
+
+
+class ProductExportResponse(BaseModel):
+    """상품 전체 목록 내보내기 응답."""
+    success: bool = True
+    products: List[dict] = Field(..., description="상품 목록")
+    count: int = Field(..., description="상품 수")
+    timestamp: float
+
+
+class ProductSearchRequest(BaseModel):
+    """상품 검색 요청."""
+    query: str = Field(..., min_length=1, description="검색어")
+    limit: int = Field(10, ge=1, le=100, description="최대 결과 수")

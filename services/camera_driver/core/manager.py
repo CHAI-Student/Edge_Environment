@@ -2,10 +2,18 @@
 Camera Manager
 
 6대 카메라 동시 관리 (Top 1 + Zone 5)
+
+기능:
+- 고유 ID 기반 카메라 매핑
+- 동적 디바이스 재매핑
+- 자동 재연결 (reconnect)
+- 헬스 체크
 """
 
 from typing import Any, Dict, List, Optional, Tuple
 import logging
+import threading
+import time
 
 from ..config import (
     settings,
@@ -13,8 +21,12 @@ from ..config import (
     TOP_CAMERA_ID,
     ZONE_CAMERA_IDS,
     ALL_CAMERA_IDS,
+    CAMERA_ID_MAPPING,
+    save_camera_mapping,
+    update_camera_identifier,
 )
 from .camera import ZoneCamera, CameraConfig
+from .device_scanner import DeviceScanner, CameraDeviceInfo
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +38,12 @@ class CameraManager:
     6대 카메라 동시 관리:
     - Camera 0: Top 카메라 (손 감지, 전체 Zone 커버)
     - Camera 1-5: Zone별 전용 Side 카메라
+
+    기능:
+    - 고유 ID 기반 카메라 매핑 (USB 시리얼)
+    - 동적 디바이스 재매핑 (USB 포트 변경 대응)
+    - 자동 재연결 (disconnection 복구)
+    - 헬스 체크 (연결 상태 모니터링)
     """
 
     def __init__(
@@ -33,6 +51,7 @@ class CameraManager:
         resolution: Optional[Tuple[int, int]] = None,
         fps: Optional[int] = None,
         buffer_size: Optional[int] = None,
+        auto_reconnect: bool = True,
     ):
         """
         초기화
@@ -41,15 +60,32 @@ class CameraManager:
             resolution: 프레임 해상도
             fps: 목표 FPS
             buffer_size: 프레임 버퍼 크기
+            auto_reconnect: 자동 재연결 활성화
         """
         self.resolution = resolution or (settings.resolution_width, settings.resolution_height)
         self.fps = fps or settings.fps
         self.buffer_size = buffer_size or settings.buffer_size
+        self.auto_reconnect = auto_reconnect
 
         # 카메라 객체
         self._cameras: Dict[int, ZoneCamera] = {}
         self._initialized = False
         self._streaming = False
+
+        # 디바이스 스캐너
+        self._scanner = DeviceScanner(max_index=settings.max_scan_index)
+
+        # Zone-카메라 인덱스 매핑 (동적)
+        self._zone_to_device: Dict[int, int] = dict(ZONE_CAMERA_MAP)
+        self._top_device_index: int = TOP_CAMERA_ID
+
+        # 재연결 스레드
+        self._reconnect_thread: Optional[threading.Thread] = None
+        self._reconnect_running = False
+        self._reconnect_lock = threading.Lock()
+
+        # 연결 상태 추적
+        self._connection_failures: Dict[int, int] = {}  # camera_id -> failure_count
 
     def initialize_all(self) -> Dict[int, bool]:
         """
@@ -220,3 +256,267 @@ class CameraManager:
     @property
     def connected_count(self) -> int:
         return sum(1 for c in self._cameras.values() if c.is_connected)
+
+    # =========================================================================
+    # 디바이스 스캔 및 동적 매핑
+    # =========================================================================
+
+    def scan_devices(self) -> List[CameraDeviceInfo]:
+        """
+        시스템의 모든 카메라 디바이스 스캔.
+
+        Returns:
+            CameraDeviceInfo 리스트
+        """
+        return self._scanner.scan_all_devices(refresh=True)
+
+    def rebuild_mapping(self) -> Dict[str, int]:
+        """
+        고유 ID 기반 카메라 매핑 재구성.
+
+        USB 포트 변경 등으로 디바이스 인덱스가 변경된 경우
+        설정된 고유 ID를 기반으로 매핑을 재구성합니다.
+
+        Returns:
+            {zone_key: device_index} 매핑 결과
+        """
+        logger.info("Rebuilding camera mapping...")
+
+        # 디바이스 스캔
+        devices = self._scanner.scan_all_devices(refresh=True)
+        logger.info(f"Found {len(devices)} camera devices")
+
+        # 설정 기반 매핑 재구성
+        new_mapping = self._scanner.rebuild_mapping(CAMERA_ID_MAPPING)
+
+        # Top 카메라 매핑
+        top_config = CAMERA_ID_MAPPING.get("top", {})
+        if top_config.get("identifier"):
+            idx = self._scanner.find_by_identifier(top_config["identifier"])
+            if idx is not None:
+                self._top_device_index = idx
+                logger.info(f"Top camera mapped to device {idx}")
+            else:
+                self._top_device_index = top_config.get("fallback_index", TOP_CAMERA_ID)
+                logger.warning(f"Top camera using fallback index {self._top_device_index}")
+        else:
+            self._top_device_index = top_config.get("fallback_index", TOP_CAMERA_ID)
+
+        # Zone 카메라 매핑
+        for zone_key, device_idx in new_mapping.items():
+            if zone_key.startswith("zone_"):
+                try:
+                    zone_id = int(zone_key.split("_")[1])
+                    self._zone_to_device[zone_id] = device_idx
+                except (ValueError, IndexError):
+                    pass
+
+        logger.info(f"Mapping rebuilt: top={self._top_device_index}, zones={self._zone_to_device}")
+        return new_mapping
+
+    def learn_device_identifiers(self) -> Dict[str, str]:
+        """
+        현재 연결된 카메라의 고유 ID 학습.
+
+        현재 인덱스 기반으로 연결된 카메라의 고유 ID를 추출하여
+        설정에 저장합니다. 초기 설정 시 사용합니다.
+
+        Returns:
+            {zone_key: identifier} 매핑
+        """
+        devices = self._scanner.scan_all_devices(refresh=True)
+        learned: Dict[str, str] = {}
+
+        for device in devices:
+            if not device.identifier:
+                continue
+
+            # Top 카메라
+            if device.device_index == TOP_CAMERA_ID:
+                update_camera_identifier("top", device.identifier)
+                learned["top"] = device.identifier
+
+            # Zone 카메라
+            for zone_id, cam_id in ZONE_CAMERA_MAP.items():
+                if device.device_index == cam_id:
+                    zone_key = f"zone_{zone_id}"
+                    update_camera_identifier(zone_key, device.identifier)
+                    learned[zone_key] = device.identifier
+                    break
+
+        # 설정 파일 저장
+        if learned:
+            save_camera_mapping()
+            logger.info(f"Learned {len(learned)} device identifiers")
+
+        return learned
+
+    # =========================================================================
+    # 자동 재연결
+    # =========================================================================
+
+    def start_reconnect_monitor(self) -> None:
+        """자동 재연결 모니터 시작."""
+        if not self.auto_reconnect:
+            return
+
+        if self._reconnect_running:
+            return
+
+        self._reconnect_running = True
+        self._reconnect_thread = threading.Thread(
+            target=self._reconnect_loop,
+            daemon=True,
+            name="CameraReconnect",
+        )
+        self._reconnect_thread.start()
+        logger.info("Camera reconnect monitor started")
+
+    def stop_reconnect_monitor(self) -> None:
+        """자동 재연결 모니터 중지."""
+        self._reconnect_running = False
+        if self._reconnect_thread and self._reconnect_thread.is_alive():
+            self._reconnect_thread.join(timeout=2.0)
+        logger.info("Camera reconnect monitor stopped")
+
+    def _reconnect_loop(self) -> None:
+        """재연결 모니터링 루프."""
+        while self._reconnect_running:
+            try:
+                self._check_and_reconnect()
+            except Exception as e:
+                logger.error(f"Reconnect loop error: {e}")
+
+            time.sleep(settings.reconnect_interval)
+
+    def _check_and_reconnect(self) -> None:
+        """연결 상태 확인 및 재연결 시도."""
+        with self._reconnect_lock:
+            for camera_id, camera in list(self._cameras.items()):
+                if not camera.is_connected:
+                    # 실패 횟수 증가
+                    self._connection_failures[camera_id] = \
+                        self._connection_failures.get(camera_id, 0) + 1
+
+                    failure_count = self._connection_failures[camera_id]
+
+                    if failure_count > settings.max_reconnect_attempts:
+                        logger.error(
+                            f"Camera {camera_id}: Max reconnect attempts exceeded"
+                        )
+                        continue
+
+                    logger.info(
+                        f"Camera {camera_id}: Attempting reconnect "
+                        f"({failure_count}/{settings.max_reconnect_attempts})"
+                    )
+
+                    # 재연결 시도
+                    if self._try_reconnect_camera(camera_id):
+                        self._connection_failures[camera_id] = 0
+                        logger.info(f"Camera {camera_id}: Reconnected successfully")
+                    else:
+                        # 매핑 재구성 시도 (USB 포트 변경 가능성)
+                        if failure_count >= 3:
+                            logger.info("Attempting to rebuild camera mapping...")
+                            self.rebuild_mapping()
+
+    def _try_reconnect_camera(self, camera_id: int) -> bool:
+        """
+        단일 카메라 재연결 시도.
+
+        Args:
+            camera_id: 카메라 ID
+
+        Returns:
+            재연결 성공 여부
+        """
+        if camera_id not in self._cameras:
+            return False
+
+        camera = self._cameras[camera_id]
+
+        # 기존 연결 해제
+        camera.disconnect()
+
+        # 재연결
+        if camera.connect():
+            if self._streaming:
+                camera.start_streaming()
+            return True
+
+        return False
+
+    def reconnect_camera(self, camera_id: int) -> bool:
+        """
+        특정 카메라 수동 재연결.
+
+        Args:
+            camera_id: 카메라 ID
+
+        Returns:
+            재연결 성공 여부
+        """
+        with self._reconnect_lock:
+            if self._try_reconnect_camera(camera_id):
+                self._connection_failures[camera_id] = 0
+                return True
+            return False
+
+    # =========================================================================
+    # 헬스 체크
+    # =========================================================================
+
+    def health_check(self) -> Dict[int, bool]:
+        """
+        모든 카메라 헬스 체크.
+
+        Returns:
+            {camera_id: is_healthy} 딕셔너리
+        """
+        health: Dict[int, bool] = {}
+
+        for camera_id, camera in self._cameras.items():
+            # 연결 상태 확인
+            if not camera.is_connected:
+                health[camera_id] = False
+                continue
+
+            # 프레임 캡처 가능 여부 확인
+            frame = camera.get_frame()
+            health[camera_id] = frame is not None
+
+        return health
+
+    def get_detailed_status(self) -> Dict[str, Any]:
+        """
+        상세 상태 조회 (디바이스 정보 포함).
+
+        Returns:
+            상세 상태 딕셔너리
+        """
+        devices = self._scanner.scan_all_devices()
+
+        return {
+            "initialized": self._initialized,
+            "streaming": self._streaming,
+            "reconnect_monitor_active": self._reconnect_running,
+            "top_device_index": self._top_device_index,
+            "zone_mapping": dict(self._zone_to_device),
+            "cameras": [
+                {
+                    **camera.get_status(),
+                    "failure_count": self._connection_failures.get(camera.camera_id, 0),
+                }
+                for camera in self._cameras.values()
+            ],
+            "available_devices": [
+                {
+                    "index": d.device_index,
+                    "name": d.name,
+                    "identifier": d.identifier,
+                    "available": d.is_available,
+                }
+                for d in devices
+            ],
+        }

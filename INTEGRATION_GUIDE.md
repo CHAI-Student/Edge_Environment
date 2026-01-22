@@ -156,7 +156,13 @@ services/model/
 │       └── rapid_pickup_handler.py # 연속 픽업
 │
 ├── database/                       # 상품 DB
-│   └── product_db.py
+│   └── product_db.py               # IF11 형식 지원
+│
+├── error_recovery/                 # ★ 에러 복구 모듈 (신규)
+│   ├── __init__.py
+│   ├── error_codes.py              # ErrorCode enum (E2xxx, E3xxx, ...)
+│   ├── service_error.py            # ServiceError dataclass
+│   └── recovery_manager.py         # RecoveryManager (헬스체크, 자동복구)
 │
 ├── monitor/                        # 테스트 대시보드
 │   ├── console_dashboard.py
@@ -164,7 +170,9 @@ services/model/
 │
 └── tests/                          # 테스트
     ├── test_offline_dataset.py     # 오프라인 테스트
-    └── test_hardware_integration.py # 하드웨어 테스트
+    ├── test_hardware_integration.py # 하드웨어 테스트
+    ├── test_error_recovery.py      # ★ 에러 복구 테스트 (36개)
+    └── test_product_registration.py # ★ 상품 등록 테스트
 ```
 
 ---
@@ -880,6 +888,42 @@ GET /api/stats/recognition-rate
 }
 ```
 
+#### IF11 상품 리스트 동기화 (Node.js → Model)
+```http
+POST /api/products/sync
+Content-Type: application/json
+
+{
+    "product_list": [
+        {
+            "product_idx": "P17355176364813008",
+            "product_name": "페리에 330ml",
+            "sale_price": 1985,
+            "stock_qty": 12,
+            "product_weight": "550"
+        },
+        {
+            "product_idx": "P17355176391055026",
+            "product_name": "하겐다즈 그린티&아몬드 80ml",
+            "sale_price": 4300,
+            "stock_qty": 10,
+            "product_weight": "77"
+        }
+    ]
+}
+```
+```json
+{
+    "success": true,
+    "loaded_count": 2,
+    "total_products": 52,
+    "message": "Successfully synced 2 products from IF11 format",
+    "timestamp": 1737450000.123
+}
+```
+
+> **참고**: README.md Step 5.1 "상품 정보(상품명, 무게, 재고) + 스냅샷 경로 (node → model)" 연동용
+
 ### 6.2 IO Board 서비스 API
 
 #### 로드셀 값 조회
@@ -1178,4 +1222,78 @@ tolerance_percent = 0.10  # 허용 오차 10%
 ---
 
 > **문의**: minkyu 브랜치 담당자
-> **최종 업데이트**: 2026-01-22
+> **최종 업데이트**: 2026-01-22 (2차)
+
+---
+
+## 9. 최신 업데이트 (2026-01-22 2차)
+
+### 9.1 IF11 상품 리스트 동기화
+
+Node.js에서 IF11 형식의 상품 리스트를 Model 서비스로 전송할 수 있습니다.
+
+**README.md Step 5.1 연동:**
+```
+상품 정보(상품명, 무게, 재고) + 스냅샷 경로 (node → model)
+```
+
+**사용 예시 (Node.js):**
+```javascript
+const axios = require('axios');
+
+// IF11 상품 리스트를 Model 서비스에 동기화
+async function syncProductsToModel(productList) {
+    const response = await axios.post('http://localhost:8002/api/products/sync', {
+        product_list: productList.map(p => ({
+            product_idx: p.product_idx,
+            product_name: p.product_name,
+            sale_price: p.sale_price,
+            stock_qty: p.stock_qty,
+            product_weight: String(p.product_weight)  // 문자열로 변환
+        }))
+    });
+    return response.data;
+}
+```
+
+### 9.2 에러 복구 모듈
+
+Model 서비스에 에러 복구 모듈이 추가되었습니다.
+
+**에러 코드 체계:**
+| 범위 | 서비스 | 예시 |
+|------|--------|------|
+| E2xxx | io_board | E2001(포트 없음), E2005(타임아웃) |
+| E3xxx | camera | E3001(연결 실패), E3002(프레임 캡처 실패) |
+| E4xxx | vision | E4001(모델 로드 실패), E4002(추론 실패) |
+| E5xxx | network | E5001(SSE 연결 실패), E5003(Node.js 연결 실패) |
+| E6xxx | payment | E6001(단말기 연결 실패), E6002(승인 실패) |
+
+**RecoveryManager 사용:**
+```python
+from error_recovery import RecoveryManager
+
+manager = RecoveryManager()
+manager.register_service("io_board")
+manager.register_service("camera")
+
+# 헬스 체크
+await manager.start_monitoring()
+
+# 상태 조회
+status = manager.get_all_status()
+```
+
+### 9.3 카메라 디바이스 스캐너
+
+USB 포트 변경 시 자동 재매핑을 지원합니다.
+
+**파일:** `services/camera_driver/core/device_scanner.py`
+
+```python
+from camera_driver.core import DeviceScanner
+
+scanner = DeviceScanner()
+devices = scanner.scan_all_devices()
+mapping = scanner.rebuild_mapping()  # zone → device_index
+```

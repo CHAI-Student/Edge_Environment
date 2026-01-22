@@ -13,10 +13,13 @@ REST API 엔드포인트 정의.
 """
 
 from typing import List, Optional, Dict
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel, Field
 import logging
 import time
+import os
+import shutil
+from pathlib import Path
 
 from ..config import config
 from ..database.product_db import ProductDatabase
@@ -45,6 +48,15 @@ from .models import (
     # Stats
     RecognitionRateResponse,
     ZoneStatistics,
+    # Product Registration
+    ProductRegisterRequest,
+    ProductRegisterResponse,
+    ProductUpdateRequest,
+    ProductUpdateResponse,
+    ProductDeleteResponse,
+    ImageUploadResponse,
+    ProductExportResponse,
+    ProductSearchRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -334,6 +346,436 @@ async def get_product(product_id: int):
         weight=product.weight,
         price=product.price,
     )
+
+
+# ===== Product Registration Endpoints =====
+
+# 이미지 저장 기본 경로 (config에서 가져오거나 기본값 사용)
+_IMAGE_BASE_PATH = os.environ.get(
+    "PRODUCT_IMAGE_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "images")
+)
+
+
+@router.post("/products/register", response_model=ProductRegisterResponse)
+async def register_product(request: ProductRegisterRequest):
+    """
+    새 상품 등록.
+
+    점주가 새 상품을 등록합니다.
+
+    Args:
+        request: 상품 등록 요청
+
+    Returns:
+        ProductRegisterResponse: 등록된 상품 정보
+    """
+    global _product_db
+
+    if _product_db is None:
+        raise HTTPException(status_code=503, detail="Product database not initialized")
+
+    try:
+        product_id = _product_db.add_product(
+            name=request.name,
+            category=request.category,
+            weight=request.weight,
+            price=request.price,
+            barcode=request.barcode,
+            stock=request.stock,
+        )
+
+        logger.info(f"Product registered: id={product_id}, name={request.name}")
+
+        return ProductRegisterResponse(
+            success=True,
+            product_id=product_id,
+            name=request.name,
+            status="registered",
+            timestamp=time.time(),
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Product registration failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/products/{product_id}", response_model=ProductUpdateResponse)
+async def update_product(product_id: int, request: ProductUpdateRequest):
+    """
+    상품 정보 수정.
+
+    Args:
+        product_id: 상품 ID
+        request: 수정할 필드
+
+    Returns:
+        ProductUpdateResponse: 수정 결과
+    """
+    global _product_db
+
+    if _product_db is None:
+        raise HTTPException(status_code=503, detail="Product database not initialized")
+
+    try:
+        success = _product_db.update_product(
+            product_id=product_id,
+            name=request.name,
+            category=request.category,
+            weight=request.weight,
+            price=request.price,
+            barcode=request.barcode,
+            stock=request.stock,
+        )
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
+
+        logger.info(f"Product updated: id={product_id}")
+
+        return ProductUpdateResponse(
+            success=True,
+            product_id=product_id,
+            message="Product updated successfully",
+            timestamp=time.time(),
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Product update failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/products/{product_id}", response_model=ProductDeleteResponse)
+async def delete_product(product_id: int):
+    """
+    상품 삭제.
+
+    Args:
+        product_id: 상품 ID
+
+    Returns:
+        ProductDeleteResponse: 삭제 결과
+    """
+    global _product_db
+
+    if _product_db is None:
+        raise HTTPException(status_code=503, detail="Product database not initialized")
+
+    # hand(0) 삭제 방지
+    if product_id == 0:
+        raise HTTPException(status_code=400, detail="Cannot delete hand class (id=0)")
+
+    success = _product_db.delete_product(product_id)
+
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
+
+    logger.info(f"Product deleted: id={product_id}")
+
+    return ProductDeleteResponse(
+        success=True,
+        product_id=product_id,
+        message="Product deleted successfully",
+        timestamp=time.time(),
+    )
+
+
+@router.post("/products/{product_id}/images", response_model=ImageUploadResponse)
+async def upload_product_images(
+    product_id: int,
+    camera_id: int = Form(..., ge=0, le=5, description="카메라 ID (0=Top, 1-5=Zone)"),
+    images: List[UploadFile] = File(..., description="이미지 파일들"),
+):
+    """
+    상품 이미지 업로드.
+
+    카메라별로 이미지를 저장합니다.
+
+    저장 구조:
+    ```
+    {base_path}/images/
+    └── cam_{camera_id}/
+        ├── product_{product_id}_001.jpg
+        ├── product_{product_id}_002.jpg
+        └── ...
+    ```
+
+    Args:
+        product_id: 상품 ID
+        camera_id: 카메라 ID (0=Top, 1-5=Zone)
+        images: 이미지 파일 리스트
+
+    Returns:
+        ImageUploadResponse: 업로드 결과
+    """
+    global _product_db
+
+    if _product_db is None:
+        raise HTTPException(status_code=503, detail="Product database not initialized")
+
+    # 상품 존재 확인
+    product = _product_db.get_product(product_id)
+    if product is None:
+        raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
+
+    # 이미지 저장 디렉토리 생성
+    cam_dir = os.path.join(_IMAGE_BASE_PATH, f"cam_{camera_id}")
+    os.makedirs(cam_dir, exist_ok=True)
+
+    # 기존 이미지 수 확인 (파일명 번호 결정용)
+    existing_images = list(Path(cam_dir).glob(f"product_{product_id:03d}_*.jpg"))
+    next_num = len(existing_images) + 1
+
+    saved_count = 0
+    for image in images:
+        # 파일 확장자 확인
+        if not image.filename.lower().endswith((".jpg", ".jpeg", ".png")):
+            logger.warning(f"Skipping non-image file: {image.filename}")
+            continue
+
+        # 파일명 생성
+        filename = f"product_{product_id:03d}_{next_num:03d}.jpg"
+        filepath = os.path.join(cam_dir, filename)
+
+        try:
+            # 파일 저장
+            with open(filepath, "wb") as f:
+                content = await image.read()
+                f.write(content)
+
+            saved_count += 1
+            next_num += 1
+            logger.debug(f"Image saved: {filepath}")
+
+        except Exception as e:
+            logger.error(f"Failed to save image {image.filename}: {e}")
+
+    # 상품 이미지 수 갱신
+    if saved_count > 0:
+        _product_db.increment_image_count(product_id, saved_count)
+
+    total_images = product.image_count + saved_count
+
+    logger.info(
+        f"Product images uploaded: product_id={product_id}, "
+        f"camera_id={camera_id}, saved={saved_count}"
+    )
+
+    return ImageUploadResponse(
+        success=True,
+        product_id=product_id,
+        camera_id=camera_id,
+        saved_count=saved_count,
+        save_path=f"images/cam_{camera_id}/",
+        total_images=total_images,
+        timestamp=time.time(),
+    )
+
+
+@router.get("/products/export", response_model=ProductExportResponse)
+async def export_products():
+    """
+    전체 상품 목록 내보내기.
+
+    Node.js 동기화 및 외부 시스템 연동용.
+
+    Returns:
+        ProductExportResponse: 전체 상품 목록
+    """
+    global _product_db
+
+    if _product_db is None:
+        raise HTTPException(status_code=503, detail="Product database not initialized")
+
+    products = _product_db.export_all(exclude_hand=True)
+
+    return ProductExportResponse(
+        success=True,
+        products=products,
+        count=len(products),
+        timestamp=time.time(),
+    )
+
+
+@router.get("/products/search")
+async def search_products(query: str, limit: int = 10):
+    """
+    상품 이름 검색.
+
+    Args:
+        query: 검색어 (부분 일치)
+        limit: 최대 결과 수 (기본 10)
+
+    Returns:
+        검색 결과 리스트
+    """
+    global _product_db
+
+    if _product_db is None:
+        raise HTTPException(status_code=503, detail="Product database not initialized")
+
+    matches = _product_db.search_by_name(query, limit=min(limit, 100))
+
+    return {
+        "success": True,
+        "query": query,
+        "products": [
+            {
+                "product_id": p.product_id,
+                "name": p.name,
+                "category": p.category,
+                "weight": p.weight,
+                "price": p.price,
+            }
+            for p in matches
+        ],
+        "count": len(matches),
+        "timestamp": time.time(),
+    }
+
+
+@router.get("/products/barcode/{barcode}")
+async def get_product_by_barcode(barcode: str):
+    """
+    바코드로 상품 조회.
+
+    Args:
+        barcode: 바코드
+
+    Returns:
+        상품 정보
+    """
+    global _product_db
+
+    if _product_db is None:
+        raise HTTPException(status_code=503, detail="Product database not initialized")
+
+    product = _product_db.get_by_barcode(barcode)
+
+    if product is None:
+        raise HTTPException(status_code=404, detail=f"Product with barcode {barcode} not found")
+
+    return {
+        "success": True,
+        "product": {
+            "product_id": product.product_id,
+            "name": product.name,
+            "category": product.category,
+            "weight": product.weight,
+            "price": product.price,
+            "barcode": product.barcode,
+            "stock": product.stock,
+        },
+        "timestamp": time.time(),
+    }
+
+
+class IF11ProductItem(BaseModel):
+    """IF11 형식의 상품 항목."""
+    product_idx: str = Field(..., description="상품 ID (예: P17355176364813008)")
+    product_name: str = Field(..., description="상품명")
+    sale_price: int = Field(0, description="판매가")
+    stock_qty: int = Field(0, description="재고 수량")
+    product_weight: str = Field("0", description="상품 무게 (문자열)")
+
+
+class IF11ProductListRequest(BaseModel):
+    """IF11 상품 리스트 요청."""
+    product_list: List[IF11ProductItem] = Field(..., description="상품 리스트")
+
+
+@router.post("/products/sync")
+async def sync_products_from_if11(request: IF11ProductListRequest):
+    """
+    IF11 형식의 상품 리스트 동기화.
+
+    Node.js에서 IF11 형식으로 상품 리스트를 전달받아 데이터베이스를 갱신합니다.
+
+    README.md Step 5.1: 상품 정보(상품명, 무게, 재고) + 스냅샷 경로 (node → model)
+
+    IF11 형식 예시:
+        {
+            "product_idx": "P17355176364813008",
+            "product_name": "페리에 330ml",
+            "sale_price": 1985,
+            "stock_qty": 12,
+            "product_weight": "550"
+        }
+
+    Args:
+        request: IF11 형식의 상품 리스트
+
+    Returns:
+        동기화 결과
+    """
+    global _product_db
+
+    if _product_db is None:
+        raise HTTPException(status_code=503, detail="Product database not initialized")
+
+    try:
+        # IF11 형식을 딕셔너리 리스트로 변환
+        product_list = [
+            {
+                "product_idx": item.product_idx,
+                "product_name": item.product_name,
+                "sale_price": item.sale_price,
+                "stock_qty": item.stock_qty,
+                "product_weight": item.product_weight,
+            }
+            for item in request.product_list
+        ]
+
+        # 상품 로드
+        loaded_count = _product_db.load_from_if11(product_list)
+
+        logger.info(f"Products synced from IF11 format: {loaded_count} products")
+
+        return {
+            "success": True,
+            "loaded_count": loaded_count,
+            "total_products": _product_db.product_count,
+            "message": f"Successfully synced {loaded_count} products from IF11 format",
+            "timestamp": time.time(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to sync products from IF11: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/products/save")
+async def save_products_to_file(path: Optional[str] = None):
+    """
+    상품 데이터베이스 저장.
+
+    Args:
+        path: 저장 경로 (선택)
+
+    Returns:
+        저장 결과
+    """
+    global _product_db
+
+    if _product_db is None:
+        raise HTTPException(status_code=503, detail="Product database not initialized")
+
+    try:
+        _product_db.save_to_file(path)
+        return {
+            "success": True,
+            "message": "Product database saved",
+            "timestamp": time.time(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to save products: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def _calculate_delta_weight(

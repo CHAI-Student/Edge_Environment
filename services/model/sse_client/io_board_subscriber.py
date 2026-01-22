@@ -38,6 +38,9 @@ class SubscriberState:
     last_change_time: Optional[float] = None
     reconnect_count: int = 0
     error_count: int = 0
+    consecutive_failures: int = 0  # 연속 실패 횟수
+    last_error_time: Optional[float] = None
+    last_error_message: Optional[str] = None
 
 
 class IOBoardSubscriber:
@@ -62,13 +65,17 @@ class IOBoardSubscriber:
         on_uncertainty: Optional[Callable[[LoadcellUncertaintyEvent], Any]] = None,
         on_door_update: Optional[Callable[[DoorUpdateEvent], Any]] = None,
         on_error: Optional[Callable[[SSEErrorEvent], Any]] = None,
+        on_connection_status: Optional[Callable[[bool, Optional[str]], Any]] = None,
         filter_method: str = "exponential",
         filter_alpha: float = 0.2,
         threshold: float = 5.0,
         threshold_scope: str = "filtered",
         loadcell_interval: float = 0.5,
         door_interval: float = 1.0,
-        reconnect_delay: float = 5.0,
+        # Exponential Backoff 설정
+        initial_reconnect_delay: float = 1.0,
+        max_reconnect_delay: float = 30.0,
+        backoff_multiplier: float = 2.0,
         max_reconnect_attempts: int = -1,  # -1 = 무한
     ):
         """
@@ -81,13 +88,16 @@ class IOBoardSubscriber:
             on_uncertainty: loadcell.uncertainty 이벤트 콜백
             on_door_update: door.update 이벤트 콜백
             on_error: error 이벤트 콜백
+            on_connection_status: 연결 상태 변경 콜백 (connected, error_message)
             filter_method: 필터 방식 (none, exponential, kalman)
             filter_alpha: Exponential smoothing alpha
             threshold: 변화 감지 임계값 (g)
             threshold_scope: 임계값 적용 대상 (raw, filtered)
             loadcell_interval: 로드셀 폴링 간격 (초)
             door_interval: 도어 상태 폴링 간격 (초)
-            reconnect_delay: 재연결 대기 시간 (초)
+            initial_reconnect_delay: 초기 재연결 대기 시간 (초)
+            max_reconnect_delay: 최대 재연결 대기 시간 (초)
+            backoff_multiplier: 재연결 대기 시간 증가 배수
             max_reconnect_attempts: 최대 재연결 시도 (-1 = 무한)
         """
         self.base_url = base_url or config.io_board_url
@@ -96,6 +106,7 @@ class IOBoardSubscriber:
         self.on_uncertainty = on_uncertainty
         self.on_door_update = on_door_update
         self.on_error = on_error
+        self.on_connection_status = on_connection_status
 
         # SSE 파라미터
         self.filter_method = filter_method
@@ -105,9 +116,12 @@ class IOBoardSubscriber:
         self.loadcell_interval = loadcell_interval
         self.door_interval = door_interval
 
-        # 재연결 설정
-        self.reconnect_delay = reconnect_delay
+        # Exponential Backoff 설정
+        self.initial_reconnect_delay = initial_reconnect_delay
+        self.max_reconnect_delay = max_reconnect_delay
+        self.backoff_multiplier = backoff_multiplier
         self.max_reconnect_attempts = max_reconnect_attempts
+        self._current_reconnect_delay = initial_reconnect_delay
 
         # 상태
         self.state = SubscriberState()
@@ -160,28 +174,65 @@ class IOBoardSubscriber:
         logger.info("IOBoardSubscriber stopped")
 
     async def _run_loop(self) -> None:
-        """메인 실행 루프 (자동 재연결 포함)."""
+        """메인 실행 루프 (Exponential Backoff 재연결 포함)."""
+        import time as time_module
+
         while self._running:
             try:
                 await self._connect_and_stream()
+
+                # 성공적인 연결 후 재연결 지연 초기화
+                self._current_reconnect_delay = self.initial_reconnect_delay
+                self.state.consecutive_failures = 0
+
             except asyncio.CancelledError:
                 break
+
             except Exception as e:
-                logger.error(f"SSE connection error: {e}")
+                error_msg = str(e)
+                logger.error(f"SSE connection error: {error_msg}")
+
                 self.state.connected = False
                 self.state.error_count += 1
+                self.state.consecutive_failures += 1
+                self.state.last_error_time = time_module.time()
+                self.state.last_error_message = error_msg
 
+                # 연결 상태 콜백 호출
+                if self.on_connection_status:
+                    try:
+                        result = self.on_connection_status(False, error_msg)
+                        if asyncio.iscoroutine(result):
+                            await result
+                    except Exception as cb_err:
+                        logger.error(f"Connection status callback error: {cb_err}")
+
+                # 최대 재연결 시도 확인
                 if self.max_reconnect_attempts >= 0:
                     if self.state.reconnect_count >= self.max_reconnect_attempts:
-                        logger.error("Max reconnect attempts reached")
+                        logger.error(
+                            f"Max reconnect attempts ({self.max_reconnect_attempts}) reached, "
+                            f"giving up"
+                        )
                         break
 
                 self.state.reconnect_count += 1
+
+                # Exponential Backoff 적용
+                delay = self._current_reconnect_delay
                 logger.info(
-                    f"Reconnecting in {self.reconnect_delay}s "
-                    f"(attempt {self.state.reconnect_count})"
+                    f"Reconnecting in {delay:.1f}s "
+                    f"(attempt {self.state.reconnect_count}, "
+                    f"consecutive failures: {self.state.consecutive_failures})"
                 )
-                await asyncio.sleep(self.reconnect_delay)
+
+                await asyncio.sleep(delay)
+
+                # 다음 재연결을 위해 지연 시간 증가
+                self._current_reconnect_delay = min(
+                    self._current_reconnect_delay * self.backoff_multiplier,
+                    self.max_reconnect_delay
+                )
 
     async def _connect_and_stream(self) -> None:
         """SSE 연결 및 스트림 처리."""
@@ -194,7 +245,18 @@ class IOBoardSubscriber:
 
             self.state.connected = True
             self.state.reconnect_count = 0
+            self.state.consecutive_failures = 0
+            self._current_reconnect_delay = self.initial_reconnect_delay
             logger.info("SSE connected successfully")
+
+            # 연결 성공 콜백 호출
+            if self.on_connection_status:
+                try:
+                    result = self.on_connection_status(True, None)
+                    if asyncio.iscoroutine(result):
+                        await result
+                except Exception as cb_err:
+                    logger.error(f"Connection status callback error: {cb_err}")
 
             event_type = None
             event_data = None
@@ -299,3 +361,35 @@ class IOBoardSubscriber:
     def is_running(self) -> bool:
         """실행 상태."""
         return self._running
+
+    def reset_backoff(self) -> None:
+        """Backoff 상태 초기화."""
+        self._current_reconnect_delay = self.initial_reconnect_delay
+        self.state.consecutive_failures = 0
+        self.state.reconnect_count = 0
+
+    def get_connection_stats(self) -> dict:
+        """
+        연결 상태 통계.
+
+        Returns:
+            연결 상태 정보 딕셔너리
+        """
+        import time as time_module
+
+        uptime = None
+        if self.state.connected and self.state.last_update_time:
+            uptime = time_module.time() - self.state.last_update_time
+
+        return {
+            "connected": self.state.connected,
+            "running": self._running,
+            "reconnect_count": self.state.reconnect_count,
+            "error_count": self.state.error_count,
+            "consecutive_failures": self.state.consecutive_failures,
+            "current_backoff_delay": self._current_reconnect_delay,
+            "last_update_time": self.state.last_update_time,
+            "last_change_time": self.state.last_change_time,
+            "last_error_time": self.state.last_error_time,
+            "last_error_message": self.state.last_error_message,
+        }
