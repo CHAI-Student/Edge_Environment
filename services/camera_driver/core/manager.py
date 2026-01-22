@@ -27,6 +27,7 @@ from ..config import (
 )
 from .camera import ZoneCamera, CameraConfig
 from .device_scanner import DeviceScanner, CameraDeviceInfo
+from .media_recorder import MediaRecorder, EventRecorder, RecordingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,10 @@ class CameraManager:
 
         # 연결 상태 추적
         self._connection_failures: Dict[int, int] = {}  # camera_id -> failure_count
+
+        # 미디어 레코더
+        self._media_recorder: Optional[MediaRecorder] = None
+        self._event_recorder: Optional[EventRecorder] = None
 
     def initialize_all(self) -> Dict[int, bool]:
         """
@@ -520,3 +525,193 @@ class CameraManager:
                 for d in devices
             ],
         }
+
+    # =========================================================================
+    # 미디어 녹화 기능
+    # =========================================================================
+
+    def init_media_recorder(
+        self,
+        base_path: str = "./recordings",
+        fps: Optional[int] = None,
+    ) -> None:
+        """
+        미디어 레코더 초기화.
+
+        Args:
+            base_path: 녹화 저장 기본 경로
+            fps: 영상 FPS
+        """
+        config = RecordingConfig(
+            base_path=base_path,
+            fps=fps or self.fps,
+            resolution=self.resolution,
+        )
+        self._media_recorder = MediaRecorder(config)
+        self._event_recorder = EventRecorder(self._media_recorder, self)
+        logger.info(f"Media recorder initialized: {base_path}")
+
+    def start_recording(
+        self,
+        zone_id: Optional[int] = None,
+        cameras: Optional[List[int]] = None,
+        include_top: bool = True,
+        record_video: bool = True,
+    ) -> Optional[str]:
+        """
+        녹화 시작.
+
+        Args:
+            zone_id: Zone ID (특정 Zone만 녹화)
+            cameras: 카메라 ID 목록 (직접 지정)
+            include_top: Top 카메라 포함 여부
+            record_video: 영상 녹화 여부
+
+        Returns:
+            세션 ID
+        """
+        if not self._media_recorder:
+            self.init_media_recorder()
+
+        if self._event_recorder and zone_id is not None:
+            return self._event_recorder.start_event_recording(
+                zone_id=zone_id,
+                include_top=include_top,
+                record_video=record_video,
+            )
+
+        # 카메라 목록 결정
+        if cameras is None:
+            cameras = []
+            if include_top:
+                cameras.append(TOP_CAMERA_ID)
+            if zone_id is not None:
+                cameras.append(zone_id + 1)  # Zone 0 → cam_1
+            else:
+                cameras.extend(ZONE_CAMERA_IDS)
+
+        session_id = self._media_recorder.create_session(cameras)
+
+        if record_video:
+            self._media_recorder.start_video_recording(session_id)
+
+        return session_id
+
+    def stop_recording(self) -> Optional[Dict[str, Any]]:
+        """
+        녹화 중지.
+
+        Returns:
+            세션 정보
+        """
+        if self._event_recorder:
+            return self._event_recorder.stop_event_recording()
+        return None
+
+    def capture_snapshot(
+        self,
+        session_id: Optional[str] = None,
+        zone_id: Optional[int] = None,
+        all_cameras: bool = False,
+    ) -> Dict[int, str]:
+        """
+        스냅샷 캡처.
+
+        Args:
+            session_id: 기존 세션에 저장 (없으면 새 세션 생성)
+            zone_id: Zone ID (None이면 Top만)
+            all_cameras: 모든 카메라 캡처
+
+        Returns:
+            {camera_id: image_path} 매핑
+        """
+        if not self._media_recorder:
+            self.init_media_recorder()
+
+        # 카메라 목록 결정
+        cameras = []
+        if all_cameras:
+            cameras = ALL_CAMERA_IDS.copy()
+        elif zone_id is not None:
+            cameras = [TOP_CAMERA_ID, zone_id + 1]
+        else:
+            cameras = [TOP_CAMERA_ID]
+
+        # 세션이 없으면 생성
+        if not session_id:
+            session_id = self._media_recorder.create_session(cameras)
+
+        # 프레임 캡처
+        frames: Dict[int, Any] = {}
+        for cam_id in cameras:
+            if cam_id in self._cameras:
+                frame = self._cameras[cam_id].get_frame()
+                if frame is not None:
+                    frames[cam_id] = frame
+
+        # 이미지 저장
+        return self._media_recorder.save_images_batch(session_id, frames)
+
+    def write_video_frames(self, session_id: str) -> int:
+        """
+        현재 모든 카메라 프레임을 영상에 기록.
+
+        Args:
+            session_id: 세션 ID
+
+        Returns:
+            기록된 프레임 수
+        """
+        if not self._media_recorder:
+            return 0
+
+        session = self._media_recorder._sessions.get(session_id)
+        if not session:
+            return 0
+
+        count = 0
+        for cam_id in session.cameras:
+            if cam_id in self._cameras:
+                frame = self._cameras[cam_id].get_frame()
+                if frame is not None:
+                    if self._media_recorder.write_video_frame(session_id, cam_id, frame):
+                        count += 1
+
+        return count
+
+    def get_recording_paths(self, session_id: str) -> Dict[str, str]:
+        """
+        녹화 세션 경로 조회.
+
+        Args:
+            session_id: 세션 ID
+
+        Returns:
+            경로 정보
+        """
+        if not self._media_recorder:
+            return {}
+
+        return self._media_recorder.get_session_paths(session_id)
+
+    def close_recording_session(self, session_id: str) -> Dict[str, Any]:
+        """
+        녹화 세션 종료.
+
+        Args:
+            session_id: 세션 ID
+
+        Returns:
+            세션 정보
+        """
+        if not self._media_recorder:
+            return {}
+
+        return self._media_recorder.close_session(session_id)
+
+    @property
+    def is_recording(self) -> bool:
+        """녹화 중 여부"""
+        if self._event_recorder:
+            return self._event_recorder.is_recording
+        return False

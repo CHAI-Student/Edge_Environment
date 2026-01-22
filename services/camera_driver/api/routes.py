@@ -160,3 +160,148 @@ async def health_check() -> HealthResponse:
         streaming=manager.is_streaming,
         connected_cameras=manager.connected_count,
     )
+
+
+# =========================================================================
+# 녹화 API 엔드포인트
+# =========================================================================
+
+
+@router.post("/recording/start")
+async def start_recording(
+    zone_id: Optional[int] = None,
+    include_top: bool = True,
+    record_video: bool = True,
+    base_path: Optional[str] = None,
+) -> dict:
+    """
+    녹화 시작.
+
+    Args:
+        zone_id: Zone ID (0-4, None이면 전체)
+        include_top: Top 카메라 포함 여부
+        record_video: 영상 녹화 여부
+        base_path: 저장 기본 경로
+
+    Returns:
+        세션 ID 및 경로 정보
+    """
+    manager = get_manager()
+
+    if base_path:
+        manager.init_media_recorder(base_path=base_path)
+    elif not manager._media_recorder:
+        manager.init_media_recorder()
+
+    session_id = manager.start_recording(
+        zone_id=zone_id,
+        include_top=include_top,
+        record_video=record_video,
+    )
+
+    if not session_id:
+        raise HTTPException(status_code=500, detail="Failed to start recording")
+
+    paths = manager.get_recording_paths(session_id)
+
+    return {
+        "success": True,
+        "session_id": session_id,
+        "zone_id": zone_id,
+        "record_video": record_video,
+        "paths": paths,
+    }
+
+
+@router.post("/recording/stop")
+async def stop_recording() -> dict:
+    """
+    녹화 중지.
+
+    Returns:
+        세션 정보 (저장된 파일 경로 등)
+    """
+    manager = get_manager()
+
+    if not manager.is_recording:
+        raise HTTPException(status_code=400, detail="No active recording")
+
+    result = manager.stop_recording()
+
+    if not result:
+        raise HTTPException(status_code=500, detail="Failed to stop recording")
+
+    return {
+        "success": True,
+        "session_info": result,
+    }
+
+
+@router.post("/recording/snapshot")
+async def capture_snapshot(
+    zone_id: Optional[int] = None,
+    all_cameras: bool = False,
+    session_id: Optional[str] = None,
+) -> dict:
+    """
+    스냅샷 캡처.
+
+    Args:
+        zone_id: Zone ID (0-4)
+        all_cameras: 모든 카메라 캡처
+        session_id: 기존 세션에 저장 (없으면 새 세션)
+
+    Returns:
+        저장된 이미지 경로 정보
+    """
+    manager = get_manager()
+
+    if zone_id is not None and (zone_id < 0 or zone_id > 4):
+        raise HTTPException(status_code=400, detail="zone_id must be 0-4")
+
+    saved_paths = manager.capture_snapshot(
+        session_id=session_id,
+        zone_id=zone_id,
+        all_cameras=all_cameras,
+    )
+
+    return {
+        "success": True,
+        "saved_count": len(saved_paths),
+        "images": {f"cam_{k}": v for k, v in saved_paths.items()},
+    }
+
+
+@router.get("/recording/status")
+async def get_recording_status() -> dict:
+    """녹화 상태 조회."""
+    manager = get_manager()
+
+    return {
+        "is_recording": manager.is_recording,
+        "has_media_recorder": manager._media_recorder is not None,
+    }
+
+
+@router.post("/recording/session/{session_id}/close")
+async def close_session(session_id: str) -> dict:
+    """
+    녹화 세션 종료.
+
+    Args:
+        session_id: 세션 ID
+
+    Returns:
+        세션 정보
+    """
+    manager = get_manager()
+
+    result = manager.close_recording_session(session_id)
+
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    return {
+        "success": True,
+        "session_info": result,
+    }
