@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-const { ProductUpload } = require("../model/ProductUpload");
+const { ProductUpload } = require("../../model/ProductUpload");
 const crypto = require("crypto");
 const path = require("path");
 const Minio = require("minio");
@@ -10,9 +10,6 @@ const config = require("../../config/key");
 //=================================
 //           ProductUpload
 //=================================
-
-const minioClient = req.app.locals.minioClient;
-const BUCKET = req.app.locals.minioBucket || "chaiimage";
 
 // multer: 메모리로 받아서 MinIO로 바로 업로드
 // const upload = multer({ storage: multer.memoryStorage() }).array("files", 2000);
@@ -51,6 +48,10 @@ function putObjectAsync(minioClient, bucket, key, buffer, meta) {
 }
 // MinIO Upload
 router.post("/uploads/images", (req, res) => {
+
+    const minioClient = req.app.locals.minioClient;
+    const BUCKET = req.app.locals.minioBucket || "chaiimage";
+    
     upload(req, res, async (err) => {
         try {
             if (err) return res.status(400).json({ success: false, err: String(err) });

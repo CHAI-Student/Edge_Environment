@@ -4,18 +4,6 @@ const Schema = mongoose.Schema;
 const productUploadSchema = mongoose.Schema({
     //mongoDB 고유 id값
     productMetaIdx: mongoose.Schema.Types.ObjectId,
-    //PNT에 등록된 매장 고유번호 (FK)
-    divisionIdx: {
-        type: String,
-    },
-    //배포 모델 버전 (매장별)
-    modelVersion: {
-        type: String
-    },
-    //매장 별 모델 배포 브런치 정보(CI/CD)
-    brunchName: {
-        type: String
-    },
     //PNT에 등록된 상품 고유번호 (FK)
     productIdx: {
         type: String,
@@ -32,10 +20,6 @@ const productUploadSchema = mongoose.Schema({
     isNew: {
         type: String,
     },
-    //상품 학습 상태 정보 (매장별)
-    trainingStatus: {
-        type: String
-    },
     //상품 영문명
     productEngName: {
         type: String
@@ -43,11 +27,6 @@ const productUploadSchema = mongoose.Schema({
     //상품 로드셀 무게 정보
     productLoadcellWeight: {
         type: String
-    },
-    //어노테이션 정보
-    productAnnotation: {
-        type: Schema.Types.ObjectId,
-        ref: "ProductAnnotation",
     },
     //이미지 스냅샷 폴더명
     foldername: {
@@ -60,16 +39,6 @@ const productUploadSchema = mongoose.Schema({
     //이미지 스냅샷 전체 장 수
     filelength: {
         type: Number
-    },
-    //학습 시작일
-    trainingDate: {
-        type: Date,
-        default: Date.now
-    },
-    //재학습 시작일
-    retrainingDate: {
-        type: Date,
-        default: Date.now
     },
     //상품 등록일(이미지가 DB에 저장된 날)
     createDate: {
