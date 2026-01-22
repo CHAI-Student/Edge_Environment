@@ -1,14 +1,13 @@
 require("dotenv").config();
 const axios = require("axios");
 const config = require("../../config/key");
-const { v4: uuidv4 } = require("uuid");
-const { devAutoLogin } = require("../auth");
-const { HealthMqtt } = require("../Mqtt/HealthMqtt");
+const { callCardTerminalStatusApi, callIOStatusApi } = require("../Mqtt/HealthMqtt");
+const { callApiToControlDoor } = require('../Mqtt/DoorApiService')
 const { ProductList } = require("./ProductList");
 const fs = require("fs");
 const path = require("path");
 
-function makeTimestampFolderName(d = new Date()) {
+function FolderName(d = new Date()) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
@@ -18,11 +17,11 @@ function makeTimestampFolderName(d = new Date()) {
   return `${yyyy}${mm}${dd}_${HH}${MM}${SS}`;
 }
 
-function ensureCaptureFolder({ localRoot } = {}) {
+function MakeCameraFolder({ localRoot } = {}) {
   if (!localRoot) throw new Error("localRoot is required");
   console.log('localRoot', localRoot)
 
-  const folderName = makeTimestampFolderName();
+  const folderName = FolderName();
   const folderPath = path.join(localRoot, folderName);
 
   fs.mkdirSync(folderPath, { recursive: true });
@@ -30,7 +29,7 @@ function ensureCaptureFolder({ localRoot } = {}) {
   return { folderName, folderPath };
 }
 
-async function requestTopCameraCapture({cameraUrl, folderPath,
+async function requestCamera({cameraUrl, folderPath,
 }) {
   if (!cameraUrl) throw new Error("cameraServerBaseUrl is required");
   if (!folderPath) throw new Error("folderPath is required");
@@ -47,30 +46,36 @@ async function Payments() {
     // 토큰 생성 확인 전달 (sensor → node)
 
     // 냉장고 상태 체크 + 상품정보(IF11) 뷸러오기
-    // const deviceHealthCheck = await HealthMqtt(body);
-    // console.log('deviceHealthCheck', deviceHealthCheck)
-    const productData = await ProductList({
-        division_idx: divisionIdx,
-        device_idx: deviceIdx
-    })
-    console.log("[ProductList] response:");
-    console.dir(productData, { depth: null });
+    const apiCardTerminalStatus = await callCardTerminalStatusApi();
+    const apiDeadboltStatus = await callIOStatusApi();
+    if (apiCardTerminalStatus == '39' && apiDeadboltStatus == '19') {
+        console.log('[HEALTH-CHECK] status is ok')
+        const productData = await ProductList({
+            division_idx: divisionIdx,
+            device_idx: deviceIdx
+        })
+        console.log("[ProductList] response:");
+        console.dir(productData, { depth: null });
+        return productData;
+    } else {
+        console.log('[HEALTH-CHECK] the status is bad, it cannot run')
+    }
 
     // 상단 카메라 request (node → sensor) + 폴더경로 지정
     const LOCAL_ROOT = path.resolve(process.cwd()); 
     // 1) 폴더 생성
-    const { folderName, folderPath } = ensureCaptureFolder({ localRoot: LOCAL_ROOT });
-    console.log("[CaptureFolder]", { folderName, folderPath });
+    const { folderName, folderPath } = MakeCameraFolder({ localRoot: LOCAL_ROOT });
+    console.log("[CameraFolder]", { folderName, folderPath });
     // 카메라 실행
     // 2) 상단 카메라 서버로 저장 경로 전달 + 촬영 요청
     const cameraUrl = config.cameraUrl
 
-    const camRes = await requestTopCameraCapture({
+    const camRes = await requestCamera({
         cameraUrl,
         folderPath,
     });
 
-    console.log("[TopCamera] response:");
+    console.log("[Camera] response:");
     console.dir(camRes, { depth: null });
 
     // 데드볼트 request (node → sensor)
