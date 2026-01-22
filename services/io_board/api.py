@@ -353,6 +353,21 @@ async def handle_loadcells() -> LoadCellsResponse:
 
 
 @app.get(
+    "/health",
+    summary="Health check",
+    description="Health check endpoint for Docker healthcheck and service monitoring.",
+    tags=["System"],
+)
+async def health_check():
+    """Health check endpoint matching Node.js format."""
+    return {
+        "status": "healthy",
+        "service": "io_board",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+@app.get(
     "/status",
     response_model=IOStatusResponse,
     responses={

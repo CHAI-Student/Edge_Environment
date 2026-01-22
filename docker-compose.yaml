@@ -160,6 +160,15 @@ services:
       - CAMERA_URL=http://camera_driver:8003
       - CARD_TERMINAL_URL=http://card_terminal:8004
       - MQTT_CLIENT_URL=http://mqtt_client:8006
+    depends_on:
+      io_board:
+        condition: service_healthy
+      model:
+        condition: service_healthy
+      camera_driver:
+        condition: service_healthy
+      mqtt_client:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8888/health"]

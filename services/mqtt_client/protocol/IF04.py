@@ -1,3 +1,5 @@
+import time
+import uuid
 from typing import Literal
 
 from aiomqtt.types import PayloadType
@@ -11,16 +13,22 @@ from .protocol import *
 
 
 IF_ID = "IF_04"
-IF_SYSID = "45BDA-12A3DASD-1231-1E12-3123D3DAZ23"
-IF_HOST = "CRKPNTCHAI"
-IF_DATE = "20240503152229"
+IF_HOST = "CHAI"  # Match Node.js ManualDoor.js IF_HOST
 
-HEADER = {
-    "IF_ID": IF_ID,
-    "IF_SYSID": IF_SYSID,
-    "IF_HOST": IF_HOST,
-    "IF_DATE": IF_DATE,
-}
+
+def make_header(if_sysid: str | None = None) -> dict:
+    """Create dynamic header matching Node.js format.
+
+    Node.js uses:
+    - IF_SYSID: uuid or echo from request
+    - IF_DATE: Unix timestamp (milliseconds)
+    """
+    return {
+        "IF_ID": IF_ID,
+        "IF_SYSID": if_sysid or str(uuid.uuid4()),
+        "IF_HOST": IF_HOST,
+        "IF_DATE": int(time.time() * 1000),  # Unix timestamp in ms like Node.js Date.now()
+    }
 
 
 class CollectDoorReqData(ReqData):
@@ -47,6 +55,7 @@ class CollectDoorAckMessage(BaseModel):
 @core.router.register(
     subscribe_topic="chai/device/{DEVICE_ID}/cmd/door/collect",
     publish_topic="chai/device/{DEVICE_ID}/ack/door/collect",
+    qos=1,  # Match Node.js QoS for door control
 )
 async def collect_door_handler(payload: PayloadType):
     if not isinstance(payload, (str, bytes, bytearray)):
@@ -57,12 +66,15 @@ async def collect_door_handler(payload: PayloadType):
     except ValidationError as e:
         return None
 
-    # TODO: Implement collect door logic
+    # Echo IF_SYSID from request (like Node.js ManualDoor.js)
+    if_sysid = req_message.HEADER.IF_SYSID
     door_state = req_message.DATA.door_state
+
+    # TODO: Implement actual collect door logic via io_board API
 
     return CollectDoorAckMessage.model_validate(
         {
-            "HEADER": HEADER,
+            "HEADER": make_header(if_sysid),  # Dynamic header with echoed IF_SYSID
             "DATA": {
                 "division_idx": settings.division_idx,
                 "device_idx": settings.device_idx,
