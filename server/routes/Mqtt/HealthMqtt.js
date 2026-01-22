@@ -5,7 +5,7 @@ const axios = require("axios"); // ✅ API 통신을 위한 라이브러리
 
 const PAYMENT_API_URL = "http://localhost:8001/status"; 
 
-async function callApiToControlDoor() {
+async function callCardTerminalStatusApi() {
   try {
     console.log(`[API] Sending Request to ${PAYMENT_API_URL}`);
 
@@ -18,10 +18,17 @@ async function callApiToControlDoor() {
 
     // API 응답 확인 (서버가 반환한 최종 상태)
     // Python 서버는 { "state": "OPEN" } 형태를 반환함
-    const finalState = response.data.response_code;
-    console.log(`[API] Response Received. Final State: ${finalState}`);
-    
-    return finalState;
+    const CardTerminalStatus = response.data.response_code;
+    if (CardTerminalStatus == "OPEN") { // 카드단말기가 이상이 없으면 OPEN으로 온다는 가정 
+      const CardTerminalStatus = '39'
+      console.log(`[API] Response Received. Card Tenminal Final State Code: ${CardTerminalStatus}`);
+      return CardTerminalStatus
+    }
+    else{ // 이 부분은 정확히 무슨 문제가 있으면 해당 코드를 보낸다라는 가정문이 추가되어야 할거 같음. 지금은 몰라서 에러 코드값인 41로 하였음
+      const CardTerminalStatus = "41"
+      console.log(`[API] Response Received. Card Tenminal Final State Code: ${CardTerminalStatus}`);
+      return CardTerminalStatus
+    }
 
   } catch (error) {
     // 에러 발생 시 상세 내용 출력
@@ -39,7 +46,7 @@ async function callApiToControlDoor() {
 
 const IO_BOARD_API_URL = "http://localhost:8000/status"; 
 
-async function callApiToControlIO() {
+async function callIOStatusApi() {
   try {
     console.log(`[API] Sending Request to ${IO_BOARD_API_URL}`);
 
@@ -54,14 +61,17 @@ async function callApiToControlIO() {
     // Python 서버는 { "state": "OPEN" } 형태를 반환함
     
     if (response.data.door == 'CLOSED' && response.data.deadbolt == 'LOCKED') {
-      const DeadboltState = '0';
+      const DeadboltState = '19';
       // { ..., "loadcells": "HEALTHY" or "UNHEALTHY"}
       // camera: { "status": "ok" or "error", "device_count": <connected device count>}
-      console.log(`[API] Response Received. Final State: ${DeadboltState}`);
+      console.log(`[API] Response Received. Deadbolt Final State Code: ${DeadboltState}`);
       return DeadboltState;
     }
-    
-    return DeadboltState;
+    else{
+      const DeadboltState = '20'; // 이 부분은 정확히 무슨 문제가 있으면 해당 코드를 보낸다라는 가정문이 추가되어야 할거 같음. 지금은 몰라서 에러 코드값인 20으로 하였음
+      console.log(`[API] Response Received. Deadbolt Final State Code: ${DeadboltState}`);
+      return DeadboltState;
+    }
 
   } catch (error) {
     // 에러 발생 시 상세 내용 출력
@@ -82,8 +92,12 @@ async function HealthMqtt() {
   const deviceIdx = config.deviceIdx
   const divisionIdx = config.divisionIdx
 
-  const apiResultState = await callApiToControlDoor();
+  const apiCardTerminalStatus = await callCardTerminalStatusApi();
+  const apiDeadboltStatus = await callIOStatusApi();
   //나중에 await 처리 하기
+
+  const apiLoadcellStatus = "29" // 현재는 값을 못불러오니, 이렇게 지정
+  const apiCameraStatus = "09" // 현재는 값을 못불러오니, 이렇게 지정
 
   // publish
   const healthCheck = `chai/device/${deviceIdx}/health` // healthcare
@@ -103,14 +117,16 @@ async function HealthMqtt() {
         IF_DATE: timestamp,
       };
 
+      const IOBoardStatus = (apiDeadboltStatus == "19" && apiLoadcellStatus == "29") ? "49" : "41";
+
       const body = {
         device_idx: deviceIdx,
         division_idx: divisionIdx,
-        camera_status: "09",
-        deadbolt_status: "19",
-        loadcell_status: "29",
-        card_terminal_status: "39",
-        edgepc_status: "49"
+        camera_status: apiCameraStatus,
+        deadbolt_status: apiDeadboltStatus,
+        loadcell_status: apiLoadcellStatus,
+        CardTerminalStatus: apiCardTerminalStatus,
+        ioboard_status: IOBoardStatus
       };
 
       const payload = JSON.stringify({ HEADER: header, DATA: body });
