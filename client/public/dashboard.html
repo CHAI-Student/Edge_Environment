@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CHAI Edge Dashboard</title>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-card: #0f3460;
+            --bg-card-hover: #1a4a80;
+            --text-primary: #eaeaea;
+            --text-secondary: #a0a0a0;
+            --accent: #e94560;
+            --accent-hover: #c73e54;
+            --success: #4ade80;
+            --warning: #fbbf24;
+            --error: #ef4444;
+            --border: #2a3f5f;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header */
+        .header {
+            background: var(--bg-secondary);
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            color: var(--accent);
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .service-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: var(--bg-card);
+            border-radius: 16px;
+            font-size: 12px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.healthy { background: var(--success); }
+        .status-dot.unhealthy { background: var(--error); }
+        .status-dot.unknown { background: var(--warning); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Main Layout */
+        .main-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .left-panel {
+            width: 380px;
+            min-width: 380px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .right-panel {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .card-header {
+            padding: 12px 15px;
+            border-bottom: 1px solid var(--border);
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-body {
+            padding: 15px;
+        }
+
+        /* Zone Grid */
+        .zones-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 8px;
+        }
+
+        .zone-card {
+            background: var(--bg-card);
+            padding: 12px 8px;
+            border-radius: 6px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+
+        .zone-card:hover {
+            background: var(--bg-card-hover);
+        }
+
+        .zone-card.active {
+            border-color: var(--success);
+        }
+
+        .zone-card .zone-id {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .zone-card .weight {
+            font-size: 18px;
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+        }
+
+        .zone-card .channels {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        /* Loadcells Grid */
+        .loadcells-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 6px;
+        }
+
+        .loadcell-item {
+            background: var(--bg-card);
+            padding: 8px;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .loadcell-item .channel {
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        .loadcell-item .value {
+            font-size: 14px;
+            font-family: 'Courier New', monospace;
+            margin-top: 2px;
+        }
+
+        /* Door Panel */
+        .door-status {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .door-indicator {
+            flex: 1;
+            background: var(--bg-card);
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .door-indicator .label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .door-indicator .state {
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .door-indicator .state.open { color: var(--success); }
+        .door-indicator .state.closed { color: var(--error); }
+
+        .door-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        /* Buttons */
+        button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.2s;
+            flex: 1;
+        }
+
+        button:hover {
+            background: var(--accent-hover);
+        }
+
+        button:disabled {
+            background: var(--bg-card);
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        button.secondary {
+            background: var(--bg-card);
+        }
+
+        button.secondary:hover {
+            background: var(--bg-card-hover);
+        }
+
+        button.success {
+            background: var(--success);
+            color: #000;
+        }
+
+        /* Camera Grid */
+        .camera-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+
+        .camera-item {
+            background: var(--bg-card);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .camera-header {
+            padding: 8px 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .camera-name {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .camera-preview {
+            height: 120px;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            font-size: 11px;
+        }
+
+        .camera-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* Model Test Panel */
+        .model-test-form {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .form-row label {
+            width: 100px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .form-row input, .form-row select {
+            flex: 1;
+            padding: 8px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+
+        .form-row input:focus, .form-row select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .test-result {
+            margin-top: 15px;
+            padding: 15px;
+            background: var(--bg-card);
+            border-radius: 6px;
+            display: none;
+        }
+
+        .test-result.show {
+            display: block;
+        }
+
+        .test-result .result-header {
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .test-result .result-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 13px;
+        }
+
+        /* Event Log */
+        .event-log {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .event-item {
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .event-item:last-child {
+            border-bottom: none;
+        }
+
+        .event-item .time {
+            color: var(--text-secondary);
+            font-size: 11px;
+            min-width: 70px;
+        }
+
+        .event-item .type {
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+
+        .event-item .type.weight { background: #3b82f6; }
+        .event-item .type.door { background: #8b5cf6; }
+        .event-item .type.judgment { background: #10b981; }
+        .event-item .type.system { background: #6b7280; }
+
+        .event-item .delta {
+            font-family: 'Courier New', monospace;
+        }
+
+        .event-item .delta.negative { color: var(--error); }
+        .event-item .delta.positive { color: var(--success); }
+
+        /* Log Viewer Footer */
+        .log-viewer {
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+            max-height: 250px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .log-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .log-tab {
+            padding: 10px 20px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .log-tab:hover {
+            color: var(--text-primary);
+            background: var(--bg-card);
+        }
+
+        .log-tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+
+        .log-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 15px;
+        }
+
+        .log-table {
+            width: 100%;
+            font-size: 11px;
+            border-collapse: collapse;
+        }
+
+        .log-table th {
+            text-align: left;
+            padding: 6px 8px;
+            color: var(--text-secondary);
+            font-weight: normal;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            background: var(--bg-secondary);
+        }
+
+        .log-table td {
+            padding: 6px 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .log-table tr:hover {
+            background: var(--bg-card);
+        }
+
+        /* Quick Stats */
+        .quick-stats {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .stat-item {
+            flex: 1;
+            background: var(--bg-card);
+            padding: 12px;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .stat-item .value {
+            font-size: 20px;
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+        }
+
+        .stat-item .label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        /* Products List */
+        .products-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .product-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+        }
+
+        .product-item:hover {
+            background: var(--bg-card);
+        }
+
+        .product-item .name {
+            flex: 1;
+        }
+
+        .product-item .weight {
+            color: var(--text-secondary);
+            margin-left: 10px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .product-item .price {
+            color: var(--success);
+            margin-left: 10px;
+            font-family: 'Courier New', monospace;
+        }
+
+        /* Config Section */
+        .config-list {
+            font-size: 12px;
+        }
+
+        .config-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .config-item:last-child {
+            border-bottom: none;
+        }
+
+        .config-item .key {
+            color: var(--text-secondary);
+        }
+
+        .config-item .value {
+            font-family: 'Courier New', monospace;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-secondary);
+        }
+
+        /* Controls Row */
+        .controls-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .controls-row button {
+            flex: none;
+            padding: 8px 12px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <h1>CHAI Edge Dashboard</h1>
+        <div class="status-bar" id="status-bar">
+            <div class="service-badge">
+                <span class="status-dot" id="io-board-dot"></span>
+                <span>IO Board</span>
+            </div>
+            <div class="service-badge">
+                <span class="status-dot" id="camera-dot"></span>
+                <span>Camera</span>
+            </div>
+            <div class="service-badge">
+                <span class="status-dot" id="model-dot"></span>
+                <span>Model</span>
+            </div>
+            <div class="service-badge">
+                <span class="status-dot" id="node-dot"></span>
+                <span>Node.js</span>
+            </div>
+            <div class="service-badge">
+                <span class="status-dot" id="mongodb-dot"></span>
+                <span>MongoDB</span>
+            </div>
+            <div class="service-badge">
+                <span class="status-dot" id="sse-dot"></span>
+                <span>SSE</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Left Panel -->
+        <aside class="left-panel">
+            <!-- Zone Monitor -->
+            <div class="card">
+                <div class="card-header">
+                    Zones
+                    <span id="total-weight" style="color: var(--accent);">0g</span>
+                </div>
+                <div class="card-body">
+                    <div class="zones-grid" id="zones-grid"></div>
+                </div>
+            </div>
+
+            <!-- Raw Loadcells -->
+            <div class="card">
+                <div class="card-header">Raw Loadcells</div>
+                <div class="card-body">
+                    <div class="loadcells-grid" id="loadcells-grid"></div>
+                </div>
+            </div>
+
+            <!-- Door Status -->
+            <div class="card">
+                <div class="card-header">Door Control</div>
+                <div class="card-body">
+                    <div class="door-status">
+                        <div class="door-indicator">
+                            <div class="label">Door</div>
+                            <div class="state" id="door-state">--</div>
+                        </div>
+                        <div class="door-indicator">
+                            <div class="label">Deadbolt</div>
+                            <div class="state" id="deadbolt-state">--</div>
+                        </div>
+                    </div>
+                    <div class="door-controls">
+                        <button onclick="unlockDeadbolt()">Unlock</button>
+                        <button onclick="lockDeadbolt()" class="secondary">Lock</button>
+                        <button onclick="toggleDeadbolt()" class="secondary">Toggle</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="card">
+                <div class="card-header">Controls</div>
+                <div class="card-body">
+                    <div class="controls-row">
+                        <button onclick="resetBaseline()">Reset Baseline</button>
+                        <button onclick="refreshStatus()" class="secondary">Refresh</button>
+                        <button onclick="initCameras()" class="secondary">Init Cameras</button>
+                    </div>
+                    <div class="config-list" style="margin-top: 15px;">
+                        <div class="config-item">
+                            <span class="key">Nvidia Mode</span>
+                            <span class="value" id="nvidia-mode">-</span>
+                        </div>
+                        <div class="config-item">
+                            <span class="key">Weight Threshold</span>
+                            <span class="value" id="weight-threshold">-</span>
+                        </div>
+                        <div class="config-item">
+                            <span class="key">Active Zones</span>
+                            <span class="value" id="active-zones">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Right Panel -->
+        <section class="right-panel">
+            <!-- Camera Grid -->
+            <div class="card">
+                <div class="card-header">Cameras</div>
+                <div class="card-body">
+                    <div class="camera-grid" id="camera-grid"></div>
+                </div>
+            </div>
+
+            <!-- Model Test Panel -->
+            <div class="card">
+                <div class="card-header">
+                    Model Test
+                    <span id="model-info" style="font-size: 11px; color: var(--text-secondary);">Loading...</span>
+                </div>
+                <div class="card-body">
+                    <div class="model-test-form">
+                        <div class="form-row">
+                            <label>Zone</label>
+                            <select id="test-zone">
+                                <option value="0">Zone 0</option>
+                                <option value="1">Zone 1</option>
+                                <option value="2">Zone 2</option>
+                                <option value="3">Zone 3</option>
+                                <option value="4">Zone 4</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label>Delta Weight</label>
+                            <input type="number" id="test-delta" value="-520" placeholder="e.g., -520">
+                            <span style="color: var(--text-secondary); font-size: 12px;">g</span>
+                        </div>
+                        <div class="form-row">
+                            <label></label>
+                            <button onclick="runModelTest()" style="flex: none; width: 120px;">Run Test</button>
+                            <button onclick="runTestWorkflow()" class="success" style="flex: none; width: 150px;">Full Workflow</button>
+                        </div>
+                    </div>
+                    <div class="test-result" id="test-result">
+                        <div class="result-header">Judgment Result</div>
+                        <div id="result-content"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Event Log -->
+            <div class="card">
+                <div class="card-header">
+                    Real-time Events
+                    <button onclick="clearEventLog()" class="secondary" style="padding: 4px 8px; font-size: 11px;">Clear</button>
+                </div>
+                <div class="card-body">
+                    <div class="event-log" id="event-log">
+                        <div style="text-align: center; color: var(--text-secondary); padding: 20px;">
+                            Waiting for events...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Log Viewer Footer -->
+    <footer class="log-viewer">
+        <nav class="log-tabs">
+            <div class="log-tab active" onclick="switchLogTab('weight')">Weight Log</div>
+            <div class="log-tab" onclick="switchLogTab('camera')">Camera Log</div>
+            <div class="log-tab" onclick="switchLogTab('system')">System Log</div>
+            <div class="log-tab" onclick="switchLogTab('judgment')">Judgment Log</div>
+        </nav>
+        <div class="log-content" id="log-content">
+            <table class="log-table" id="log-table">
+                <thead id="log-table-head"></thead>
+                <tbody id="log-table-body"></tbody>
+            </table>
+        </div>
+    </footer>
+
+    <script>
+        // Configuration
+        const API_BASE = window.location.origin;
+        let eventSource = null;
+        let lastWeights = [];
+        const eventLog = [];
+        const MAX_EVENTS = 100;
+        let currentLogTab = 'weight';
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            initZones();
+            initLoadcells();
+            initCameraGrid();
+            connectSSE();
+            fetchDashboardStatus();
+            fetchModelInfo();
+            loadLogTab('weight');
+
+            // Periodic status refresh
+            setInterval(fetchDashboardStatus, 10000);
+            setInterval(loadLogTab.bind(null, currentLogTab), 30000);
+        });
+
+        // Initialize zones
+        function initZones() {
+            const container = document.getElementById('zones-grid');
+            container.innerHTML = '';
+            for (let i = 0; i < 5; i++) {
+                const zone = document.createElement('div');
+                zone.className = 'zone-card';
+                zone.id = `zone-${i}`;
+                zone.innerHTML = `
+                    <div class="zone-id">Zone ${i}</div>
+                    <div class="weight" id="zone-${i}-weight">0</div>
+                    <div class="channels">CH ${i*2}, ${i*2+1}</div>
+                `;
+                zone.onclick = () => toggleZoneCamera(i);
+                container.appendChild(zone);
+            }
+        }
+
+        // Initialize loadcells
+        function initLoadcells() {
+            const container = document.getElementById('loadcells-grid');
+            container.innerHTML = '';
+            for (let i = 0; i < 10; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'loadcell-item';
+                cell.innerHTML = `
+                    <div class="channel">CH ${i}</div>
+                    <div class="value" id="loadcell-${i}">0</div>
+                `;
+                container.appendChild(cell);
+            }
+        }
+
+        // Initialize cameras
+        function initCameraGrid() {
+            const container = document.getElementById('camera-grid');
+            container.innerHTML = '';
+            const cameraNames = ['Top Camera', 'Zone 0 Side', 'Zone 1 Side', 'Zone 2 Side', 'Zone 3 Side', 'Zone 4 Side'];
+            for (let i = 0; i < 6; i++) {
+                const cam = document.createElement('div');
+                cam.className = 'camera-item';
+                cam.innerHTML = `
+                    <div class="camera-header">
+                        <span class="camera-name">${cameraNames[i]}</span>
+                        <span class="status-dot unknown" id="cam-${i}-status"></span>
+                    </div>
+                    <div class="camera-preview" id="cam-${i}-preview">No preview</div>
+                `;
+                container.appendChild(cam);
+            }
+        }
+
+        // Connect to SSE
+        function connectSSE() {
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            eventSource = new EventSource(`${API_BASE}/sse/events`);
+
+            eventSource.onopen = () => {
+                setServiceStatus('sse-dot', true);
+            };
+
+            eventSource.onerror = () => {
+                setServiceStatus('sse-dot', false);
+                setTimeout(connectSSE, 5000);
+            };
+
+            // Loadcell updates
+            eventSource.addEventListener('loadcell_update', (e) => {
+                const data = JSON.parse(e.data);
+                updateLoadcells(data.weights || data.raw_values || data.filtered_values);
+            });
+
+            // Weight change events
+            eventSource.addEventListener('weight_change', (e) => {
+                const data = JSON.parse(e.data);
+                addEventToLog('weight', data);
+                highlightZone(data.zone_id);
+            });
+
+            // Door updates
+            eventSource.addEventListener('door_update', (e) => {
+                const data = JSON.parse(e.data);
+                updateDoorStatus(data.door, data.deadbolt);
+            });
+
+            // Door events
+            eventSource.addEventListener('door_opened', (e) => {
+                addEventToLog('door', { event: 'Door Opened', ...JSON.parse(e.data) });
+            });
+
+            eventSource.addEventListener('door_closed', (e) => {
+                addEventToLog('door', { event: 'Door Closed', ...JSON.parse(e.data) });
+            });
+
+            eventSource.addEventListener('deadbolt_changed', (e) => {
+                const data = JSON.parse(e.data);
+                addEventToLog('door', { event: `Deadbolt: ${data.previous} -> ${data.current}`, ...data });
+            });
+
+            // Connection events
+            eventSource.addEventListener('connected', () => {
+                console.log('SSE connected');
+            });
+
+            eventSource.addEventListener('io_board_connected', () => {
+                setServiceStatus('io-board-dot', true);
+            });
+
+            eventSource.addEventListener('io_board_disconnected', () => {
+                setServiceStatus('io-board-dot', false);
+            });
+        }
+
+        // Update loadcell display
+        function updateLoadcells(weights) {
+            if (!weights) return;
+            lastWeights = weights;
+
+            let totalWeight = 0;
+            weights.forEach((weight, i) => {
+                const el = document.getElementById(`loadcell-${i}`);
+                if (el) {
+                    const val = parseFloat(weight) || 0;
+                    el.textContent = val.toFixed(0);
+                    totalWeight += val;
+                }
+            });
+
+            // Update zone weights
+            for (let zone = 0; zone < 5; zone++) {
+                const ch1 = parseFloat(weights[zone * 2]) || 0;
+                const ch2 = parseFloat(weights[zone * 2 + 1]) || 0;
+                const total = ch1 + ch2;
+                const el = document.getElementById(`zone-${zone}-weight`);
+                if (el) {
+                    el.textContent = total.toFixed(0);
+                }
+            }
+
+            // Update total weight
+            document.getElementById('total-weight').textContent = `${totalWeight.toFixed(0)}g`;
+        }
+
+        // Update door status display
+        function updateDoorStatus(door, deadbolt) {
+            const doorEl = document.getElementById('door-state');
+            const deadboltEl = document.getElementById('deadbolt-state');
+
+            if (doorEl && door) {
+                doorEl.textContent = door;
+                doorEl.className = 'state ' + (door.toUpperCase().includes('OPEN') ? 'open' : 'closed');
+            }
+
+            if (deadboltEl && deadbolt) {
+                deadboltEl.textContent = deadbolt;
+                deadboltEl.className = 'state ' + (deadbolt.toUpperCase().includes('OPEN') ? 'open' : 'closed');
+            }
+        }
+
+        // Add event to log
+        function addEventToLog(type, data) {
+            const container = document.getElementById('event-log');
+
+            // Clear waiting message
+            if (eventLog.length === 0) {
+                container.innerHTML = '';
+            }
+
+            eventLog.unshift({ type, data, timestamp: new Date() });
+            if (eventLog.length > MAX_EVENTS) {
+                eventLog.pop();
+            }
+
+            const time = new Date().toLocaleTimeString();
+            const item = document.createElement('div');
+            item.className = 'event-item';
+
+            let content = `<span class="time">${time}</span><span class="type ${type}">${type}</span>`;
+
+            if (type === 'weight') {
+                const deltaClass = data.delta < 0 ? 'negative' : 'positive';
+                const sign = data.delta > 0 ? '+' : '';
+                content += `<span>Zone ${data.zone_id}</span><span class="delta ${deltaClass}">${sign}${data.delta?.toFixed(0) || 0}g</span>`;
+            } else if (type === 'door') {
+                content += `<span>${data.event || 'Door Event'}</span>`;
+            } else if (type === 'judgment') {
+                content += `<span>${data.product || 'Unknown'} - ${data.confidence?.toFixed(1) || 0}%</span>`;
+            }
+
+            item.innerHTML = content;
+            container.insertBefore(item, container.firstChild);
+
+            while (container.children.length > MAX_EVENTS) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        // Clear event log
+        function clearEventLog() {
+            eventLog.length = 0;
+            const container = document.getElementById('event-log');
+            container.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">Waiting for events...</div>';
+        }
+
+        // Highlight zone
+        function highlightZone(zoneId) {
+            const el = document.getElementById(`zone-${zoneId}`);
+            if (el) {
+                el.classList.add('active');
+                setTimeout(() => el.classList.remove('active'), 2000);
+            }
+        }
+
+        // Set service status
+        function setServiceStatus(elementId, healthy) {
+            const el = document.getElementById(elementId);
+            if (el) {
+                el.className = 'status-dot ' + (healthy ? 'healthy' : 'unhealthy');
+            }
+        }
+
+        // Fetch dashboard status
+        async function fetchDashboardStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/dashboard/status`);
+                const data = await response.json();
+
+                // Update services
+                const services = data.services;
+                setServiceStatus('io-board-dot', services.io_board?.healthy);
+                setServiceStatus('camera-dot', services.camera_driver?.healthy);
+                setServiceStatus('model-dot', services.model?.healthy);
+                setServiceStatus('node-dot', services.node_server?.healthy);
+                setServiceStatus('mongodb-dot', services.mongodb?.connected);
+
+                // Update door status from SSE subscriber
+                if (data.io_board_sse) {
+                    updateDoorStatus(data.io_board_sse.doorState, data.io_board_sse.deadboltState);
+                }
+
+                // Update config
+                if (data.config?.camera_device_map) {
+                    document.getElementById('nvidia-mode').textContent =
+                        data.config.camera_device_map.nvidia_mode ? 'Enabled' : 'Disabled';
+                }
+
+                if (data.io_board_sse) {
+                    document.getElementById('weight-threshold').textContent =
+                        `${data.io_board_sse.settings?.weightChangeThreshold || 50}g`;
+                    document.getElementById('active-zones').textContent =
+                        data.io_board_sse.activeZones?.length || 0;
+                }
+
+            } catch (error) {
+                console.error('Failed to fetch status:', error);
+            }
+        }
+
+        // Fetch model info
+        async function fetchModelInfo() {
+            try {
+                const response = await fetch(`${API_BASE}/api/model/info`);
+                const data = await response.json();
+
+                if (data.success) {
+                    document.getElementById('model-info').textContent =
+                        `${data.product_count} products | ${data.model_name || 'Model loaded'}`;
+                }
+            } catch (error) {
+                document.getElementById('model-info').textContent = 'Model unavailable';
+            }
+        }
+
+        // Door control functions
+        async function unlockDeadbolt() {
+            try {
+                const response = await fetch(`${API_BASE}/api/door/deadbolt/unlock`, { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    updateDoorStatus(null, 'OPEN');
+                }
+            } catch (error) {
+                console.error('Failed to unlock:', error);
+                alert('Failed to unlock deadbolt');
+            }
+        }
+
+        async function lockDeadbolt() {
+            try {
+                const response = await fetch(`${API_BASE}/api/door/deadbolt/lock`, { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    updateDoorStatus(null, 'CLOSED');
+                }
+            } catch (error) {
+                console.error('Failed to lock:', error);
+                alert('Failed to lock deadbolt');
+            }
+        }
+
+        async function toggleDeadbolt() {
+            try {
+                const response = await fetch(`${API_BASE}/api/door/deadbolt/toggle`, { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    updateDoorStatus(null, data.state);
+                }
+            } catch (error) {
+                console.error('Failed to toggle:', error);
+                alert('Failed to toggle deadbolt');
+            }
+        }
+
+        // Camera control
+        async function toggleZoneCamera(zoneId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/camera/zone/${zoneId}/activate`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                console.log('Zone activated:', data);
+            } catch (error) {
+                console.error('Failed to activate zone:', error);
+            }
+        }
+
+        async function initCameras() {
+            try {
+                await fetch('http://localhost:8003/api/init', { method: 'POST' });
+                alert('Cameras initialized');
+            } catch (error) {
+                console.error('Failed to init cameras:', error);
+                alert('Failed to initialize cameras');
+            }
+        }
+
+        // Model test
+        async function runModelTest() {
+            const zoneId = document.getElementById('test-zone').value;
+            const deltaWeight = document.getElementById('test-delta').value;
+
+            if (!deltaWeight) {
+                alert('Please enter delta weight');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/model/test`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        zone_id: parseInt(zoneId),
+                        delta_weight: parseFloat(deltaWeight)
+                    })
+                });
+
+                const data = await response.json();
+                displayTestResult(data);
+                addEventToLog('judgment', data);
+
+            } catch (error) {
+                console.error('Model test failed:', error);
+                alert('Model test failed: ' + error.message);
+            }
+        }
+
+        // Full test workflow
+        async function runTestWorkflow() {
+            const resultEl = document.getElementById('test-result');
+            const contentEl = document.getElementById('result-content');
+            resultEl.classList.add('show');
+            contentEl.innerHTML = '<div>Starting test workflow...</div>';
+
+            try {
+                // 1. Unlock deadbolt
+                contentEl.innerHTML += '<div>1. Unlocking deadbolt...</div>';
+                await fetch(`${API_BASE}/api/door/deadbolt/unlock`, { method: 'POST' });
+
+                // 2. Wait for door open
+                contentEl.innerHTML += '<div>2. Waiting for door to open...</div>';
+                await waitForDoorState('OPEN', 30000);
+
+                contentEl.innerHTML += '<div>3. Door opened! Waiting for weight change...</div>';
+
+                // 3. Wait for weight change (simulated)
+                await new Promise(resolve => setTimeout(resolve, 2000));
+
+                // 4. Run judgment
+                const zoneId = document.getElementById('test-zone').value;
+                const deltaWeight = document.getElementById('test-delta').value;
+
+                contentEl.innerHTML += '<div>4. Running judgment...</div>';
+                const response = await fetch(`${API_BASE}/api/model/test`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        zone_id: parseInt(zoneId),
+                        delta_weight: parseFloat(deltaWeight)
+                    })
+                });
+
+                const data = await response.json();
+
+                // 5. Wait for door close
+                contentEl.innerHTML += '<div>5. Waiting for door to close...</div>';
+                await waitForDoorState('CLOSED', 30000);
+
+                // 6. Lock deadbolt
+                contentEl.innerHTML += '<div>6. Locking deadbolt...</div>';
+                await fetch(`${API_BASE}/api/door/deadbolt/lock`, { method: 'POST' });
+
+                contentEl.innerHTML += '<div style="color: var(--success); margin-top: 10px;">Workflow complete!</div>';
+                displayTestResult(data);
+
+            } catch (error) {
+                contentEl.innerHTML += `<div style="color: var(--error);">Error: ${error.message}</div>`;
+            }
+        }
+
+        // Wait for door state
+        function waitForDoorState(targetState, timeout) {
+            return new Promise((resolve, reject) => {
+                const startTime = Date.now();
+
+                const checkState = () => {
+                    const doorEl = document.getElementById('door-state');
+                    if (doorEl && doorEl.textContent.toUpperCase().includes(targetState)) {
+                        resolve();
+                        return;
+                    }
+
+                    if (Date.now() - startTime > timeout) {
+                        reject(new Error(`Timeout waiting for door ${targetState}`));
+                        return;
+                    }
+
+                    setTimeout(checkState, 500);
+                };
+
+                checkState();
+            });
+        }
+
+        // Display test result
+        function displayTestResult(data) {
+            const resultEl = document.getElementById('test-result');
+            const contentEl = document.getElementById('result-content');
+
+            resultEl.classList.add('show');
+
+            if (!data.success && data.error) {
+                contentEl.innerHTML = `<div style="color: var(--error);">Error: ${data.error}</div>`;
+                return;
+            }
+
+            const items = [];
+            if (data.product_name) items.push(`<div class="result-item"><span>Product</span><span>${data.product_name}</span></div>`);
+            if (data.confidence) items.push(`<div class="result-item"><span>Confidence</span><span>${(data.confidence * 100).toFixed(1)}%</span></div>`);
+            if (data.quantity) items.push(`<div class="result-item"><span>Quantity</span><span>${data.quantity}</span></div>`);
+            if (data.total_price) items.push(`<div class="result-item"><span>Total Price</span><span>${data.total_price.toLocaleString()}</span></div>`);
+            if (data.delta_weight !== undefined) items.push(`<div class="result-item"><span>Weight Change</span><span>${data.delta_weight}g</span></div>`);
+
+            contentEl.innerHTML = items.join('') || '<div>No result data</div>';
+        }
+
+        // Reset baseline
+        async function resetBaseline() {
+            try {
+                await fetch(`${API_BASE}/api/weight/baseline/reset`, { method: 'POST' });
+                alert('Baseline reset');
+            } catch (error) {
+                console.error('Failed to reset baseline:', error);
+            }
+        }
+
+        // Refresh status
+        async function refreshStatus() {
+            await fetchDashboardStatus();
+            await fetchModelInfo();
+        }
+
+        // Log tab functions
+        function switchLogTab(tab) {
+            currentLogTab = tab;
+            document.querySelectorAll('.log-tab').forEach(el => el.classList.remove('active'));
+            document.querySelector(`.log-tab:nth-child(${['weight', 'camera', 'system', 'judgment'].indexOf(tab) + 1})`).classList.add('active');
+            loadLogTab(tab);
+        }
+
+        async function loadLogTab(tab) {
+            const thead = document.getElementById('log-table-head');
+            const tbody = document.getElementById('log-table-body');
+
+            try {
+                let logs = [];
+                let headers = [];
+
+                if (tab === 'weight') {
+                    const response = await fetch(`${API_BASE}/api/logs/weight?limit=50`);
+                    const data = await response.json();
+                    logs = data.logs || [];
+                    headers = ['Time', 'Zone', 'Delta', 'Current'];
+
+                    tbody.innerHTML = logs.map(log => `
+                        <tr>
+                            <td>${new Date(log.timestamp).toLocaleTimeString()}</td>
+                            <td>Zone ${log.zone_id}</td>
+                            <td style="color: ${log.delta < 0 ? 'var(--error)' : 'var(--success)'}">${log.delta > 0 ? '+' : ''}${log.delta?.toFixed(0) || 0}g</td>
+                            <td>${log.current ? log.current.join(', ') : '-'}</td>
+                        </tr>
+                    `).join('');
+
+                } else if (tab === 'system') {
+                    const response = await fetch(`${API_BASE}/api/logs/system?limit=20`);
+                    const data = await response.json();
+                    logs = data.logs || [];
+                    headers = ['Time', 'IO Board', 'Camera', 'Model', 'Memory'];
+
+                    tbody.innerHTML = logs.map(log => `
+                        <tr>
+                            <td>${new Date(log.timestamp).toLocaleTimeString()}</td>
+                            <td style="color: ${log.services?.io_board?.healthy ? 'var(--success)' : 'var(--error)'}">${log.services?.io_board?.healthy ? 'OK' : 'ERR'}</td>
+                            <td style="color: ${log.services?.camera?.healthy ? 'var(--success)' : 'var(--error)'}">${log.services?.camera?.healthy ? 'OK' : 'ERR'}</td>
+                            <td style="color: ${log.services?.model?.healthy ? 'var(--success)' : 'var(--error)'}">${log.services?.model?.healthy ? 'OK' : 'ERR'}</td>
+                            <td>${log.memory ? Math.round(log.memory.heapUsed / 1024 / 1024) + 'MB' : '-'}</td>
+                        </tr>
+                    `).join('');
+
+                } else if (tab === 'judgment') {
+                    const response = await fetch(`${API_BASE}/api/logs/judgment?limit=50`);
+                    const data = await response.json();
+                    logs = data.logs || [];
+                    headers = ['Time', 'Zone', 'Product', 'Confidence', 'Price'];
+
+                    tbody.innerHTML = logs.map(log => `
+                        <tr>
+                            <td>${new Date(log.timestamp).toLocaleTimeString()}</td>
+                            <td>Zone ${log.zone_id ?? '-'}</td>
+                            <td>${log.product_name || '-'}</td>
+                            <td>${log.confidence ? (log.confidence * 100).toFixed(1) + '%' : '-'}</td>
+                            <td>${log.total_price ? log.total_price.toLocaleString() : '-'}</td>
+                        </tr>
+                    `).join('');
+
+                } else if (tab === 'camera') {
+                    const today = new Date().toISOString().split('T')[0];
+                    const response = await fetch(`${API_BASE}/api/logs/camera/${today}`);
+                    const data = await response.json();
+                    const snapshots = data.snapshots || [];
+                    headers = ['Time', 'Cameras', 'Path'];
+
+                    tbody.innerHTML = snapshots.slice(0, 20).map(snap => `
+                        <tr>
+                            <td>${snap.time.replace(/-/g, ':')}</td>
+                            <td>${snap.files?.length || 0} cameras</td>
+                            <td style="font-size: 10px; color: var(--text-secondary)">${snap.path}</td>
+                        </tr>
+                    `).join('');
+                }
+
+                thead.innerHTML = `<tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
+
+                if (tbody.innerHTML === '') {
+                    tbody.innerHTML = `<tr><td colspan="${headers.length}" style="text-align: center; color: var(--text-secondary)">No logs available</td></tr>`;
+                }
+
+            } catch (error) {
+                console.error('Failed to load logs:', error);
+                tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--error)">Failed to load logs</td></tr>`;
+            }
+        }
+    </script>
+</body>
+</html>

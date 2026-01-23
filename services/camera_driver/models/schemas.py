@@ -6,6 +6,7 @@ class CameraStatus(BaseModel):
     """Single camera status"""
 
     camera_id: int
+    device_index: Optional[int] = None  # 물리적 디바이스 인덱스
     connected: bool
     running: bool
     active: bool

@@ -24,6 +24,7 @@ from ..config import (
     CAMERA_ID_MAPPING,
     save_camera_mapping,
     update_camera_identifier,
+    get_physical_device_index,
 )
 from .camera import ZoneCamera, CameraConfig
 from .device_scanner import DeviceScanner, CameraDeviceInfo
@@ -96,25 +97,32 @@ class CameraManager:
         """
         모든 카메라 초기화
 
+        물리적 디바이스 인덱스 매핑을 적용하여 카메라를 초기화합니다.
+        Nvidia 모드에서는 짝수 인덱스(0, 2, 4, 6, 8, 10)를 사용합니다.
+
         Returns:
             {camera_id: success} 딕셔너리
         """
         status: Dict[int, bool] = {}
 
         # Top 카메라
+        top_device_index = get_physical_device_index(TOP_CAMERA_ID)
         top_config = CameraConfig(
             camera_id=TOP_CAMERA_ID,
             resolution=self.resolution,
             fps=self.fps,
             buffer_size=self.buffer_size,
             is_top_camera=True,
+            device_index=top_device_index,
         )
         top_camera = ZoneCamera(top_config)
         status[TOP_CAMERA_ID] = top_camera.connect()
         self._cameras[TOP_CAMERA_ID] = top_camera
+        logger.info(f"Top camera: logical_id={TOP_CAMERA_ID}, device_index={top_device_index}")
 
         # Zone 카메라
         for zone_id, camera_id in ZONE_CAMERA_MAP.items():
+            device_index = get_physical_device_index(camera_id)
             zone_config = CameraConfig(
                 camera_id=camera_id,
                 resolution=self.resolution,
@@ -122,10 +130,12 @@ class CameraManager:
                 buffer_size=self.buffer_size,
                 is_top_camera=False,
                 zone_id=zone_id,
+                device_index=device_index,
             )
             zone_camera = ZoneCamera(zone_config)
             status[camera_id] = zone_camera.connect()
             self._cameras[camera_id] = zone_camera
+            logger.info(f"Zone {zone_id} camera: logical_id={camera_id}, device_index={device_index}")
 
         self._initialized = True
         connected_count = sum(status.values())

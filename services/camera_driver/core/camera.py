@@ -28,12 +28,13 @@ logger = logging.getLogger(__name__)
 class CameraConfig:
     """카메라 설정"""
 
-    camera_id: int
+    camera_id: int  # 논리적 카메라 ID (0-5)
     resolution: Tuple[int, int] = (640, 480)
     fps: int = 30
     buffer_size: int = 60
     is_top_camera: bool = False
     zone_id: Optional[int] = None
+    device_index: Optional[int] = None  # 물리적 디바이스 인덱스 (None이면 camera_id 사용)
 
 
 class ZoneCamera:
@@ -77,6 +78,11 @@ class ZoneCamera:
     def is_active(self) -> bool:
         return self._active
 
+    @property
+    def device_index(self) -> int:
+        """물리적 디바이스 인덱스"""
+        return self.config.device_index if self.config.device_index is not None else self.config.camera_id
+
     def connect(self) -> bool:
         """카메라 연결"""
         if not CV2_AVAILABLE:
@@ -84,9 +90,13 @@ class ZoneCamera:
             return False
 
         try:
-            self._cap = cv2.VideoCapture(self.config.camera_id)
+            # 물리적 디바이스 인덱스 사용
+            device_idx = self.device_index
+            logger.info(f"Camera {self.camera_id}: Opening device index {device_idx}")
+
+            self._cap = cv2.VideoCapture(device_idx)
             if not self._cap.isOpened():
-                logger.error(f"Camera {self.camera_id}: Failed to open")
+                logger.error(f"Camera {self.camera_id}: Failed to open device {device_idx}")
                 return False
 
             # 해상도 설정
@@ -94,7 +104,7 @@ class ZoneCamera:
             self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.resolution[1])
             self._cap.set(cv2.CAP_PROP_FPS, self.config.fps)
 
-            logger.info(f"Camera {self.camera_id}: Connected")
+            logger.info(f"Camera {self.camera_id}: Connected to device {device_idx}")
             return True
 
         except Exception as e:
@@ -198,6 +208,7 @@ class ZoneCamera:
         """상태 조회"""
         return {
             "camera_id": self.camera_id,
+            "device_index": self.device_index,
             "connected": self.is_connected,
             "running": self.is_running,
             "active": self.is_active,

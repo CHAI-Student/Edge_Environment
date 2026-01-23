@@ -111,3 +111,9 @@ def load_config() -> Config:
     )
 
     return Config(serial=serial_config, api=api_config)
+
+
+# Module-level config instances for import
+_config = load_config()
+serial_config = _config.serial
+api_config = _config.api

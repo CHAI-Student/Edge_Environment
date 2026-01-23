@@ -101,7 +101,7 @@ class ModelServiceConfig:
 
     # Node.js Orchestrator 설정
     nodejs_url: str = field(
-        default_factory=lambda: os.getenv("NODEJS_URL", "http://localhost:8888")
+        default_factory=lambda: os.getenv("NODEJS_URL", "http://localhost:8889")
     )
     nodejs_judgment_endpoint: str = "/api/sensor/judgment"
 

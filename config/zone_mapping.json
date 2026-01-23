@@ -1,0 +1,38 @@
+{
+  "version": "1.0",
+  "description": "Zone to loadcell channel and camera mapping configuration",
+  "zones": {
+    "0": {
+      "name": "Zone 0",
+      "loadcell_channels": [0, 1],
+      "side_camera_id": 1,
+      "enabled": true
+    },
+    "1": {
+      "name": "Zone 1",
+      "loadcell_channels": [2, 3],
+      "side_camera_id": 2,
+      "enabled": true
+    },
+    "2": {
+      "name": "Zone 2",
+      "loadcell_channels": [4, 5],
+      "side_camera_id": 3,
+      "enabled": true
+    },
+    "3": {
+      "name": "Zone 3",
+      "loadcell_channels": [6, 7],
+      "side_camera_id": 4,
+      "enabled": true
+    },
+    "4": {
+      "name": "Zone 4",
+      "loadcell_channels": [8, 9],
+      "side_camera_id": 5,
+      "enabled": true
+    }
+  },
+  "top_camera_id": 0,
+  "total_loadcell_channels": 10
+}

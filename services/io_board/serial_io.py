@@ -7,6 +7,8 @@ comprehensive error handling.
 """
 
 import asyncio
+import os
+import random
 from typing import Optional
 
 import serial
@@ -17,6 +19,9 @@ from .exceptions import ErrorCode, SerialCommunicationError
 from .logging_config import PerformanceLogger, get_logger, log_payload
 
 logger = get_logger(__name__)
+
+# Mock mode flag
+MOCK_MODE = os.getenv("IO_BOARD_MOCK_MODE", "false").lower() in ("true", "1", "yes")
 
 # Global serial configuration and mutex
 _serial_config: Optional[SerialConfig] = None
@@ -56,6 +61,57 @@ def get_serial_config() -> SerialConfig:
             {"reason": "configure_serial() must be called before use"}
         )
     return _serial_config
+
+
+def _generate_mock_response(message: bytes) -> bytes:
+    """
+    Generate mock response for testing without hardware.
+
+    Args:
+        message: Request message to generate mock response for
+
+    Returns:
+        Mock binary response matching expected protocol format
+    """
+    from functools import reduce
+
+    # Parse command from request (after STX byte)
+    if len(message) < 6:
+        return b""
+
+    cmd = message[1:3].decode('ascii')
+    subcmd = message[3:5].decode('ascii')
+    cmd_subcmd = cmd + subcmd
+
+    # Generate mock data based on command
+    if cmd_subcmd == "RQIW":  # Loadcell weights (10 readings x 6 chars)
+        loadcells = ""
+        for _ in range(10):
+            weight = random.randint(-100, 5000)
+            loadcells += f"{weight:+06d}"
+        data = loadcells.encode('ascii')
+    elif cmd_subcmd == "RQID":  # IO status (door 6 chars + deadbolt 6 chars)
+        data = b"CLOSEDCLOSED"
+    elif cmd_subcmd == "RQMI":  # Manufacturing info (product_id 11 + sw_version 2)
+        data = b"MOCKDEVICE112"
+    elif cmd_subcmd == "RQER":  # Error list (4 errors x 4 chars)
+        data = b"0000000000000000"
+    elif cmd_subcmd == "MCDC":  # Door control - echo back door state byte
+        door_byte = message[5] if len(message) > 5 else ord('C')
+        data = bytes([door_byte])
+    elif cmd_subcmd == "MCWP":  # Write product ID - echo back
+        data = message[5:16] if len(message) >= 16 else b"MOCKDEVICE1"
+    else:
+        # Generic success response (no data) for MCPD, MCLZ, MCEZ, MCRT
+        data = b""
+
+    # Build response frame: STX + CMD + SUBCMD + DATA + ETX + CHECKSUM
+    # Checksum is XOR of all bytes between STX and checksum (including ETX)
+    response_body = cmd.encode('ascii') + subcmd.encode('ascii') + data + b"\x03"
+    checksum = reduce(lambda x, y: x ^ y, response_body, 0)
+    response = b"\x02" + response_body + bytes([checksum])
+
+    return response
 
 
 async def _fetch_with_timeout(
@@ -132,6 +188,14 @@ async def fetch(message: bytes) -> bytes:
     Raises:
         SerialCommunicationError: If communication fails after all retries
     """
+    # Mock mode - return simulated responses
+    if MOCK_MODE:
+        log_payload(logger, "TX (MOCK)", message, "request")
+        await asyncio.sleep(0.01)  # Simulate small delay
+        response = _generate_mock_response(message)
+        log_payload(logger, "RX (MOCK)", response, "response")
+        return response
+
     config = get_serial_config()
 
     async with _serial_mutex:

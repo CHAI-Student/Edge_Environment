@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from ..config import settings, ZONE_CAMERA_MAP, TOP_CAMERA_ID
+from ..config import settings, ZONE_CAMERA_MAP, TOP_CAMERA_ID, get_physical_device_index
 from ..core import CameraManager
 from ..models import (
     AllCamerasStatus,
@@ -65,6 +65,7 @@ async def get_status() -> AllCamerasStatus:
         cameras=[
             CameraStatus(
                 camera_id=c["camera_id"],
+                device_index=c.get("device_index"),
                 connected=c["connected"],
                 running=c["running"],
                 active=c["active"],
@@ -160,6 +161,104 @@ async def health_check() -> HealthResponse:
         streaming=manager.is_streaming,
         connected_cameras=manager.connected_count,
     )
+
+
+@router.get("/status/detailed")
+async def get_detailed_status() -> dict:
+    """Get detailed camera status including device info"""
+    manager = get_manager()
+    return manager.get_detailed_status()
+
+
+@router.get("/devices/scan")
+async def scan_devices() -> dict:
+    """Scan for available camera devices"""
+    manager = get_manager()
+    devices = manager.scan_devices()
+    return {
+        "devices": [
+            {
+                "index": d.device_index,
+                "name": d.name,
+                "identifier": d.identifier,
+                "available": d.is_available,
+            }
+            for d in devices
+        ],
+        "nvidia_mode": settings.nvidia_mode,
+    }
+
+
+@router.get("/camera/{camera_id}/frame")
+async def get_camera_frame_base64(camera_id: int) -> dict:
+    """Get single frame as base64 encoded JPEG"""
+    import base64
+
+    if camera_id < 0 or camera_id > 5:
+        raise HTTPException(status_code=400, detail="camera_id must be 0-5")
+
+    manager = get_manager()
+    frame, timestamp = manager.get_frame_with_timestamp(camera_id)
+
+    if frame is None:
+        raise HTTPException(status_code=404, detail=f"No frame from camera {camera_id}")
+
+    # Encode to JPEG and then base64
+    try:
+        import cv2
+
+        _, buffer = cv2.imencode(
+            ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, settings.jpeg_quality]
+        )
+        frame_base64 = base64.b64encode(buffer).decode("utf-8")
+        return {
+            "camera_id": camera_id,
+            "frame": frame_base64,
+            "timestamp": timestamp,
+            "format": "jpeg",
+        }
+    except ImportError:
+        raise HTTPException(status_code=500, detail="OpenCV not available")
+
+
+@router.get("/zone/{zone_id}/capture")
+async def capture_zone(zone_id: int, include_top: bool = True) -> dict:
+    """Capture zone frames as base64"""
+    import base64
+
+    if zone_id < 0 or zone_id > 4:
+        raise HTTPException(status_code=400, detail="zone_id must be 0-4")
+
+    manager = get_manager()
+    side_frame, top_frame = manager.get_zone_frames(zone_id, include_top=include_top)
+
+    result = {
+        "zone_id": zone_id,
+        "side_camera_id": ZONE_CAMERA_MAP.get(zone_id),
+        "zone_frame": None,
+        "top_frame": None,
+        "timestamp": time.time(),
+    }
+
+    try:
+        import cv2
+
+        if side_frame is not None:
+            _, buffer = cv2.imencode(
+                ".jpg", side_frame, [cv2.IMWRITE_JPEG_QUALITY, settings.jpeg_quality]
+            )
+            result["zone_frame"] = base64.b64encode(buffer).decode("utf-8")
+
+        if include_top and top_frame is not None:
+            _, buffer = cv2.imencode(
+                ".jpg", top_frame, [cv2.IMWRITE_JPEG_QUALITY, settings.jpeg_quality]
+            )
+            result["top_frame"] = base64.b64encode(buffer).decode("utf-8")
+
+    except ImportError:
+        raise HTTPException(status_code=500, detail="OpenCV not available")
+
+    return result
 
 
 # =========================================================================
