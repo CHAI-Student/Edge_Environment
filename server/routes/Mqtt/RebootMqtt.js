@@ -21,7 +21,7 @@ function runReboot() {
 
   console.log("[REBOOT] rebooting now...");
   // Linux에서 실제 재부팅 (sudo 권한 필요할 수 있음)
-  // exec("sudo reboot", (err, stdout, stderr) => {
+  // exec("sudo -n reboot", (err, stdout, stderr) => {
   //   if (err) console.error("[REBOOT] reboot command failed:", err.message);
   //   if (stdout) console.log("[REBOOT] stdout:", stdout);
   //   if (stderr) console.log("[REBOOT] stderr:", stderr);

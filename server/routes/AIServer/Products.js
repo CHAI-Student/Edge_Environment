@@ -1,262 +1,186 @@
-/**
- * Products API - MinIO 이미지 업로드 및 MongoDB 메타데이터 저장
- */
-
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const multer = require('multer');
-const crypto = require('crypto');
-const path = require('path');
+const multer = require("multer");
+const { ProductUpload } = require("../../model/ProductUpload");
+const crypto = require("crypto");
+const path = require("path");
+const Minio = require("minio");
+const config = require("../../config/key");
 
-const config = require('../../config/key');
-const { ProductUpload } = require('../../model/ProductUpload');
+//=================================
+//        Product Upload
+//=================================
 
-// Multer 설정 - 메모리 스토리지 사용
+// multer: 메모리로 받아서 MinIO로 바로 업로드
+// const upload = multer({ storage: multer.memoryStorage() }).array("files", 2000);
 const upload = multer({
-    storage: multer.memoryStorage(),
-    limits: {
-        files: 2000,        // 최대 2000개 파일
-        fileSize: 100 * 1024 * 1024  // 100MB per file
-    }
+  storage: multer.memoryStorage(),
+  limits: {
+    files: 2000,                 // 상한선
+    fileSize: 100 * 1024 * 1024, // 100MB
+  },
+}).array("files", 2000);
+
+function safe(s) {
+  return String(s || "").replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function isEmptyDir(dir) {
+  try {
+    return fs.existsSync(dir) && fs.readdirSync(dir).length === 0;
+  } catch {
+    return false;
+  }
+}
+
+function removeDirIfEmpty(dir) {
+  try {
+    if (isEmptyDir(dir)) fs.rmdirSync(dir);
+  } catch {}
+}
+
+function putObjectAsync(minioClient, bucket, key, buffer, meta) {
+  return new Promise((resolve, reject) => {
+    minioClient.putObject(bucket, key, buffer, meta, (err, etag) => {
+      if (err) return reject(err);
+      resolve(etag);
+    });
+  });
+}
+
+//=================================
+//       MinIO Image Upload
+//=================================
+router.post("/uploads/images", (req, res) => {
+
+    console.log('req', req.body)
+
+    upload(req, res, async (err) => {
+      try {
+        if (err) return res.status(400).json({ success: false, err: String(err) });
+        if (!req.files || req.files.length === 0) {
+          return res.status(400).json({ success: false, err: "No files uploaded" });
+        }
+
+        const minioClient = req.app.locals.minioClient;
+        const BUCKET = req.app.locals.minioBucket || "chaiimage";
+        if (!minioClient) {
+          return res.status(500).json({ success: false, err: "minioClient not initialized in index.js" });
+        }
+
+        const productIdx = req.body.productIdx;
+        const divisionIdx = req.body.divisionIdx; // 유지해도 되고, 안 쓰면 제거해도 됨
+        if (!productIdx || !divisionIdx) {
+          return res.status(400).json({ success: false, err: "productIdx and divisionIdx are required" });
+        }
+        
+        const rootName = req.body.rootName; // 예: "20260122_170612"
+        if (!rootName) {
+          return res.status(400).json({ success: false, err: "rootName is required (e.g., 날짜_시간)" });
+        }
+
+        const relPaths = req.body.relPaths;
+        const relPathArr =
+          Array.isArray(relPaths) ? relPaths :
+          typeof relPaths === "string" ? [relPaths] : [];
+
+        const useRelPath = relPathArr.length === req.files.length;
+        if (!useRelPath) {
+          return res.status(400).json({
+            success: false,
+            err: "relPaths is required and must match files count (e.g., images/cam_0/0001.jpg)",
+          });
+        }
+
+        // 최종 상위 폴더: productImg/<productIdx>_<날짜_시간>/
+        const foldername = `${safe(productIdx)}_${safe(rootName)}`;
+        const basePrefix = `productImg/${foldername}`;
+        const folderpath = `s3://${BUCKET}/${basePrefix}/`;
+
+        // putObjectAsync는 minioClient를 인자로 받는 형태로 추천
+        const uploaded = await Promise.all(
+          req.files.map(async (f, i) => {
+            // relPath 예: "images/cam_0/0001.jpg"
+            const p = String(relPathArr[i]).replace(/\\/g, "/");
+
+            // images/ 제거 후 cam_x/... 유지
+            let rel = p.startsWith("images/") ? p.slice("images/".length) : p;
+
+            // 보안: 상위 디렉토리 이동 방지
+            rel = rel.replace(/^\/*/, "");       // leading slash 제거
+            rel = rel.replace(/\.\./g, "_");     // .. 제거
+
+            // 확장자는 rel에서 가져오되, 없으면 f.originalname으로 보정
+            const ext = path.extname(rel) || path.extname(f.originalname || "") || ".jpg";
+            const withoutExt = ext ? rel.slice(0, -ext.length) : rel;
+
+            // 최종 key: based_image/<productIdx>_<rootName>/<cam_x/...>_<hash>.jpg
+            const key = `${basePrefix}/${withoutExt}_${sha1(f.buffer)}${ext.toLowerCase()}`;
+
+            const meta = { "Content-Type": f.mimetype || "application/octet-stream" };
+
+            // putObjectAsync(minioClient, BUCKET, key, ...)
+            const etag = await putObjectAsync(minioClient, BUCKET, key, f.buffer, meta);
+
+            return { key, etag, size: f.size, mimeType: f.mimetype };
+          })
+        );
+
+        return res.json({
+          success: true,
+          bucket: BUCKET,
+          foldername,
+          folderpath,
+          filelength: uploaded.length,
+          objects: uploaded.map((x) => ({ key: x.key, etag: x.etag, size: x.size })),
+        });
+      } catch (e) {
+        return res.status(500).json({ success: false, err: e?.message || String(e) });
+      }
+    });
+
 });
 
-// MinIO Client (index.js에서 초기화됨)
-let minioClient = null;
-const BUCKET_NAME = config.minioBucket || 'chaiimage';
 
-/**
- * MinIO 클라이언트 설정
- * @param {object} client - MinIO 클라이언트 인스턴스
- */
-function setMinioClient(client) {
-    minioClient = client;
-}
-
-/**
- * 문자열 안전 처리 (알파벳, 숫자, 점, 하이픈, 언더스코어만 허용)
- */
-function safe(str) {
-    return String(str).replace(/[^a-zA-Z0-9.\-_]/g, '_');
-}
-
-/**
- * MinIO putObject를 Promise로 래핑
- */
-function putObjectAsync(bucket, key, buffer, metadata) {
-    return new Promise((resolve, reject) => {
-        if (!minioClient) {
-            return reject(new Error('MinIO client not initialized'));
-        }
-        minioClient.putObject(bucket, key, buffer, metadata, (err, etag) => {
-            if (err) return reject(err);
-            resolve(etag);
-        });
-    });
-}
-
-/**
- * POST /uploads/images
- * 이미지 파일들을 MinIO에 업로드
- */
-router.post('/uploads/images', upload.array('images'), async (req, res) => {
+//=================================
+//      MongoDB Meta Save
+//=================================
+router.post("/products", async (req, res) => {
     try {
-        const { productIdx, divisionIdx, rootName, relPaths } = req.body;
+        const { productIdx, divisionIdx, foldername, folderpath } = req.body;
 
-        // 필수 파라미터 검증
-        if (!productIdx || !divisionIdx || !rootName) {
-            return res.status(400).json({
-                success: false,
-                error: 'Missing required parameters: productIdx, divisionIdx, rootName'
-            });
+        if (!productIdx || !divisionIdx) {
+            return res.status(400).json({ success: false, err: "productIdx and divisionIdx are required" });
+        }
+        if (!foldername || !folderpath) {
+            return res.status(400).json({ success: false, err: "foldername and folderpath are required" });
         }
 
-        const files = req.files;
-        if (!files || files.length === 0) {
-            return res.status(400).json({
-                success: false,
-                error: 'No files uploaded'
-            });
-        }
-
-        // relPaths 파싱 (JSON 문자열 또는 배열)
-        let relativePaths;
-        try {
-            relativePaths = typeof relPaths === 'string' ? JSON.parse(relPaths) : relPaths;
-        } catch (e) {
-            relativePaths = [];
-        }
-
-        // 파일 수와 경로 수 검증
-        if (relativePaths.length !== files.length) {
-            console.warn(`[Products] Path count mismatch: ${relativePaths.length} paths, ${files.length} files`);
-        }
-
-        const results = [];
-        const baseFolder = `productImg/${safe(productIdx)}_${safe(rootName)}`;
-
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            let relPath = relativePaths[i] || `file_${i}`;
-
-            // 보안: 디렉토리 탐색 방지
-            relPath = relPath.replace(/^\/+/, '').replace(/\.\./g, '');
-
-            // 파일 해시 생성 (충돌 방지)
-            const hash = crypto.createHash('md5').update(file.buffer).digest('hex').substring(0, 8);
-            const ext = path.extname(file.originalname) || '.jpg';
-            const safeName = safe(path.basename(relPath, ext));
-
-            const key = `${baseFolder}/${safeName}_${hash}${ext}`;
-
-            try {
-                const etag = await putObjectAsync(BUCKET_NAME, key, file.buffer, {
-                    'Content-Type': file.mimetype
-                });
-
-                results.push({
-                    key,
-                    etag,
-                    size: file.size,
-                    originalName: file.originalname
-                });
-            } catch (uploadError) {
-                console.error(`[Products] Upload failed for ${key}:`, uploadError.message);
-                results.push({
-                    key,
-                    error: uploadError.message,
-                    originalName: file.originalname
-                });
-            }
-        }
-
-        const successCount = results.filter(r => !r.error).length;
-
-        res.json({
-            success: true,
+        const doc = await ProductUpload.create({
             productIdx,
             divisionIdx,
-            folder: baseFolder,
-            uploaded: successCount,
-            total: files.length,
-            files: results
-        });
+            modelVersion: req.body.modelVersion,
+            brunchName: req.body.brunchName,
+            productName: req.body.productName,
+            categoryIdx: req.body.categoryIdx,
+            isNew: req.body.isNew,
+            trainingStatus: req.body.trainingStatus,
+            productEngName: req.body.productEngName,
+            productLoadcellWeight: req.body.productLoadcellWeight,
+            productAnnotation: req.body.productAnnotation,
 
-    } catch (error) {
-        console.error('[Products] Upload error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-/**
- * POST /products
- * MongoDB에 상품 메타데이터 저장
- */
-router.post('/products', async (req, res) => {
-    try {
-        const {
-            productIdx,
-            productName,
-            productEngName,
-            categoryIdx,
-            isNew,
-            trainingStatus,
-            productLoadcellWeight,
             foldername,
             folderpath,
-            filelength,
-            eventPromotion
-        } = req.body;
+            filelength: Number(req.body.filelength || 0),
 
-        if (!productIdx) {
-            return res.status(400).json({
-                success: false,
-                error: 'productIdx is required'
-            });
-        }
-
-        const productData = {
-            productIdx,
-            productName,
-            productEngName,
-            categoryIdx: categoryIdx || 'null',
-            isNew: isNew || 'true',
-            trainingStatus: trainingStatus || '0',
-            productLoadcellWeight: productLoadcellWeight || 'null',
-            foldername,
-            folderpath,
-            filelength: filelength || 0,
-            eventPromotion: eventPromotion || []
-        };
-
-        const product = new ProductUpload(productData);
-        await product.save();
-
-        res.json({
-            success: true,
-            message: 'Product metadata saved',
-            product: product.toObject()
+            eventPromotion: Array.isArray(req.body.eventPromotion) ? req.body.eventPromotion : [],
         });
 
-    } catch (error) {
-        console.error('[Products] Save error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        return res.json({ success: true, id: doc._id });
+    } catch (e) {
+        return res.status(500).json({ success: false, err: e?.message || String(e) });
     }
 });
 
-/**
- * GET /products
- * 모든 상품 목록 조회
- */
-router.get('/products', async (req, res) => {
-    try {
-        const products = await ProductUpload.find({}).sort({ createDate: -1 });
-        res.json({
-            success: true,
-            count: products.length,
-            products
-        });
-    } catch (error) {
-        console.error('[Products] Query error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
 
-/**
- * GET /products/:productIdx
- * 특정 상품 조회
- */
-router.get('/products/:productIdx', async (req, res) => {
-    try {
-        const { productIdx } = req.params;
-        const product = await ProductUpload.findOne({ productIdx });
-
-        if (!product) {
-            return res.status(404).json({
-                success: false,
-                error: 'Product not found'
-            });
-        }
-
-        res.json({
-            success: true,
-            product
-        });
-    } catch (error) {
-        console.error('[Products] Query error:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-module.exports = { router, setMinioClient };
+module.exports = router;

@@ -17,7 +17,7 @@ const configManager = require("./services/ConfigManager");
 const scheduledLogger = require("./services/ScheduledLogger");
 
 // ============================================
-// MongoDB 연결 (선택적)
+// MongoDB 연결
 // ============================================
 const mongoose = require("mongoose");
 if (config.mongoURI) {
@@ -29,31 +29,31 @@ if (config.mongoURI) {
 }
 
 // ============================================
-// MinIO 연결 (선택적)
+// MinIO 연결
 // ============================================
-const Minio = require('minio');
+const Minio = require("minio");
 let minioClient = null;
 
-if (config.minioEndpoint && config.minioAccessKey) {
+if (config.minioURL && config.minioAccessKey) {
     minioClient = new Minio.Client({
-        endPoint: config.minioEndpoint,
-        port: config.minioPort || 9000,
-        useSSL: config.minioUseSSL || false,
+        endPoint: config.minioURL,
+        port: 9000,
+        useSSL: false,
         accessKey: config.minioAccessKey,
-        secretKey: config.minioSecretKey
+        secretKey: config.minioSecretKey,
     });
 
-    // 버킷 확인
-    const bucketName = config.minioBucket || 'chaiimage';
-    minioClient.bucketExists(bucketName, (err, exists) => {
-        if (err) {
-            console.error('[MinIO] Bucket check error:', err.message);
-        } else if (exists) {
-            console.log(`[MinIO] Connected, bucket '${bucketName}' exists`);
-        } else {
-            console.log(`[MinIO] Connected, bucket '${bucketName}' does not exist`);
+    app.locals.minioClient = minioClient;
+    app.locals.minioBucket = config.minioBucket || "chaiimage";
+
+    (async () => {
+        try {
+            const buckets = await minioClient.listBuckets();
+            console.log("[MINIO] Buckets:", buckets.map(b => b.name));
+        } catch (err) {
+            console.error("[MINIO] error:", err.message);
         }
-    });
+    })();
 } else {
     console.log('[MinIO] MinIO not configured, skipping connection');
 }
@@ -106,11 +106,8 @@ app.use("/api/auth", authModule.router);
 })();
 
 // Products 라우트 (AIServer)
-const productsModule = require("./routes/AIServer/Products");
-if (minioClient) {
-    productsModule.setMinioClient(minioClient);
-}
-app.use("/api", productsModule.router);
+const productRouter = require("./routes/AIServer/Products");
+app.use("/api", productRouter);
 
 // MQTT 라우트
 const mqttModule = require("./routes/mqtt");
@@ -195,19 +192,17 @@ console.log('[APP] Scheduled logger started');
 // ============================================
 // Static 파일 서빙
 // ============================================
-// 상품 이미지 폴더
-app.use('/products', express.static(path.join(__dirname, 'products')));
-app.use('/images', express.static(path.join(__dirname, 'images')));
+app.use('/products', express.static('uploads'));
 app.use('/uploads/images', express.static('images'));
+app.use('/images', express.static(path.join(__dirname, 'images')));
 
-// Dashboard 정적 파일 서빙 (개발/운영 공통)
+// Dashboard 정적 파일 서빙
 app.use(express.static(path.resolve(__dirname, "../client/public")));
 
 // Production 모드: React 빌드 서빙
 if (process.env.NODE_ENV === "production") {
     app.use(express.static("client/build"));
     app.get("*", (req, res, next) => {
-        // API/SSE 요청은 건너뛰기
         if (req.path.startsWith('/api') || req.path.startsWith('/sse') || req.path.startsWith('/health')) {
             return next();
         }
@@ -230,7 +225,6 @@ app.listen(port, () => {
 async function gracefulShutdown(signal) {
     console.log(`\n[APP] ${signal} received. Shutting down...`);
 
-    // IO Board SSE 구독 중지
     try {
         ioBoardSSE.stop();
         console.log('[APP] IO Board SSE subscriber stopped');
@@ -238,7 +232,6 @@ async function gracefulShutdown(signal) {
         console.error('[APP] Error stopping IO Board SSE:', e.message);
     }
 
-    // 스케줄 로거 중지
     try {
         scheduledLogger.stop();
         console.log('[APP] Scheduled logger stopped');
@@ -246,7 +239,6 @@ async function gracefulShutdown(signal) {
         console.error('[APP] Error stopping Scheduled logger:', e.message);
     }
 
-    // MQTT 연결 종료
     try {
         await disconnect();
         console.log('[APP] MQTT disconnected');
@@ -254,7 +246,6 @@ async function gracefulShutdown(signal) {
         console.error('[APP] Error disconnecting MQTT:', e.message);
     }
 
-    // MongoDB 연결 종료
     if (mongoose.connection.readyState === 1) {
         await mongoose.connection.close();
         console.log('[DB] MongoDB disconnected');

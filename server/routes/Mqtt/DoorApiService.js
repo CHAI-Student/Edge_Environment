@@ -7,8 +7,8 @@ const axios = require('axios');
 const config = require('../../config/key');
 
 // API 설정
-const API_HOST = config.ioboardApiHost || 'http://localhost:8001';
-const API_ENDPOINT = config.doorControlEndpoint || '/api/door/control';
+const API_HOST = 'http://localhost:8001';
+const API_ENDPOINT = '/api/door/control';
 
 /**
  * Door 상태 제어 API 호출

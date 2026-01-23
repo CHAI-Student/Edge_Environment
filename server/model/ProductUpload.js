@@ -69,6 +69,7 @@ const productUploadSchema = mongoose.Schema({
     }
 })
 
+// const ProductUpload = mongoose.model('ProductUpload', productUploadSchema);
 const ProductUpload = mongoose.model('ProductUpload', productUploadSchema, 'ProductsList');
 
 module.exports = { ProductUpload }

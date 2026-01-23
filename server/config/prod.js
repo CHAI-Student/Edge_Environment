@@ -10,14 +10,10 @@ module.exports = {
     userPassword: process.env.USER_PASSWORD,
     jwtToken: process.env.JWT_TOKEN,
     jwtTokenAt: process.env.JWT_TOKEN_AT,
-    // MinIO 설정
-    minioEndpoint: process.env.MINIO_ENDPOINT,
-    minioPort: parseInt(process.env.MINIO_PORT) || 9000,
     minioAccessKey: process.env.MINIO_ACCESS_KEY,
     minioSecretKey: process.env.MINIO_SECRET_KEY,
-    minioUseSSL: process.env.MINIO_USE_SSL === 'true',
-    minioBucket: process.env.MINIO_BUCKET || 'chaiimage',
     minioURL: process.env.MINIO_URL,
+    minioBucket: process.env.MINIO_BUCKET || 'chaiimage',
     sensorAPI: process.env.SENSOR_API,
     // 서비스 API 설정
     ioBoardUrl: process.env.IO_BOARD_URL || 'http://localhost:8001',
@@ -28,5 +24,4 @@ module.exports = {
     // 레거시 호환
     ioboardApiHost: process.env.IO_BOARD_URL || 'http://io_board:8001',
     cameraControlApi: process.env.CAMERA_URL || 'http://localhost:8003',
-    doorControlEndpoint: '/api/door/control',
 }
