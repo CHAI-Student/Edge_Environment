@@ -116,32 +116,17 @@ if (process.env.NODE_ENV === "production") {
     res.sendFile(path.resolve(__dirname, "../client", "build", "index.html"));
   });
 }
-app.use("/api", productsModule.router);
 
 // MQTT 라우트
 const mqttModule = require("./routes/mqtt");
 const { disconnect } = require("./routes/Mqtt/MqttClient");
 app.use('/', mqttModule.router);
+console.log('[APP] MQTT module loaded', mqttModule);
 
 // MQTT 초기화
 mqttModule.init().catch((e) => {
     console.error('[APP] MQTT init during server start failed:', e?.message || e);
 });
-
-// ============================================
-// Static 파일 서빙
-// ============================================
-// 상품 이미지 폴더
-app.use('/products', express.static(path.join(__dirname, 'products')));
-app.use('/images', express.static(path.join(__dirname, 'images')));
-
-// Production 모드: React 빌드 서빙
-if (process.env.NODE_ENV === "production") {
-    app.use(express.static("client/build"));
-    app.get("*", (req, res) => {
-        res.sendFile(path.resolve(__dirname, "../client", "build", "index.html"));
-    });
-}
 
 // ============================================
 // 서버 시작

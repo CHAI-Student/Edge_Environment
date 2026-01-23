@@ -7,7 +7,7 @@ const PAYMENT_API_URL = "http://localhost:8001/status";
 
 async function callCardTerminalStatusApi() {
   try {
-    console.log(`[API] Sending Request to ${PAYMENT_API_URL}`);
+    console.log(`[API] Sending Card Terminal Request to ${PAYMENT_API_URL}`);
 
     // POST 요청 전송
     const response = await axios.get(PAYMENT_API_URL, {
@@ -48,7 +48,7 @@ const IO_BOARD_API_URL = "http://localhost:8000/status";
 
 async function callIOStatusApi() {
   try {
-    console.log(`[API] Sending Request to ${IO_BOARD_API_URL}`);
+    console.log(`[API] Sending IO Board Request to ${IO_BOARD_API_URL}`);
 
     // POST 요청 전송
     const response = await axios.get(IO_BOARD_API_URL, {
