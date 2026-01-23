@@ -11,6 +11,7 @@ This module provides a RESTful API interface to the IO Board device with:
 
 import asyncio
 import json
+import re
 import signal
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
@@ -236,7 +237,7 @@ async def handle_deadbolt(request: DeadboltRequest) -> DeadboltResponse:
     logger.info(f"IO status after deadbolt command: {io_status}")
 
     # Return state based on deadbolt sensor reading
-    if "OPEN" in io_status["deadbolt"].upper():
+    if "UNLOCK" in io_status["deadbolt"].upper():
         return DeadboltResponse(state=DoorState.OPEN)
     else:
         return DeadboltResponse(state=DoorState.CLOSE)
@@ -352,6 +353,8 @@ async def handle_loadcells() -> LoadCellsResponse:
     return LoadCellsResponse(loadcells=loadcells)
 
 
+PATTERN = re.compile(r'(\+|-)\d{5}')
+
 @app.get(
     "/health",
     summary="Health check",
@@ -360,10 +363,30 @@ async def handle_loadcells() -> LoadCellsResponse:
 )
 async def health_check():
     """Health check endpoint matching Node.js format."""
+    loadcells = await commands.get_loadcells()
+    if not all(map(lambda x: PATTERN.fullmatch(x) is not None, loadcells)):
+        loadcell_ok = False
+    elif not all(map(lambda x: -40000 <= int(x) <= 40000, loadcells)):
+        loadcell_ok = False
+    else:
+        loadcell_ok = True
+    
+    await commands.clear_errors()
+    prev_status = await commands.get_io_status()
+    if prev_status["deadbolt"] == "LOCKED":
+        await commands.set_door_state(DoorState.CLOSE)
+    else:
+        await commands.set_door_state(DoorState.OPEN)
+    errors = await commands.get_errors()
+
+    if all(map(lambda x: x == "    " or x == "0000", errors)):
+        deadbolt_ok = True
+    else:
+        deadbolt_ok = False
+    
     return {
-        "status": "healthy",
-        "service": "io_board",
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "deadbolt": "HEALTHY" if deadbolt_ok else "UNHEALTHY",
+        "loadcells": "HEALTHY" if loadcell_ok else "UNHEALTHY",
     }
 
 
