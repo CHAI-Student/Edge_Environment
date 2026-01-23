@@ -1,0 +1,17 @@
+# IO Board Service Dependencies
+# FastAPI framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# Serial communication
+pyserial>=3.5
+pyserial-asyncio>=0.6
+
+# Binary protocol parsing
+construct>=2.10.70
+
+# Data validation
+pydantic>=2.5.0
+
+# HTTP client (for health checks)
+httpx>=0.26.0

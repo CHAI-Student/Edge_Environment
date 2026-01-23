@@ -1,0 +1,41 @@
+# AI Smart Vending Machine - Windows Development Override
+# Debug settings and development configuration
+#
+# Usage:
+#   docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up -d
+
+services:
+  # ============================================
+  # All services - Debug log level
+  # ============================================
+  io_board:
+    environment:
+      - LOG_LEVEL=DEBUG
+      - IO_BOARD_MOCK_MODE=true
+
+  model:
+    environment:
+      - LOG_LEVEL=DEBUG
+      - USE_CPU=true
+      - CUDA_VISIBLE_DEVICES=
+
+  camera_driver:
+    environment:
+      - LOG_LEVEL=DEBUG
+      - CAMERA_MODE=folder
+
+  mqtt_client:
+    environment:
+      - LOG_LEVEL=DEBUG
+
+  card_terminal:
+    environment:
+      - LOG_LEVEL=DEBUG
+      - MOCK_MODE=true
+
+  node_server:
+    environment:
+      - NODE_ENV=development
+      - LOG_LEVEL=debug
+    volumes:
+      - ./server:/app/server:ro

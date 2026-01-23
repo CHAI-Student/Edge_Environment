@@ -1,0 +1,35 @@
+[Unit]
+Description=AI Smart Vending Machine System
+Documentation=https://github.com/CHAI-Student/Edge_Environment
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/jetson/ai-vending
+
+# Start all services
+ExecStart=/usr/bin/docker compose -f docker-compose.yaml -f docker-compose.jetson.yaml up -d
+
+# Stop all services gracefully
+ExecStop=/usr/bin/docker compose -f docker-compose.yaml -f docker-compose.jetson.yaml down
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+
+# Timeouts
+TimeoutStartSec=300
+TimeoutStopSec=60
+
+# User/Group (adjust as needed)
+User=jetson
+Group=docker
+
+# Environment
+Environment=COMPOSE_PROJECT_NAME=ai-vending
+
+[Install]
+WantedBy=multi-user.target

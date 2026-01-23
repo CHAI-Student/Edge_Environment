@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-smart-vending"
+version = "1.0.0"
+description = "AI Smart Vending Machine System - Edge Environment"
+readme = "README.md"
+requires-python = ">=3.10,<3.12"
+license = { text = "MIT" }
+
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "httpx>=0.24.0",
+    "aiohttp>=3.8.0",
+    "httpx-sse>=0.3.0",
+    "numpy>=1.24.0",
+    "opencv-python-headless>=4.8.0",
+    "pillow>=10.0.0",
+    "pyserial>=3.5",
+    "pyserial-asyncio>=0.6",
+    "construct>=2.10.70",
+    "pyyaml>=6.0.0",
+    "python-multipart>=0.0.6",
+]
+
+[project.optional-dependencies]
+ai = [
+    "ultralytics>=8.0.0",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+]
+mqtt = [
+    "aiomqtt>=2.0.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+test = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["services*"]
+
+[tool.uv]
+python = "3.11"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["services/model/tests", "services/camera_driver/tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true

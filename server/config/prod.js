@@ -1,5 +1,5 @@
 module.exports = {
-    mongoURI:process.env.MONGO_URI,
+    mongoURI: process.env.MONGO_URI,
     mqttURL: process.env.MQTT_URL,
     mqttID: process.env.MQTT_USER,
     mqttPW: process.env.MQTT_PASS,
@@ -9,6 +9,9 @@ module.exports = {
     userId: process.env.USER_ID,
     userPassword: process.env.USER_PASSWORD,
     jwtToken: process.env.JWT_TOKEN,
+    jwtTokenAt: process.env.JWT_TOKEN_AT,
+    ioboardApiHost: process.env.IO_BOARD_URL,
+    cameraControlApi: process.env.CAMERA_URL,
     minioAccessKey: process.env.MINIO_ACCESS_KEY,
     minioSecretKey: process.env.MINIO_SECRET_KEY,
     minioURL: process.env.MINIO_URL,

@@ -25,6 +25,7 @@ module.exports = {
     get jwtTokenAt() {
         return process.env.JWT_TOKEN_AT;
     },
-    doorControlApi: "http://localhost:8000",
-    cameraControlApi: "http://localhost:8000",
+    // IO Board API 설정
+    ioboardApiHost: 'http://localhost:8001',
+    cameraControlApi: "http://localhost:8003",
 }
