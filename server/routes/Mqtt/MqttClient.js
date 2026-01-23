@@ -17,10 +17,9 @@ function createMqttClient() {
     clientId,
     username: config.mqttID,
     password: config.mqttPW,
-
     clean: true,
     keepalive: 30,
-    connectTimeout: 8000,
+    connectTimeout: 10000,
 
     // 재연결 주기(ms). 운영에선 1000~5000 정도 권장
     reconnectPeriod: 2000,

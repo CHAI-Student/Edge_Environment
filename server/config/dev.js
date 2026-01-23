@@ -13,8 +13,8 @@ module.exports = {
     // 매장 고유번호
     divisionIdx: 'DI17647205538493077',
     // 장비 고유번호
-    // deviceIdx: 'DE17560868094789999',
-    deviceIdx: 'DE17683631997086480',
+    deviceIdx: 'DE17560868094789999',
+    // deviceIdx: 'DE17683631997086480',
     // PNT RestAPI 연결
     restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
     userId: 'chai',
@@ -25,6 +25,7 @@ module.exports = {
     get jwtTokenAt() {
         return process.env.JWT_TOKEN_AT;
     },
-    doorControlApi: "http://localhost:8000",
-    cameraControlApi: "http://localhost:8000",
+    // IO Board API 설정
+    ioboardApiHost: 'http://localhost:8001',
+    cameraControlApi: "http://localhost:8003",
 }
