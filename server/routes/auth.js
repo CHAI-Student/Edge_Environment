@@ -24,13 +24,15 @@ async function devAutoLogin() {
   if (!userId || !userPassword) return null;
 
   const r = await external.post("/auth/login", {
-    loginType: "admin",
+    loginType: "chai",
     userId: userId,
     userPassword: userPassword,
     ipaddress: "",
   });
 
   const token = r.data.accessToken
+
+  // console.log("[LOGIN] pid=", process.pid, "JWT_TOKEN set");
 
   if (!token) return null;
   else {

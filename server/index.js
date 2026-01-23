@@ -12,7 +12,7 @@ require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 const config = require("./config/key");
 
 // ============================================
-// MongoDB 연결 (선택적)
+// MongoDB 연결
 // ============================================
 const mongoose = require("mongoose");
 if (config.mongoURI) {
@@ -24,36 +24,29 @@ if (config.mongoURI) {
 }
 
 // ============================================
-// MinIO 연결 (선택적)
+// MinIO 연결
 // ============================================
-const Minio = require('minio');
-let minioClient = null;
+const Minio = require("minio");
 
-if (config.minioEndpoint && config.minioAccessKey) {
-    minioClient = new Minio.Client({
-        endPoint: config.minioEndpoint,
-        port: config.minioPort || 9000,
-        useSSL: config.minioUseSSL || false,
-        accessKey: config.minioAccessKey,
-        secretKey: config.minioSecretKey
-    });
+const minioClient = new Minio.Client({
+  endPoint: config.minioURL,
+  port: 9000,
+  useSSL: false,
+  accessKey: config.minioAccessKey,
+  secretKey: config.minioSecretKey,
+});
 
-    // 버킷 확인
-    const bucketName = config.minioBucket || 'chaiimage';
-    minioClient.bucketExists(bucketName, (err, exists) => {
-        if (err) {
-            console.error('[MinIO] Bucket check error:', err.message);
-        } else if (exists) {
-            console.log(`[MinIO] Connected, bucket '${bucketName}' exists`);
-        } else {
-            console.log(`[MinIO] Connected, bucket '${bucketName}' does not exist`);
-            // 선택적으로 버킷 생성
-            // minioClient.makeBucket(bucketName, 'us-east-1', (err) => { ... });
-        }
-    });
-} else {
-    console.log('[MinIO] MinIO not configured, skipping connection');
-}
+app.locals.minioClient = minioClient;
+app.locals.minioBucket = "chaiimage"; // 또는 config로
+
+(async () => {
+  try {
+    const buckets = await minioClient.listBuckets();
+    console.log("[MINIO] Buckets:", buckets);
+  } catch (err) {
+    console.error("[MINIO] error:", err);
+  }
+})();
 
 // ============================================
 // Middleware 설정
@@ -102,10 +95,26 @@ app.use("/api/auth", authModule.router);
     }
 })();
 
-// Products 라우트 (AIServer)
-const productsModule = require("./routes/AIServer/Products");
-if (minioClient) {
-    productsModule.setMinioClient(minioClient);
+//use this to show the image you have in node js server to client (react js)
+//https://stackoverflow.com/questions/48914987/send-image-path-from-node-js-express-server-to-react-client
+
+const productRouter = require("../server/routes/AIServer/Products"); // 네 라우터 파일 경로
+app.use("/api", productRouter);
+
+app.use('/products', express.static('uploads'));
+app.use('/uploads/images', express.static('images'));
+
+// Serve static assets if in production
+if (process.env.NODE_ENV === "production") {
+
+  // Set static folder   
+  // All the javascript and css files will be read and served from this folder
+  app.use(express.static("client/build"));
+
+  // index.html for all page routes    html or routing and naviagtion
+  app.get("*", (req, res) => {
+    res.sendFile(path.resolve(__dirname, "../client", "build", "index.html"));
+  });
 }
 app.use("/api", productsModule.router);
 

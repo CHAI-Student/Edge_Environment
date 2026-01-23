@@ -1,6 +1,14 @@
+// 파일명: ManualDoor.js
 const { v4: uuidv4 } = require("uuid");
 const { getClient } = require("./MqttClient");
 const config = require("../../config/key");
+
+// 분리한 API 서비스 모듈을 가져옵니다.
+const { callApiToControlDoor } = require("./DoorApiService");
+
+// =========================================================
+// [메인 로직: MQTT 메시지 처리]
+// =========================================================
 
 async function ManualDoor() {
   const deviceIdx = config.deviceIdx;
@@ -16,17 +24,15 @@ async function ManualDoor() {
 
   const client = getClient();
 
-  // ✅ connect 로그(참고용)
   client.on("connect", () => {
-    console.log("[DOOR] connected");
+    console.log("[DOOR] MQTT Connected");
     client.subscribe(manualDoorSub, { qos: 1 }, (err, granted) => {
       if (err) console.error("[DOOR] subscribe error:", err.message);
       else console.log("[DOOR] subscribed:", granted);
     });
   });
 
-  // ✅ cmd 수신 → ack 발행
-  client.on("message", (topic, payloadBuf) => {
+  client.on("message", async (topic, payloadBuf) => {
     if (topic !== manualDoorSub) return;
 
     let msg;
@@ -37,48 +43,72 @@ async function ManualDoor() {
       return;
     }
 
-    const doorState = msg?.DATA?.door_state; // 'OPEN' or 'CLOSE'
+    const targetState = msg?.DATA?.door_state; // 'OPEN' or 'CLOSE'
     const ifSysId = msg?.HEADER?.IF_SYSID || uuidv4();
 
-    console.log("[DOOR] cmd received. IF_SYSID=", ifSysId, "doorState=", doorState);
+    console.log(`[DOOR] MQTT CMD Received. ID=${ifSysId}, Target=${targetState}`);
 
-    if (doorState !== "OPEN" && doorState !== "CLOSE") {
-      console.error("[DOOR] invalid door_state:", doorState);
+    if (targetState !== "OPEN" && targetState !== "CLOSE") {
+      console.error("[DOOR] Invalid door_state:", targetState);
       return;
     }
 
-    const nextState = doorState === "OPEN" ? "CLOSE" : "OPEN";
+    // ---------------------------------------------------------
+    // [API 통신 및 결과 처리]
+    // ---------------------------------------------------------
+    let finalState = "";
+    let resultCd = "S"; 
+    let resultMsg = "";
+
+    try {
+      // 1. 분리된 함수 호출 (API 제어 요청)
+      const apiResultState = await callApiToControlDoor(targetState);
+
+      // 2. 결과 검증
+      if (apiResultState === "OPEN" || apiResultState === "CLOSE") {
+        finalState = apiResultState;
+        resultMsg = finalState === "OPEN" ? "Door is opened" : "Door is closed";
+      } else {
+        throw new Error(`Unexpected API response: ${apiResultState}`);
+      }
+
+    } catch (err) {
+      console.error("[DOOR] API Control Failed:", err.message);
+      resultCd = "F"; 
+      resultMsg = "API Error: " + err.message;
+      // 실패 시 요청의 반대 상태(또는 기존 상태 유지)로 가정
+      finalState = targetState === "OPEN" ? "CLOSE" : "OPEN"; 
+    }
+
+    // ---------------------------------------------------------
+    // [MQTT ACK 전송]
+    // ---------------------------------------------------------
     const timestamp = Date.now();
-
-    const header = {
-      IF_ID: "IF_03",
-      IF_SYSID: ifSysId,     // ✅ cmd의 IF_SYSID 그대로 echo
-      IF_HOST: "CHAI",
-      IF_DATE: timestamp,
-    };
-
-    const body = {
-      device_idx: deviceIdx,
-      division_idx: divisionIdx,
-      door_state: nextState,
-      result_cd: "S",
-      result_msg: doorState === "OPEN" ? "Door is closed" : "Door is opened",
-    };
-
-    const ackPayload = JSON.stringify({ HEADER: header, DATA: body });
+    const ackPayload = JSON.stringify({
+      HEADER: {
+        IF_ID: "IF_03",
+        IF_SYSID: ifSysId,
+        IF_HOST: "CHAI",
+        IF_DATE: timestamp,
+      },
+      DATA: {
+        device_idx: deviceIdx,
+        division_idx: divisionIdx,
+        door_state: finalState,
+        result_cd: resultCd,
+        result_msg: resultMsg,
+      }
+    });
 
     client.publish(manualDoorPub, ackPayload, { qos: 1, retain: false }, (e) => {
-      if (e) console.error("[DOOR] publish error:", e.message);
-      else console.log("[DOOR] ack published:", manualDoorPub, "IF_SYSID=", ifSysId);
+      if (e) console.error("[DOOR] Publish Error:", e.message);
+      else console.log(`[DOOR] ACK Sent. Result=${resultCd}, State=${finalState}`);
     });
   });
 
-  // ✅ 이미 연결되어 있으면 수동 subscribe (connect 이벤트 놓침 대비)
+  // 이미 연결되어 있는 경우 구독 처리
   if (client.connected) {
-    client.subscribe(manualDoorSub, { qos: 1 }, (err, granted) => {
-      if (err) console.error("[DOOR] subscribe error:", err.message);
-      else console.log("[DOOR] subscribed:", granted);
-    });
+    client.subscribe(manualDoorSub, { qos: 1 });
   }
 }
 

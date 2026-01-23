@@ -32,7 +32,7 @@ function startServer() {
     env: {
       ...process.env,
       NODE_ENV: "development",
-      PORT: "8888",            // 테스트 전용 포트 (원하는 값)
+      PORT: "8000",            // 테스트 전용 포트 (원하는 값)
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
