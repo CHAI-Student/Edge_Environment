@@ -5,7 +5,7 @@ const { v4: uuidv4 } = require("uuid");
 const { devAutoLogin } = require("../auth");
 
 const external = axios.create({
-  baseURL: config.restApi, // https://apichaidev.atcrk.co.kr/api/v1
+  baseURL: "https://apichaidev.atcrk.co.kr/api/v1", // https://apichaidev.atcrk.co.kr/api/v1
   timeout: 10000,
   headers: { "Content-Type": "application/json" },
 });
@@ -13,12 +13,10 @@ const external = axios.create({
 // 외부 API 호출 함수
 async function ProductList({
   division_idx = config.divisionIdx,
-  device_idx = null,
-  product_idx = null,
+  device_idx = config.deviceIdx,
 } = {}) {
   const token = config.jwtToken
   console.log("[test] JWT_TOKEN =", process.env.JWT_TOKEN);
-  console.log(token)
   if (!token) {
     throw new Error("JWT_TOKEN not set");
   }
@@ -31,9 +29,8 @@ async function ProductList({
       IF_DATE: Date.now(),
     },
     DATA: {
-      division_idx,
-      device_idx,
-      product_idx,
+      division_idx: division_idx,
+      device_idx: device_idx,
     },
   };
 
@@ -49,37 +46,37 @@ async function ProductList({
 module.exports = { ProductList };
 
 // // event 없이 'node ./server/routes/RestAPI/ProductList.js'로 실행
-if (require.main === module) {
-  (async () => {
-    try {
-      console.log("[ProductList] standalone start");
+// if (require.main === module) {
+//   (async () => {
+//     try {
+//       console.log("[ProductList] standalone start");
 
-      // 로그인 → 토큰 발급 (나중에 삭제 필요 -> 결제 시엔 이미 발급된 config 토큰 활용)
-      const token = await devAutoLogin();
-      if (!token) {
-        throw new Error("devAutoLogin failed");
-      }
-      // const token = process.env.JWT_TOKEN;
+//       // 로그인 → 토큰 발급 (나중에 삭제 필요 -> 결제 시엔 이미 발급된 config 토큰 활용)
+//       const token = await devAutoLogin();
+//       if (!token) {
+//         throw new Error("devAutoLogin failed");
+//       }
+//       // const token = process.env.JWT_TOKEN;
 
-      // env에 토큰 세팅 (나중에 삭제 필요 -> 결제 시엔 이미 발급된 config 토큰 활용)
-      process.env.JWT_TOKEN = token;
-      process.env.JWT_TOKEN_AT = Date.now().toString();
-      console.log("[ProductList] JWT_TOKEN set");
+//       // env에 토큰 세팅 (나중에 삭제 필요 -> 결제 시엔 이미 발급된 config 토큰 활용)
+//       process.env.JWT_TOKEN = token;
+//       process.env.JWT_TOKEN_AT = Date.now().toString();
+//       console.log("[ProductList] JWT_TOKEN set");
 
-      // REST API 호출
-      const data = await ProductList({
-        division_idx: config.divisionIdx,
-        device_idx: config.deviceIdx
-      });
+//       // REST API 호출
+//       const data = await ProductList({
+//         division_idx: config.divisionIdx,
+//         device_idx: config.deviceIdx
+//       });
 
-      console.log("[ProductList] response:");
-      console.dir(data, { depth: null });
-    } catch (err) {
-      console.error("[ProductList] error:");
-      console.error(err.message);
-      if (err.response) {
-        console.error(err.response.data);
-      }
-    }
-  })();
-}
+//       console.log("[ProductList] response:");
+//       console.dir(data, { depth: null });
+//     } catch (err) {
+//       console.error("[ProductList] error:");
+//       console.error(err.message);
+//       if (err.response) {
+//         console.error(err.response.data);
+//       }
+//     }
+//   })();
+// }
