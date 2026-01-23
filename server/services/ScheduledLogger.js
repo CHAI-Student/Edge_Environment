@@ -144,21 +144,38 @@ class ScheduledLogger {
      */
     async _captureCamera(cameraId, outputDir) {
         try {
+            // Try JSON endpoint first (returns base64)
             const response = await axios.get(
                 `${CAMERA_URL}/api/camera/${cameraId}/frame`,
-                {
-                    timeout: 10000,
-                    responseType: 'arraybuffer'
-                }
+                { timeout: 10000 }
             );
 
             const filename = `cam_${cameraId}.jpg`;
             const filepath = path.join(outputDir, filename);
-            await fs.writeFile(filepath, response.data);
 
-            return true;
-        } catch (error) {
+            if (response.data && response.data.frame) {
+                // Base64 encoded image
+                const imageBuffer = Buffer.from(response.data.frame, 'base64');
+                await fs.writeFile(filepath, imageBuffer);
+                return true;
+            }
+
             return false;
+        } catch (error) {
+            // Fallback: try raw JPEG endpoint
+            try {
+                const response = await axios.get(
+                    `${CAMERA_URL}/frame/${cameraId}`,
+                    { timeout: 10000, responseType: 'arraybuffer' }
+                );
+
+                const filename = `cam_${cameraId}.jpg`;
+                const filepath = path.join(outputDir, filename);
+                await fs.writeFile(filepath, response.data);
+                return true;
+            } catch (e) {
+                return false;
+            }
         }
     }
 

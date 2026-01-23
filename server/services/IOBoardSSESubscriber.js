@@ -172,13 +172,19 @@ class IOBoardSSESubscriber extends EventEmitter {
 
     /**
      * 로드셀 주기적 업데이트 처리
-     * @param {Object} data - {weights: number[], timestamp: string}
+     * @param {Object} data - {raw_values: string[], filtered_values: string[], timestamp: string}
      */
     _handleLoadcellUpdate(data) {
-        const weights = data.weights || data.loadcells;
+        // IO Board SSE sends raw_values and filtered_values (as string arrays)
+        // Support multiple formats for compatibility
+        const rawValues = data.raw_values || data.weights || data.loadcells;
+        const filteredValues = data.filtered_values || rawValues;
         const timestamp = data.timestamp || new Date().toISOString();
 
-        if (!Array.isArray(weights)) {
+        // Convert string values to numbers
+        const weights = (filteredValues || rawValues || []).map(v => parseFloat(v) || 0);
+
+        if (!Array.isArray(weights) || weights.length === 0) {
             return;
         }
 
@@ -199,9 +205,11 @@ class IOBoardSSESubscriber extends EventEmitter {
         this.lastLoadcellWeights = [...weights];
         this.lastUpdateTime = timestamp;
 
-        // 이벤트 발생
+        // 이벤트 발생 - include all data for dashboard
         this.emit('loadcell_update', {
             weights,
+            raw_values: rawValues,
+            filtered_values: filteredValues,
             timestamp,
             baseline: this.baselineWeights
         });

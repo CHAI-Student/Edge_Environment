@@ -686,6 +686,10 @@
                         <button onclick="refreshStatus()" class="secondary">Refresh</button>
                         <button onclick="initCameras()" class="secondary">Init Cameras</button>
                     </div>
+                    <div class="controls-row" style="margin-top: 8px;">
+                        <button onclick="captureAllCameras()" class="secondary">Capture All</button>
+                        <button onclick="openConfigModal()" class="secondary">Config</button>
+                    </div>
                     <div class="config-list" style="margin-top: 15px;">
                         <div class="config-item">
                             <span class="key">Nvidia Mode</span>
@@ -767,6 +771,47 @@
         </section>
     </main>
 
+    <!-- Configuration Modal -->
+    <div id="config-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;">
+        <div style="background: var(--bg-secondary); border-radius: 8px; width: 600px; max-height: 80vh; overflow-y: auto; border: 1px solid var(--border);">
+            <div style="padding: 15px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0; color: var(--accent);">Configuration</h3>
+                <button onclick="closeConfigModal()" style="background: none; padding: 5px 10px;">X</button>
+            </div>
+            <div style="padding: 20px;">
+                <!-- Zone to Loadcell Mapping -->
+                <div style="margin-bottom: 20px;">
+                    <h4 style="margin-bottom: 10px; color: var(--text-secondary);">Zone - Loadcell Mapping</h4>
+                    <div id="zone-loadcell-config" style="display: grid; gap: 8px;"></div>
+                </div>
+
+                <!-- Zone to Camera Mapping -->
+                <div style="margin-bottom: 20px;">
+                    <h4 style="margin-bottom: 10px; color: var(--text-secondary);">Zone - Camera Mapping</h4>
+                    <div id="zone-camera-config" style="display: grid; gap: 8px;"></div>
+                </div>
+
+                <!-- Camera Device Mapping -->
+                <div style="margin-bottom: 20px;">
+                    <h4 style="margin-bottom: 10px; color: var(--text-secondary);">Camera Device Mapping</h4>
+                    <div style="margin-bottom: 10px;">
+                        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
+                            <input type="checkbox" id="nvidia-mode-checkbox" onchange="updateNvidiaMode()">
+                            <span>Nvidia Mode (use even device indices: 0, 2, 4, ...)</span>
+                        </label>
+                    </div>
+                    <div id="camera-device-config" style="display: grid; gap: 8px;"></div>
+                </div>
+
+                <!-- Actions -->
+                <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                    <button onclick="closeConfigModal()" class="secondary">Cancel</button>
+                    <button onclick="saveConfig()">Save Configuration</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Log Viewer Footer -->
     <footer class="log-viewer">
         <nav class="log-tabs">
@@ -786,11 +831,15 @@
     <script>
         // Configuration
         const API_BASE = window.location.origin;
+        const IO_BOARD_URL = 'http://localhost:8001';
+        const CAMERA_DRIVER_URL = 'http://localhost:8003';
         let eventSource = null;
         let lastWeights = [];
         const eventLog = [];
         const MAX_EVENTS = 100;
         let currentLogTab = 'weight';
+        let pollingInterval = null;
+        let sseConnected = false;
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
@@ -802,9 +851,16 @@
             fetchModelInfo();
             loadLogTab('weight');
 
+            // Start polling fallback (works alongside SSE)
+            startPolling();
+
             // Periodic status refresh
             setInterval(fetchDashboardStatus, 10000);
             setInterval(loadLogTab.bind(null, currentLogTab), 30000);
+
+            // Load camera previews from saved images
+            loadCameraPreviews();
+            setInterval(loadCameraPreviews, 60000); // Refresh every minute
         });
 
         // Initialize zones
@@ -851,11 +907,103 @@
                 cam.innerHTML = `
                     <div class="camera-header">
                         <span class="camera-name">${cameraNames[i]}</span>
+                        <button onclick="captureCamera(${i})" style="padding: 2px 6px; font-size: 10px; flex: none; margin-right: 5px;">Shot</button>
                         <span class="status-dot unknown" id="cam-${i}-status"></span>
                     </div>
                     <div class="camera-preview" id="cam-${i}-preview">No preview</div>
                 `;
                 container.appendChild(cam);
+            }
+        }
+
+        // Load camera previews from saved images
+        async function loadCameraPreviews() {
+            try {
+                const today = new Date().toISOString().split('T')[0];
+                const response = await fetch(`${API_BASE}/api/logs/camera/${today}`);
+                const data = await response.json();
+                const snapshots = data.snapshots || [];
+
+                if (snapshots.length > 0) {
+                    // Get the most recent snapshot
+                    const latestSnapshot = snapshots[0];
+                    const files = latestSnapshot.files || [];
+
+                    // Map camera files to correct indices
+                    files.forEach((file) => {
+                        // Extract camera index from filename (e.g., cam_0.jpg -> 0)
+                        const match = file.match(/cam_(\d+)\.jpg/);
+                        if (match) {
+                            const camIndex = parseInt(match[1]);
+                            const previewEl = document.getElementById(`cam-${camIndex}-preview`);
+                            if (previewEl) {
+                                previewEl.innerHTML = `<img src="${API_BASE}/api/logs/camera/${today}/${latestSnapshot.time}/${file}"
+                                    onerror="this.parentElement.innerHTML='No preview'"
+                                    alt="Camera ${camIndex}">`;
+
+                                // Update status dot to healthy
+                                const statusEl = document.getElementById(`cam-${camIndex}-status`);
+                                if (statusEl) {
+                                    statusEl.className = 'status-dot healthy';
+                                }
+                            }
+                        }
+                    });
+                }
+            } catch (error) {
+                console.log('Failed to load camera previews:', error.message);
+            }
+        }
+
+        // Capture single camera shot
+        async function captureCamera(cameraId) {
+            const previewEl = document.getElementById(`cam-${cameraId}-preview`);
+            if (previewEl) {
+                previewEl.innerHTML = '<div style="color: var(--warning);">Capturing...</div>';
+            }
+
+            try {
+                // Get frame as base64 from camera driver
+                const response = await fetch(`${CAMERA_DRIVER_URL}/api/camera/${cameraId}/frame`);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.frame) {
+                        // Display base64 image
+                        if (previewEl) {
+                            previewEl.innerHTML = `<img src="data:image/jpeg;base64,${data.frame}" alt="Camera ${cameraId}">`;
+                        }
+                        // Update camera status to healthy
+                        const statusEl = document.getElementById(`cam-${cameraId}-status`);
+                        if (statusEl) {
+                            statusEl.className = 'status-dot healthy';
+                        }
+                        return;
+                    }
+                }
+
+                // Fallback: try getting raw JPEG frame
+                const imgUrl = `${CAMERA_DRIVER_URL}/frame/${cameraId}?t=${Date.now()}`;
+                if (previewEl) {
+                    previewEl.innerHTML = `<img src="${imgUrl}" onerror="this.parentElement.innerHTML='No preview'" alt="Camera ${cameraId}">`;
+                }
+            } catch (error) {
+                console.error('Failed to capture camera:', error);
+                if (previewEl) {
+                    previewEl.innerHTML = '<div style="color: var(--error);">Capture failed</div>';
+                }
+                // Update camera status to unhealthy
+                const statusEl = document.getElementById(`cam-${cameraId}-status`);
+                if (statusEl) {
+                    statusEl.className = 'status-dot unhealthy';
+                }
+            }
+        }
+
+        // Capture all cameras
+        async function captureAllCameras() {
+            for (let i = 0; i < 6; i++) {
+                await captureCamera(i);
             }
         }
 
@@ -876,10 +1024,19 @@
                 setTimeout(connectSSE, 5000);
             };
 
-            // Loadcell updates
+            // Loadcell updates - handle multiple formats
             eventSource.addEventListener('loadcell_update', (e) => {
-                const data = JSON.parse(e.data);
-                updateLoadcells(data.weights || data.raw_values || data.filtered_values);
+                try {
+                    const data = JSON.parse(e.data);
+                    // Support multiple formats: weights (parsed numbers), raw_values, filtered_values
+                    const values = data.weights || data.filtered_values || data.raw_values || data.loadcells;
+                    if (values && values.length > 0) {
+                        updateLoadcells(values);
+                        sseConnected = true;
+                    }
+                } catch (err) {
+                    console.error('Failed to parse loadcell update:', err);
+                }
             });
 
             // Weight change events
@@ -912,6 +1069,7 @@
             // Connection events
             eventSource.addEventListener('connected', () => {
                 console.log('SSE connected');
+                sseConnected = true;
             });
 
             eventSource.addEventListener('io_board_connected', () => {
@@ -921,6 +1079,45 @@
             eventSource.addEventListener('io_board_disconnected', () => {
                 setServiceStatus('io-board-dot', false);
             });
+        }
+
+        // Direct polling fallback (for when SSE isn't delivering data)
+        function startPolling() {
+            if (pollingInterval) return;
+
+            pollingInterval = setInterval(async () => {
+                try {
+                    // Poll loadcells directly from IO Board
+                    const loadcellResp = await fetch(`${IO_BOARD_URL}/loadcells`);
+                    if (loadcellResp.ok) {
+                        const data = await loadcellResp.json();
+                        if (data.loadcells) {
+                            updateLoadcells(data.loadcells);
+                            setServiceStatus('io-board-dot', true);
+                        }
+                    }
+
+                    // Poll door status directly from IO Board
+                    const statusResp = await fetch(`${IO_BOARD_URL}/status`);
+                    if (statusResp.ok) {
+                        const data = await statusResp.json();
+                        updateDoorStatus(data.door, data.deadbolt);
+                    }
+                } catch (error) {
+                    console.log('Polling fallback error:', error.message);
+                    setServiceStatus('io-board-dot', false);
+                }
+            }, 1000); // Poll every second
+
+            console.log('Started polling fallback');
+        }
+
+        function stopPolling() {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+                console.log('Stopped polling fallback');
+            }
         }
 
         // Update loadcell display
@@ -1379,6 +1576,177 @@
             } catch (error) {
                 console.error('Failed to load logs:', error);
                 tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--error)">Failed to load logs</td></tr>`;
+            }
+        }
+
+        // Configuration Modal Functions
+        let currentConfig = {
+            zoneMapping: null,
+            cameraDeviceMap: null
+        };
+
+        async function openConfigModal() {
+            try {
+                // Load current configuration
+                const [zoneMappingResp, cameraMapResp] = await Promise.all([
+                    fetch(`${API_BASE}/api/config/zone-mapping`),
+                    fetch(`${API_BASE}/api/config/camera-device-map`)
+                ]);
+
+                const zoneMappingData = await zoneMappingResp.json();
+                const cameraMapData = await cameraMapResp.json();
+
+                currentConfig.zoneMapping = zoneMappingData.mapping;
+                currentConfig.cameraDeviceMap = cameraMapData.mapping;
+
+                // Render zone-loadcell mapping
+                renderZoneLoadcellConfig();
+
+                // Render zone-camera mapping
+                renderZoneCameraConfig();
+
+                // Render camera device mapping
+                renderCameraDeviceConfig();
+
+                // Show modal
+                document.getElementById('config-modal').style.display = 'flex';
+            } catch (error) {
+                console.error('Failed to load configuration:', error);
+                alert('Failed to load configuration');
+            }
+        }
+
+        function closeConfigModal() {
+            document.getElementById('config-modal').style.display = 'none';
+        }
+
+        function renderZoneLoadcellConfig() {
+            const container = document.getElementById('zone-loadcell-config');
+            const zones = currentConfig.zoneMapping?.zones || {};
+
+            container.innerHTML = '';
+            for (let i = 0; i < 5; i++) {
+                const zoneConfig = zones[i] || { loadcell_channels: [i * 2, i * 2 + 1] };
+                const channels = zoneConfig.loadcell_channels || [i * 2, i * 2 + 1];
+
+                const row = document.createElement('div');
+                row.style.cssText = 'display: flex; align-items: center; gap: 10px;';
+                row.innerHTML = `
+                    <span style="width: 60px; font-size: 13px;">Zone ${i}:</span>
+                    <select id="zone-${i}-ch1" style="flex: 1; padding: 6px; background: var(--bg-card); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px;">
+                        ${[0,1,2,3,4,5,6,7,8,9].map(ch => `<option value="${ch}" ${channels[0] === ch ? 'selected' : ''}>CH ${ch}</option>`).join('')}
+                    </select>
+                    <select id="zone-${i}-ch2" style="flex: 1; padding: 6px; background: var(--bg-card); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px;">
+                        ${[0,1,2,3,4,5,6,7,8,9].map(ch => `<option value="${ch}" ${channels[1] === ch ? 'selected' : ''}>CH ${ch}</option>`).join('')}
+                    </select>
+                `;
+                container.appendChild(row);
+            }
+        }
+
+        function renderZoneCameraConfig() {
+            const container = document.getElementById('zone-camera-config');
+            const zones = currentConfig.zoneMapping?.zones || {};
+
+            container.innerHTML = '';
+            for (let i = 0; i < 5; i++) {
+                const zoneConfig = zones[i] || { side_camera_id: i + 1 };
+                const sideCamera = zoneConfig.side_camera_id !== undefined ? zoneConfig.side_camera_id : i + 1;
+
+                const row = document.createElement('div');
+                row.style.cssText = 'display: flex; align-items: center; gap: 10px;';
+                row.innerHTML = `
+                    <span style="width: 60px; font-size: 13px;">Zone ${i}:</span>
+                    <span style="font-size: 12px; color: var(--text-secondary);">Side Camera:</span>
+                    <select id="zone-${i}-side-cam" style="flex: 1; padding: 6px; background: var(--bg-card); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px;">
+                        ${[0,1,2,3,4,5].map(cam => `<option value="${cam}" ${sideCamera === cam ? 'selected' : ''}>Camera ${cam}</option>`).join('')}
+                    </select>
+                `;
+                container.appendChild(row);
+            }
+        }
+
+        function renderCameraDeviceConfig() {
+            const container = document.getElementById('camera-device-config');
+            const deviceMap = currentConfig.cameraDeviceMap?.device_map || {};
+            const nvidiaMode = currentConfig.cameraDeviceMap?.nvidia_mode || false;
+
+            document.getElementById('nvidia-mode-checkbox').checked = nvidiaMode;
+
+            container.innerHTML = '';
+            for (let i = 0; i < 6; i++) {
+                const camConfig = deviceMap[i] || { physical_index: nvidiaMode ? i * 2 : i };
+                const physicalIndex = camConfig.physical_index !== undefined ? camConfig.physical_index : (nvidiaMode ? i * 2 : i);
+
+                const row = document.createElement('div');
+                row.style.cssText = 'display: flex; align-items: center; gap: 10px;';
+                row.innerHTML = `
+                    <span style="width: 80px; font-size: 13px;">Camera ${i}:</span>
+                    <span style="font-size: 12px; color: var(--text-secondary);">Physical Device:</span>
+                    <select id="cam-${i}-device" style="flex: 1; padding: 6px; background: var(--bg-card); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px;">
+                        ${[0,1,2,3,4,5,6,7,8,9,10,11].map(dev => `<option value="${dev}" ${physicalIndex === dev ? 'selected' : ''}>/dev/video${dev}</option>`).join('')}
+                    </select>
+                `;
+                container.appendChild(row);
+            }
+        }
+
+        function updateNvidiaMode() {
+            const nvidiaMode = document.getElementById('nvidia-mode-checkbox').checked;
+            // Auto-update physical indices based on nvidia mode
+            for (let i = 0; i < 6; i++) {
+                const select = document.getElementById(`cam-${i}-device`);
+                if (select) {
+                    select.value = nvidiaMode ? i * 2 : i;
+                }
+            }
+        }
+
+        async function saveConfig() {
+            try {
+                // Build zone mapping
+                const zones = {};
+                for (let i = 0; i < 5; i++) {
+                    const ch1 = parseInt(document.getElementById(`zone-${i}-ch1`).value);
+                    const ch2 = parseInt(document.getElementById(`zone-${i}-ch2`).value);
+                    const sideCam = parseInt(document.getElementById(`zone-${i}-side-cam`).value);
+
+                    zones[i] = {
+                        loadcell_channels: [ch1, ch2],
+                        side_camera_id: sideCam
+                    };
+                }
+
+                // Build camera device map
+                const nvidiaMode = document.getElementById('nvidia-mode-checkbox').checked;
+                const deviceMap = {};
+                for (let i = 0; i < 6; i++) {
+                    const physicalIndex = parseInt(document.getElementById(`cam-${i}-device`).value);
+                    deviceMap[i] = { physical_index: physicalIndex };
+                }
+
+                // Save zone mapping
+                await fetch(`${API_BASE}/api/config/zone-mapping`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ zones, top_camera_id: 0 })
+                });
+
+                // Save camera device map
+                await fetch(`${API_BASE}/api/config/camera-device-map`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ nvidia_mode: nvidiaMode, device_map: deviceMap })
+                });
+
+                alert('Configuration saved successfully');
+                closeConfigModal();
+
+                // Refresh display
+                fetchDashboardStatus();
+            } catch (error) {
+                console.error('Failed to save configuration:', error);
+                alert('Failed to save configuration: ' + error.message);
             }
         }
     </script>
