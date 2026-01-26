@@ -1,8 +1,9 @@
 # Edge Environment 통합 가이드
 
-> **작성일**: 2026-01-22
+> **작성일**: 2026-01-26 (최종 업데이트)
 > **작성자**: minkyu 브랜치
 > **대상**: Node.js 총괄 담당자 및 개발팀
+> **아키텍처 변경**: Model 서비스 stateless 전환 완료
 
 ---
 
@@ -21,11 +22,14 @@
 
 ## 1. 시스템 개요
 
-### 1.1 전체 아키텍처
+### 1.1 전체 아키텍처 (2026-01-26 업데이트)
+
+> **중요 변경**: Model 서비스가 **stateless**로 전환되었습니다. Node.js가 SSE 구독 및 카메라 스냅샷을 담당합니다.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    AI Smart Vending Machine System                       │
+│                    (Node.js 중심 오케스트레이션)                          │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐               │
@@ -40,31 +44,31 @@
 │   │   :8001     │     │   :8003     │     │   :5000     │               │
 │   └──────┬──────┘     └──────┬──────┘     └──────┬──────┘               │
 │          │                   │                   │                       │
-│          │   SSE (실시간)     │   HTTP            │                       │
-│          ▼                   ▼                   │                       │
-│   ┌─────────────────────────────────┐           │                       │
-│   │         model :8002             │           │                       │
-│   │   (AI 상품 판단 + 센서 퓨전)      │           │                       │
-│   │                                 │           │                       │
-│   │   Vision + Weight → 상품 결정    │           │                       │
-│   └──────────────┬──────────────────┘           │                       │
-│                  │                              │                       │
-│                  │   HTTP POST (판단 결과)       │                       │
-│                  ▼                              ▼                       │
-│   ┌─────────────────────────────────────────────────────────┐           │
-│   │              Node.js Orchestrator :8888                  │           │
-│   │                                                          │           │
-│   │   - 전체 흐름 제어                                        │           │
-│   │   - MQTT 브로커 연동 (CHAI IF01-07)                       │           │
-│   │   - 결제 처리                                             │           │
-│   │   - Frontend 통신                                        │           │
-│   └──────────────────────────────────────────────────────────┘           │
-│                  │                                                       │
-│                  ▼                                                       │
-│   ┌─────────────────────────────────────────────────────────┐           │
-│   │              mqtt_client :8006                           │           │
-│   │              (MQTT CHAI IF01-04)                         │           │
-│   └─────────────────────────────────────────────────────────┘           │
+│          │                   │                   │                       │
+│   ┌──────┴───────────────────┴───────────────────┴──────────────────┐   │
+│   │              Node.js Orchestrator :8889 ★                        │   │
+│   │                                                                  │   │
+│   │   1. IO Board SSE 구독 (loadcell.change 감지)                    │   │
+│   │   2. Camera Driver 스냅샷 요청                                   │   │
+│   │   3. Model 서비스에 판단 요청 (weight_data + media_paths)        │   │
+│   │   4. 결제 처리 + MQTT 연동                                       │   │
+│   │   5. Frontend 대시보드 제공                                      │   │
+│   └────────────────────────┬────────────────────────────────────────┘   │
+│                            │                                             │
+│                            │ HTTP POST /api/judge                        │
+│                            │ (weight_data + media_paths)                 │
+│                            ▼                                             │
+│   ┌─────────────────────────────────────────────────────────────────┐   │
+│   │              model :8002 (STATELESS)                             │   │
+│   │                                                                  │   │
+│   │   - Vision 추론 (YOLO)                                          │   │
+│   │   - Weight 검증                                                  │   │
+│   │   - 판단 결과 반환 (SSE 구독 없음!)                              │   │
+│   └─────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│   ┌─────────────────────────────────────────────────────────────────┐   │
+│   │              mqtt_client :8006 (MQTT CHAI IF01-04)               │   │
+│   └─────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -73,12 +77,12 @@
 
 | 서비스 | 포트 | 언어 | 역할 |
 |--------|------|------|------|
-| **orchestrator** | 8888 | Node.js | 전체 흐름 제어, MQTT, Frontend API |
-| **io_board** | 8001 | Python | 로드셀 10채널 + 데드볼트 제어 |
-| **model** | 8002 | Python | AI 상품 판단 (Vision + Weight 퓨전) |
-| **camera_driver** | 8003 | Python | 6대 카메라 관리 |
+| **orchestrator** | 8889 | Node.js | SSE 구독 + 스냅샷 요청 + 판단 흐름 제어 ★ |
+| **io_board** | 8001 | Python | 로드셀 10채널 + 데드볼트 SSE 스트림 |
+| **model** | 8002 | Python | AI 상품 판단 (Stateless, Vision + Weight) |
+| **camera_driver** | 8003 | Python | 6대 카메라 관리 + 스냅샷 저장 |
 | **card_terminal** | 5000 | Python | 결제 터미널 |
-| **mqtt_client** | 8006 | Python | MQTT 브로커 연동 |
+| **mqtt_client** | 8006 | Python | MQTT 브로커 연동 (IF01-04) |
 
 ---
 
@@ -115,30 +119,27 @@ Edge_Environment/
 └── .env                            # 환경 변수
 ```
 
-### 2.2 Model 서비스 상세 구조
+### 2.2 Model 서비스 상세 구조 (Stateless 아키텍처)
+
+> **변경사항**: `sse_client/` 폴더가 삭제되었습니다. Model 서비스는 더 이상 SSE를 구독하지 않습니다.
+> Node.js가 SSE 구독 및 카메라 스냅샷을 담당하고, Model은 판단만 수행합니다.
 
 ```
 services/model/
-├── main.py                         # FastAPI 진입점
+├── main.py                         # FastAPI 진입점 (Stateless)
 ├── config.py                       # 설정 (Zone 매핑, 파라미터)
 ├── requirements.txt                # Python 의존성
 │
 ├── api/                            # REST API
-│   ├── routes.py                   # 엔드포인트 정의
-│   ├── models.py                   # Pydantic 스키마
-│   └── node_client.py              # Node.js 결과 전송
+│   ├── routes.py                   # 엔드포인트 정의 (/api/judge 등)
+│   └── models.py                   # Pydantic 스키마 (WeightData, MediaPaths)
 │
-├── sse_client/                     # io_board 실시간 구독
-│   ├── io_board_subscriber.py      # SSE 스트림 리스너
-│   ├── event_parser.py             # 이벤트 파싱
-│   └── zone_detector.py            # 채널 → Zone 매핑
-│
-├── camera/                         # 이미지 캡처
-│   ├── camera_client.py            # camera_driver API
-│   └── frame_capturer.py           # 프레임 로더
+├── camera/                         # 이미지 로드 (Node.js가 전달한 경로에서)
+│   ├── camera_client.py            # camera_driver API (폴백용)
+│   └── frame_capturer.py           # 파일 시스템에서 프레임 로드
 │
 ├── vision/                         # YOLO 추론
-│   ├── yolo_wrapper.py             # YOLO 모델 래퍼
+│   ├── yolo_wrapper.py             # YOLO 모델 래퍼 (.pt 또는 .engine)
 │   ├── hand_filter.py              # 손 근접 필터
 │   ├── top5_extractor.py           # Top-K 추출
 │   └── multi_view_ensemble.py      # Top+Side 앙상블
@@ -151,6 +152,7 @@ services/model/
 │   ├── decision_engine.py          # 핵심 판단 로직
 │   ├── event_tracker.py            # 이벤트 추적
 │   └── advanced/                   # 고급 시나리오
+│       ├── baseline_tracker.py     # 베이스라인 드리프트 감지
 │       ├── return_detector.py      # 반환 감지
 │       ├── cross_zone_detector.py  # Zone 간 이동
 │       └── rapid_pickup_handler.py # 연속 픽업
@@ -158,11 +160,9 @@ services/model/
 ├── database/                       # 상품 DB
 │   └── product_db.py               # IF11 형식 지원
 │
-├── error_recovery/                 # ★ 에러 복구 모듈 (신규)
-│   ├── __init__.py
-│   ├── error_codes.py              # ErrorCode enum (E2xxx, E3xxx, ...)
-│   ├── service_error.py            # ServiceError dataclass
-│   └── recovery_manager.py         # RecoveryManager (헬스체크, 자동복구)
+├── door_payment/                   # ★ 도어 결제 모듈 (신규)
+│   ├── transaction_controller.py   # 거래 상태 관리
+│   └── payment_client.py           # 결제 단말 통신
 │
 ├── monitor/                        # 테스트 대시보드
 │   ├── console_dashboard.py
@@ -171,95 +171,146 @@ services/model/
 └── tests/                          # 테스트
     ├── test_offline_dataset.py     # 오프라인 테스트
     ├── test_hardware_integration.py # 하드웨어 테스트
-    ├── test_error_recovery.py      # ★ 에러 복구 테스트 (36개)
-    └── test_product_registration.py # ★ 상품 등록 테스트
+    └── conftest.py                 # 테스트 설정
 ```
+
+> **삭제된 폴더**: `sse_client/` (io_board_subscriber.py, event_parser.py, zone_detector.py)
+> **삭제된 파일**: `api/node_client.py` (Model이 Node.js로 결과를 전송하지 않음)
 
 ---
 
 ## 3. Node.js 연동 가이드
 
-### 3.1 Model 서비스 연동 방법
+### 3.1 새로운 아키텍처: Node.js 중심 오케스트레이션
 
-Node.js Orchestrator는 두 가지 방식으로 Model 서비스와 통신합니다:
-
-#### 방식 1: Model → Node.js (실시간 이벤트 기반)
+> **중요**: 2026-01-26 업데이트로 Model 서비스가 **stateless**로 변경되었습니다.
+> Node.js가 모든 흐름을 제어합니다.
 
 ```
-io_board (SSE) → model (판단) → Node.js (결과 수신)
+┌─────────────────────────────────────────────────────────────────┐
+│                    새로운 데이터 흐름                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  1. IO Board SSE → Node.js (loadcell.change 이벤트)             │
+│  2. Node.js → Camera Driver (스냅샷 저장 요청)                   │
+│  3. Node.js → Model (weight_data + media_paths 전달)            │
+│  4. Model → Node.js (판단 결과 반환)                            │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-Model 서비스가 io_board의 SSE 스트림을 구독하고, 무게 변화 감지 시 자동으로 상품 판단 후 Node.js에 결과를 전송합니다.
+#### Node.js 핵심 서비스 파일
 
-**Node.js에서 수신해야 할 엔드포인트:**
+| 파일 | 역할 |
+|------|------|
+| `server/services/IOBoardSSESubscriber.js` | IO Board SSE 구독 + 무게 변화 감지 |
+| `server/services/CameraDriverClient.js` | 카메라 스냅샷 요청 |
+| `server/services/ProductJudgeClient.js` | Model 서비스 판단 요청 |
+
+#### IOBoardSSESubscriber.js 사용 예시
+
 ```javascript
-// server/routes/sensor.js (예시)
-app.post('/api/sensor/judgment', (req, res) => {
-    const result = req.body;
-    /*
-    result 구조:
-    {
-        "success": true,
-        "products": [
-            {
-                "productId": 26,
-                "name": "chickenmayo_rice",
-                "count": 1,
-                "unitPrice": 3500,
-                "totalPrice": 3500,
-                "confidence": 0.91
-            }
-        ],
-        "totalPrice": 3500,
-        "status": "complete",    // "complete" | "partial" | "uncertain"
-        "confidence": 0.91,
-        "weightInfo": {
-            "delta": -365.0,
-            "explained": 365.0,
-            "residual": 0.0
-        },
-        "isRemoval": true,       // true=픽업, false=반환
-        "zoneId": 0,
-        "timestamp": 1737450000.123
-    }
-    */
+// server/services/IOBoardSSESubscriber.js
+const EventSource = require('eventsource');
 
-    // 결과 처리 로직
-    if (result.status === 'complete') {
-        // 확실한 판단 - 바로 결제 진행
-        processPayment(result.products);
-    } else if (result.status === 'partial') {
-        // 부분 판단 - 사용자 확인 필요
-        requestUserConfirmation(result);
-    } else {
-        // 불확실 - 재시도 또는 수동 처리
-        handleUncertainJudgment(result);
+class IOBoardSSESubscriber {
+    constructor(ioboardUrl = 'http://localhost:8001') {
+        this.url = ioboardUrl;
+        this.eventSource = null;
+        this.debounceTimeout = null;
+        this.debounceMs = 500;  // 500ms 디바운스
+        this.weightThreshold = 50;  // 50g 이상 변화 시 감지
     }
 
-    res.json({ received: true });
-});
+    connect() {
+        const sseUrl = `${this.url}/sse?streams=loadcells,doors&loadcell_interval=0.5`;
+        this.eventSource = new EventSource(sseUrl);
+
+        this.eventSource.addEventListener('loadcell.change', (event) => {
+            const data = JSON.parse(event.data);
+            // data: { zone_id, delta_weight, channels, before_weights, after_weights }
+            this.handleWeightChange(data);
+        });
+
+        this.eventSource.addEventListener('door.update', (event) => {
+            const data = JSON.parse(event.data);
+            // data: { door: "OPEN"|"CLOSED", deadbolt: "LOCKED"|"UNLOCKED" }
+            this.handleDoorUpdate(data);
+        });
+    }
+
+    async handleWeightChange(data) {
+        // 디바운스: 연속 이벤트 무시
+        if (this.debounceTimeout) {
+            clearTimeout(this.debounceTimeout);
+        }
+
+        this.debounceTimeout = setTimeout(async () => {
+            if (Math.abs(data.delta_weight) < this.weightThreshold) return;
+
+            // 1. 카메라 스냅샷 요청
+            const sessionId = Date.now().toString();
+            const snapshotResult = await this.cameraClient.captureSnapshot(
+                data.zone_id,
+                sessionId
+            );
+
+            // 2. Model 서비스에 판단 요청
+            const judgment = await this.productJudge.judge({
+                zone_id: data.zone_id,
+                weight_data: {
+                    before_weights: data.before_weights,
+                    after_weights: data.after_weights,
+                    delta_weight: data.delta_weight,
+                    channels: data.channels
+                },
+                media_paths: {
+                    image_folder: snapshotResult.folder,
+                    top_image: snapshotResult.top_image,
+                    side_image: snapshotResult.side_image
+                }
+            });
+
+            // 3. 결과 처리
+            this.emit('judgment', judgment);
+        }, this.debounceMs);
+    }
+}
 ```
 
-#### 방식 2: Node.js → Model (직접 요청)
+### 3.2 Model 서비스 연동 (Stateless)
 
-Node.js에서 특정 시점에 직접 상품 판단을 요청할 수 있습니다.
+Model 서비스는 이제 **요청-응답 방식**으로만 동작합니다. SSE 구독이나 카메라 호출을 하지 않습니다.
 
-**ProductJudgeClient 사용 (services/ProductJudgeClient.js):**
+**ProductJudgeClient 사용 (server/services/ProductJudgeClient.js):**
+
+> **권장 형식**: `weight_data` + `media_paths` (레거시 `delta_weight`도 지원)
+
 ```javascript
 const axios = require('axios');
 
 class ProductJudgeClient {
     constructor(baseUrl = 'http://localhost:8002') {
         this.baseUrl = baseUrl;
+        this.timeout = 10000; // 10초 타임아웃
     }
 
-    // 단일 Zone 상품 판단
-    async judge(zoneId, deltaWeight, options = {}) {
+    // ★ 권장: weight_data + media_paths 형식
+    async judge(request) {
+        const response = await axios.post(`${this.baseUrl}/api/judge`, {
+            zone_id: request.zone_id,
+            weight_data: request.weight_data,      // 무게 정보
+            media_paths: request.media_paths       // 이미지 경로
+        }, { timeout: this.timeout });
+        return response.data;
+    }
+
+    // 레거시 형식 (하위 호환)
+    async judgeLegacy(zoneId, deltaWeight) {
         const response = await axios.post(`${this.baseUrl}/api/judge`, {
             zone_id: zoneId,
-            delta_weight: deltaWeight,
-            ...options
-        });
+            delta_weight: deltaWeight
+        }, { timeout: this.timeout });
         return response.data;
     }
 
@@ -268,7 +319,7 @@ class ProductJudgeClient {
         const response = await axios.post(`${this.baseUrl}/api/judge/multi-zone`, {
             zone_deltas: zoneDeltas,
             check_cross_zone: checkCrossZone
-        });
+        }, { timeout: this.timeout });
         return response.data;
     }
 
@@ -277,15 +328,15 @@ class ProductJudgeClient {
         const response = await axios.post(`${this.baseUrl}/api/judge/with-history`, {
             current_request: currentRequest,
             recent_events: recentEvents,
-            check_return: options.checkReturn || true,
-            check_rapid_pickup: options.checkRapidPickup || false
-        });
+            check_return: options.checkReturn ?? true,
+            check_rapid_pickup: options.checkRapidPickup ?? false
+        }, { timeout: this.timeout });
         return response.data;
     }
 
     // 헬스 체크
     async health() {
-        const response = await axios.get(`${this.baseUrl}/api/health`);
+        const response = await axios.get(`${this.baseUrl}/api/health`, { timeout: 5000 });
         return response.data;
     }
 
@@ -299,18 +350,28 @@ class ProductJudgeClient {
 module.exports = ProductJudgeClient;
 ```
 
-**사용 예시:**
+**사용 예시 (권장 형식):**
 ```javascript
 const ProductJudgeClient = require('./services/ProductJudgeClient');
 const judgeClient = new ProductJudgeClient('http://localhost:8002');
 
-// 단일 Zone 판단
+// ★ 권장: weight_data + media_paths 형식
 router.post('/judge', async (req, res) => {
     try {
-        const result = await judgeClient.judge(
-            req.body.zoneId,     // Zone 0-4
-            req.body.deltaWeight // 무게 변화량 (음수=픽업, 양수=반환)
-        );
+        const result = await judgeClient.judge({
+            zone_id: req.body.zoneId,
+            weight_data: {
+                before_weights: req.body.beforeWeights,  // 10채널 배열
+                after_weights: req.body.afterWeights,    // 10채널 배열
+                delta_weight: req.body.deltaWeight,      // 총 변화량
+                channels: req.body.channels              // 변화 채널 [0,1]
+            },
+            media_paths: {
+                image_folder: req.body.imageFolder,      // 스냅샷 폴더
+                top_image: req.body.topImage,            // Top 카메라 경로
+                side_image: req.body.sideImage           // Side 카메라 경로
+            }
+        });
         res.json(result);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -797,16 +858,35 @@ GET /api/health
 }
 ```
 
-#### 상품 판단 (기본)
+#### 상품 판단 (권장 형식 - weight_data + media_paths)
 ```http
 POST /api/judge
 Content-Type: application/json
 
 {
     "zone_id": 0,
-    "delta_weight": -365.0,
-    "loadcell_weights": ["+00267", "+00268", "+00000", ...],
-    "baseline_weights": ["+00432", "+00433", "+00000", ...]
+    "weight_data": {
+        "before_weights": [1000, 1005, 0, 0, 0, 0, 0, 0, 0, 0],
+        "after_weights": [480, 505, 0, 0, 0, 0, 0, 0, 0, 0],
+        "delta_weight": -520,
+        "channels": [0, 1]
+    },
+    "media_paths": {
+        "image_folder": "/data/snapshots/260126143025",
+        "top_image": "/data/snapshots/260126143025/cam_0/snapshot.jpg",
+        "side_image": "/data/snapshots/260126143025/cam_1/snapshot.jpg"
+    }
+}
+```
+
+#### 상품 판단 (레거시 형식 - 하위 호환)
+```http
+POST /api/judge
+Content-Type: application/json
+
+{
+    "zone_id": 0,
+    "delta_weight": -365.0
 }
 ```
 ```json
@@ -989,76 +1069,86 @@ GET /status
 
 ## 7. 데이터 흐름
 
-### 7.1 실시간 상품 판단 흐름
+### 7.1 실시간 상품 판단 흐름 (Node.js 중심)
+
+> **업데이트**: Node.js가 SSE 구독 및 카메라 제어를 담당합니다.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │                    REAL-TIME PRODUCT JUDGMENT FLOW                    │
+│                    (Node.js 오케스트레이션)                           │
 └──────────────────────────────────────────────────────────────────────┘
 
 [1] 손님이 상품을 집음
         │
         ▼
-[2] 로드셀 무게 변화 감지 (io_board)
+[2] 로드셀 무게 변화 감지 (io_board :8001)
     - 10채널 중 특정 채널에서 변화 감지
     - threshold (5g) 초과 시 이벤트 발생
         │
         │ SSE: loadcell.change
-        │ {changed_indices: [0,1], deltas: [-180,-185]}
+        │ {zone_id: 0, delta_weight: -365, channels: [0,1],
+        │  before_weights: [...], after_weights: [...]}
         ▼
-[3] Zone 감지 (model - zone_detector)
-    - 채널 [0,1] → Zone 0
-    - 채널 [2,3] → Zone 1
-    - ...
+[3] ★ Node.js SSE 수신 (IOBoardSSESubscriber.js)
+    - 무게 변화 감지 (threshold: 50g)
+    - 디바운스 처리 (500ms)
+    - Zone ID 확인
         │
         ▼
-[4] 카메라 프레임 캡처 (camera_driver)
-    - Top 카메라 (CAM 0) - 전체 뷰
-    - Side 카메라 (Zone별) - 상세 뷰
+[4] ★ Node.js → Camera Driver 스냅샷 요청
+    - POST /api/zone/{zone_id}/snapshot
+    - session_id 생성 (타임스탬프)
+    - include_top: true (Top 카메라 포함)
+        │
+        │ 스냅샷 저장 경로: /data/snapshots/{session_id}/
+        ▼
+[5] ★ Node.js → Model 서비스 판단 요청
+    - POST /api/judge
+    - weight_data: {before_weights, after_weights, delta_weight, channels}
+    - media_paths: {image_folder, top_image, side_image}
         │
         ▼
-[5] Vision 파이프라인 (model - vision/)
+[6] Model 서비스 Vision 파이프라인 (Stateless)
     ┌─────────────────────────────────────────────┐
-    │  5.1 YOLO 추론                               │
+    │  6.1 이미지 로드 (media_paths에서)           │
+    │      - Top 카메라 이미지                     │
+    │      - Side 카메라 이미지                    │
+    │                                             │
+    │  6.2 YOLO 추론                               │
     │      - 손(hand) 감지                         │
     │      - 상품(products) 감지                   │
     │                                             │
-    │  5.2 Hand Filter (ROI)                      │
+    │  6.3 Hand Filter (ROI)                      │
     │      - 손과 가장 가까운 상품 필터링            │
     │                                             │
-    │  5.3 Top-K 추출                             │
+    │  6.4 Top-K 추출 + Multi-View Ensemble       │
     │      - 최고 confidence 상품 1개 추출         │
-    │      (config: top_k=1)                      │
-    │                                             │
-    │  5.4 Multi-View Ensemble                    │
-    │      - Top + Side 카메라 결과 결합           │
-    │      - 가중치: 5:5 (동일)                    │
-    │      - 양쪽에서 감지된 클래스 우선            │
+    │      - Top + Side 카메라 결과 결합 (5:5)     │
     └─────────────────────────────────────────────┘
         │
         │ Vision 후보: [chickenmayo_rice: 0.90]
         ▼
-[6] Weight Validation (model - weight/)
+[7] Model 서비스 Weight Validation
     ┌─────────────────────────────────────────────┐
     │  Vision 후보 × 무게 변화량 매칭               │
     │                                             │
-    │  - delta_weight = -365g (로드셀에서)         │
+    │  - delta_weight = -365g (weight_data에서)   │
     │  - candidate: chickenmayo_rice (365g)       │
     │  - count = 365 / 365 = 1개                  │
-    │  - error = |365 - 365| / 365 = 0%           │
     │  - tolerance (10%) 이내 → ✓ VALIDATED       │
     └─────────────────────────────────────────────┘
         │
         ▼
-[7] 최종 판단 결정 (model - decision_engine)
+[8] Model 서비스 → Node.js 결과 반환
+    - HTTP Response (동기)
     - status: "complete" (confidence > 0.7)
     - products: [{chickenmayo_rice, count: 1, price: 3500}]
         │
-        │ HTTP POST /api/sensor/judgment
         ▼
-[8] Node.js Orchestrator 수신
+[9] Node.js 결과 처리
     - 결제 처리 진행
-    - Frontend 알림
+    - Frontend SSE 알림
     - MQTT 재고 업데이트 (IF04)
 ```
 
@@ -1222,22 +1312,53 @@ tolerance_percent = 0.10  # 허용 오차 10%
 ---
 
 > **문의**: minkyu 브랜치 담당자
-> **최종 업데이트**: 2026-01-22 (2차)
+> **최종 업데이트**: 2026-01-26
 
 ---
 
-## 9. 최신 업데이트 (2026-01-22 2차)
+## 9. 최신 업데이트
 
-### 9.1 IF11 상품 리스트 동기화
+### 9.1 아키텍처 변경 (2026-01-26) ★ 중요
+
+**Model 서비스 Stateless 전환:**
+- `sse_client/` 폴더 삭제 (io_board SSE 구독 제거)
+- `api/node_client.py` 삭제 (결과 푸시 → 동기 응답으로 변경)
+- Node.js가 모든 흐름 제어 담당
+
+**새로운 API 요청 형식:**
+```json
+{
+  "zone_id": 0,
+  "weight_data": {
+    "before_weights": [1000, 1005, 0, 0, 0, 0, 0, 0, 0, 0],
+    "after_weights": [480, 505, 0, 0, 0, 0, 0, 0, 0, 0],
+    "delta_weight": -520,
+    "channels": [0, 1]
+  },
+  "media_paths": {
+    "image_folder": "/data/snapshots/260126143025",
+    "top_image": "...",
+    "side_image": "..."
+  }
+}
+```
+
+### 9.2 Node.js 서비스 업데이트
+
+**핵심 서비스 파일:**
+| 파일 | 역할 |
+|------|------|
+| `IOBoardSSESubscriber.js` | SSE 구독 + 무게 변화 감지 + 디바운스 |
+| `CameraDriverClient.js` | 스냅샷 요청 + Top 카메라 녹화 제어 |
+| `ProductJudgeClient.js` | Model 판단 요청 (weight_data + media_paths) |
+
+**포트 변경:**
+- Node.js: 8888 → **8889**
+
+### 9.3 IF11 상품 리스트 동기화
 
 Node.js에서 IF11 형식의 상품 리스트를 Model 서비스로 전송할 수 있습니다.
 
-**README.md Step 5.1 연동:**
-```
-상품 정보(상품명, 무게, 재고) + 스냅샷 경로 (node → model)
-```
-
-**사용 예시 (Node.js):**
 ```javascript
 const axios = require('axios');
 
@@ -1249,51 +1370,31 @@ async function syncProductsToModel(productList) {
             product_name: p.product_name,
             sale_price: p.sale_price,
             stock_qty: p.stock_qty,
-            product_weight: String(p.product_weight)  // 문자열로 변환
+            product_weight: String(p.product_weight)
         }))
     });
     return response.data;
 }
 ```
 
-### 9.2 에러 복구 모듈
+### 9.4 에러 코드 체계
 
-Model 서비스에 에러 복구 모듈이 추가되었습니다.
-
-**에러 코드 체계:**
 | 범위 | 서비스 | 예시 |
 |------|--------|------|
 | E2xxx | io_board | E2001(포트 없음), E2005(타임아웃) |
-| E3xxx | camera | E3001(연결 실패), E3002(프레임 캡처 실패) |
+| E3xxx | camera | E3001(연결 실패), E3006(매핑 실패) |
 | E4xxx | vision | E4001(모델 로드 실패), E4002(추론 실패) |
-| E5xxx | network | E5001(SSE 연결 실패), E5003(Node.js 연결 실패) |
-| E6xxx | payment | E6001(단말기 연결 실패), E6002(승인 실패) |
+| E5xxx | network | E5001(SSE 실패), E5003(Node.js 실패) |
+| E6xxx | payment | E6001(단말기 연결 실패), E6004(네트워크) |
 
-**RecoveryManager 사용:**
-```python
-from error_recovery import RecoveryManager
+### 9.5 Door Payment 모듈 (신규)
 
-manager = RecoveryManager()
-manager.register_service("io_board")
-manager.register_service("camera")
+Model 서비스에 도어 결제 모듈이 추가되었습니다.
 
-# 헬스 체크
-await manager.start_monitoring()
-
-# 상태 조회
-status = manager.get_all_status()
+**API 엔드포인트:**
 ```
-
-### 9.3 카메라 디바이스 스캐너
-
-USB 포트 변경 시 자동 재매핑을 지원합니다.
-
-**파일:** `services/camera_driver/core/device_scanner.py`
-
-```python
-from camera_driver.core import DeviceScanner
-
-scanner = DeviceScanner()
-devices = scanner.scan_all_devices()
-mapping = scanner.rebuild_mapping()  # zone → device_index
+POST /api/door/transaction      # 결제 시작
+GET  /api/door/status           # 도어 상태
+POST /api/door/cancel           # 거래 취소
+POST /api/door/emergency-lock   # 비상 잠금
 ```

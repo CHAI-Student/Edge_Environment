@@ -3,7 +3,10 @@ Camera Driver API Routes
 """
 
 import io
+import shutil
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -13,6 +16,7 @@ from ..config import settings, ZONE_CAMERA_MAP, TOP_CAMERA_ID, get_physical_devi
 from ..core import CameraManager
 from ..models import (
     AllCamerasStatus,
+    CameraHealthResponse,
     CameraStatus,
     HealthResponse,
     InitializeResponse,
@@ -150,16 +154,52 @@ async def deactivate_zone(zone_id: int) -> dict:
     return {"success": True, "message": f"Zone {zone_id} camera deactivated"}
 
 
+def _test_storage_writable() -> bool:
+    """저장 경로 쓰기 가능 여부 테스트."""
+    try:
+        # 프로젝트 루트 기준: Edge_Environment/{날짜시간}/images/cam_0~cam_5
+        # camera_driver/api/routes.py 기준 상위 4단계가 프로젝트 루트
+        project_root = Path(__file__).parent.parent.parent.parent
+        test_session = datetime.now().strftime("%Y%m%d_%H%M%S_healthcheck")
+        test_path = project_root / test_session / "images"
+
+        # 6개 카메라 폴더 생성 테스트
+        for cam_id in range(6):
+            cam_folder = test_path / f"cam_{cam_id}"
+            cam_folder.mkdir(parents=True, exist_ok=True)
+
+            # 쓰기 테스트
+            test_file = cam_folder / ".write_test"
+            test_file.write_text("test")
+            test_file.unlink()
+
+        # 정리
+        shutil.rmtree(project_root / test_session)
+        return True
+    except Exception:
+        return False
+
+
 @router.get("/health")
-async def health_check() -> HealthResponse:
-    """Health check endpoint"""
+async def health_check() -> CameraHealthResponse:
+    """Health check endpoint (IO Board 형식 호환)."""
     manager = get_manager()
-    return HealthResponse(
-        status="healthy",
-        service="camera_driver",
-        initialized=manager.is_initialized,
-        streaming=manager.is_streaming,
-        connected_cameras=manager.connected_count,
+
+    # 1. 카메라 상태 확인 (기존 health_check() 메서드 활용)
+    camera_health = manager.health_check()  # {camera_id: bool}
+
+    # 6대 전부 연결 + 프레임 캡처 가능해야 HEALTHY
+    all_cameras_ok = (
+        len(camera_health) == 6 and
+        all(camera_health.values())
+    )
+
+    # 2. 저장 경로 쓰기 테스트
+    storage_ok = _test_storage_writable()
+
+    return CameraHealthResponse(
+        cameras="HEALTHY" if all_cameras_ok else "UNHEALTHY",
+        storage="HEALTHY" if storage_ok else "UNHEALTHY",
     )
 
 
@@ -259,6 +299,68 @@ async def capture_zone(zone_id: int, include_top: bool = True) -> dict:
         raise HTTPException(status_code=500, detail="OpenCV not available")
 
     return result
+
+
+from pydantic import BaseModel
+
+
+class ZoneSnapshotRequest(BaseModel):
+    """Zone 스냅샷 요청."""
+    session_id: str
+    include_top: bool = True
+
+
+@router.post("/zone/{zone_id}/snapshot")
+async def capture_zone_snapshot(zone_id: int, request: ZoneSnapshotRequest) -> dict:
+    """
+    Zone 스냅샷 캡처 및 파일 저장.
+
+    Node.js 오케스트레이터가 무게 변화 이벤트 시 호출하여
+    이미지를 디스크에 저장하고 파일 경로를 반환합니다.
+
+    Args:
+        zone_id: Zone ID (0-4)
+        request: 요청 본문 (session_id, include_top)
+
+    Returns:
+        {
+            "session_path": "/data/snapshots/260126143025",
+            "images": {
+                "cam_0": "/data/snapshots/260126143025/cam_0/snapshot.jpg",
+                "cam_1": "/data/snapshots/260126143025/cam_1/snapshot.jpg"
+            }
+        }
+    """
+    if zone_id < 0 or zone_id > 4:
+        raise HTTPException(status_code=400, detail="zone_id must be 0-4")
+
+    manager = get_manager()
+
+    # 스냅샷 캡처 (기존 메서드 활용)
+    saved_paths = manager.capture_snapshot(
+        session_id=request.session_id,
+        zone_id=zone_id,
+        all_cameras=False,
+    )
+
+    # 세션 경로 계산
+    # 기본 경로: Edge_Environment/{session_id}/images/cam_X
+    project_root = Path(__file__).parent.parent.parent.parent
+    session_path = str(project_root / request.session_id / "images")
+
+    # 응답 형식 (Node.js 클라이언트 호환)
+    images = {}
+    for cam_id, path in saved_paths.items():
+        images[f"cam_{cam_id}"] = path
+
+    return {
+        "success": True,
+        "zone_id": zone_id,
+        "session_id": request.session_id,
+        "session_path": session_path,
+        "images": images,
+        "timestamp": time.time(),
+    }
 
 
 # =========================================================================

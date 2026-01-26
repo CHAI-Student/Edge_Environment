@@ -70,28 +70,20 @@ def get_zone_cameras(zone_id: int) -> tuple:
 
 @dataclass
 class ModelServiceConfig:
-    """Model 서비스 전체 설정."""
+    """
+    Model 서비스 전체 설정.
+
+    Note (경량화):
+        io_board_url, camera_driver_url 제거됨.
+        Model 서비스는 더 이상 SSE 구독이나 카메라 직접 호출을 하지 않습니다.
+        모든 데이터는 Node.js 오케스트레이터가 수집하여 전달합니다.
+    """
 
     # 서비스 포트
     host: str = "0.0.0.0"
     port: int = 8002
 
-    # io_board SSE 설정
-    io_board_url: str = field(
-        default_factory=lambda: os.getenv("IO_BOARD_URL", "http://localhost:8001")
-    )
-    sse_filter_method: str = "exponential"
-    sse_filter_alpha: float = 0.2
-    sse_threshold: float = 5.0  # 무게 변화 감지 임계값 (g)
-
-    # camera_driver 설정
-    camera_driver_url: str = field(
-        default_factory=lambda: os.getenv("CAMERA_DRIVER_URL", "http://localhost:8003")
-    )
-    camera_timeout: float = 5.0  # 카메라 요청 타임아웃 (초)
-
-    # 이미지 저장 경로 설정 (미리 합의된 경로)
-    # 카메라가 이미지를 저장하면 Model이 이 경로에서 직접 읽음
+    # 이미지 저장 경로 설정 (Node.js가 저장, Model이 읽음)
     snapshot_base_path: str = field(
         default_factory=lambda: os.getenv("SNAPSHOT_BASE_PATH", "/data/snapshots")
     )
@@ -117,10 +109,6 @@ class ModelServiceConfig:
     tolerance_percent: float = 0.10  # 허용 오차 10%
     min_weight_change: float = 5.0  # 최소 무게 변화량 (g)
     max_combination_size: int = 2  # 최대 조합 크기
-
-    # 이벤트 설정
-    camera_off_delay: float = 10.0  # 이벤트 종료 후 카메라 off 지연 (초)
-    event_cooldown: float = 1.0  # 이벤트 쿨다운 (초)
 
     # 앙상블 설정 (동일 가중치)
     top_weight: float = 0.5  # Top 카메라 가중치

@@ -9,7 +9,7 @@ API Models for Model Service.
 - GET /api/stats/recognition-rate: 인식률 통계
 """
 
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from enum import Enum
 
@@ -299,3 +299,94 @@ class ProductSearchRequest(BaseModel):
     """상품 검색 요청."""
     query: str = Field(..., min_length=1, description="검색어")
     limit: int = Field(10, ge=1, le=100, description="최대 결과 수")
+
+
+# ===== Lightweight Model Service Models (Node.js Orchestrator Integration) =====
+
+class WeightData(BaseModel):
+    """무게 데이터 (Node.js에서 전달)."""
+    before_weights: List[float] = Field(
+        ...,
+        description="변화 전 무게 (10채널, g)",
+        min_length=1,
+        max_length=10,
+    )
+    after_weights: List[float] = Field(
+        ...,
+        description="변화 후 무게 (10채널, g)",
+        min_length=1,
+        max_length=10,
+    )
+    delta_weight: float = Field(..., description="Zone별 총 무게 변화량 (g)")
+    channels: List[int] = Field(
+        default_factory=list,
+        description="변화 감지된 채널 인덱스",
+    )
+
+
+class MediaPaths(BaseModel):
+    """이미지/영상 경로 (Node.js가 저장 후 전달)."""
+    image_folder: Optional[str] = Field(
+        None,
+        description="스냅샷 폴더 경로 (예: /data/snapshots/260126_143025)",
+    )
+    top_image: Optional[str] = Field(
+        None,
+        description="Top 카메라 이미지 경로",
+    )
+    side_image: Optional[str] = Field(
+        None,
+        description="Side 카메라 이미지 경로",
+    )
+    video_path: Optional[str] = Field(
+        None,
+        description="영상 파일 경로 (옵션)",
+    )
+
+
+class JudgmentMetadata(BaseModel):
+    """판단 메타데이터."""
+    vision_used: bool = Field(False, description="Vision 추론 사용 여부")
+    image_paths_processed: List[str] = Field(
+        default_factory=list,
+        description="처리된 이미지 경로 목록",
+    )
+    processing_time_ms: float = Field(0.0, description="처리 시간 (ms)")
+
+
+class NewJudgeRequest(BaseModel):
+    """
+    새로운 상품 판단 요청 (Node.js에서 호출).
+
+    Node.js 오케스트레이터가 SSE 이벤트 수신, 이미지 캡처 후
+    수집된 데이터를 이 형식으로 Model 서비스에 전달합니다.
+    """
+    zone_id: int = Field(..., ge=0, le=4, description="Zone ID (0-4)")
+    weight_data: WeightData = Field(..., description="무게 데이터")
+    media_paths: Optional[MediaPaths] = Field(
+        None,
+        description="이미지/영상 경로 (None이면 Vision 미사용)",
+    )
+    timestamp: float = Field(..., description="이벤트 발생 시각 (Unix timestamp)")
+    vision_candidates: Optional[List[Dict]] = Field(
+        None,
+        description="Node.js에서 미리 추론한 Vision 후보군 (옵션)",
+    )
+
+
+class NewJudgeResponse(BaseModel):
+    """
+    새로운 상품 판단 응답.
+
+    기존 JudgeResponse와 호환되면서 judgment_metadata 추가.
+    """
+    success: bool
+    products: List[Dict] = Field(default_factory=list)
+    totalPrice: int = 0
+    status: JudgmentStatusEnum = JudgmentStatusEnum.NO_DETECTION
+    confidence: float = 0.0
+    weightInfo: Dict = Field(default_factory=dict)
+    productCount: int = 0
+    isRemoval: bool = False
+    timestamp: float
+    judgment_metadata: Optional[JudgmentMetadata] = None

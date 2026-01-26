@@ -40,8 +40,17 @@ class IOBoardSSESubscriber extends EventEmitter {
         this.activeZones = new Set();
         this.zoneDeactivateTimers = new Map(); // zoneId -> timerId
 
-        // 카메라 비활성화 딜레이 (판단 완료 후)
-        this.cameraDeactivateDelay = 5000; // 5초
+        // 카메라 비활성화 딜레이 (마지막 무게 변화로부터 10초)
+        this.cameraDeactivateDelay = 10000; // 10초
+
+        // Zone별 녹화 세션 관리
+        this.zoneRecordingSessions = new Map(); // zoneId -> {sessionId, startTime}
+        this.zoneRecordingStopTimers = new Map(); // zoneId -> timerId
+
+        // Top 카메라 (cam_0) 상태
+        this.topCameraActive = false;
+        this.topCameraRecordingSession = null;
+        this.topCameraDeactivateTimer = null;
 
         // 문/데드볼트 상태 추적
         this.doorState = null; // 'OPEN', 'CLOSED' or null
@@ -125,7 +134,7 @@ class IOBoardSSESubscriber extends EventEmitter {
     /**
      * SSE 스트림 구독 중지
      */
-    stop() {
+    async stop() {
         if (this.eventSource) {
             this.eventSource.close();
             this.eventSource = null;
@@ -144,6 +153,34 @@ class IOBoardSSESubscriber extends EventEmitter {
             clearTimeout(timerId);
         }
         this.zoneDeactivateTimers.clear();
+
+        // 녹화 세션 정리
+        for (const [zoneId, session] of this.zoneRecordingSessions) {
+            try {
+                await this._stopZoneRecording(zoneId);
+            } catch (error) {
+                console.error(`[IOBoardSSE] Failed to stop zone ${zoneId} recording on shutdown:`, error.message);
+            }
+        }
+        this.zoneRecordingSessions.clear();
+
+        // Top 카메라 정리
+        if (this.topCameraDeactivateTimer) {
+            clearTimeout(this.topCameraDeactivateTimer);
+            this.topCameraDeactivateTimer = null;
+        }
+
+        if (this.topCameraActive) {
+            try {
+                await cameraClient.stopRecording();
+                await cameraClient.deactivateTopCamera();
+                this.topCameraActive = false;
+                this.topCameraRecordingSession = null;
+                console.log('[IOBoardSSE] Top camera deactivated on shutdown');
+            } catch (error) {
+                console.error('[IOBoardSSE] Failed to deactivate top camera on shutdown:', error.message);
+            }
+        }
     }
 
     /**
@@ -256,15 +293,107 @@ class IOBoardSSESubscriber extends EventEmitter {
             }
         }
 
-        // 데드볼트 상태 변화 감지
+        // 데드볼트 상태 변화 감지 + Top 카메라 제어
         if (prevDeadboltState && prevDeadboltState !== data.deadbolt) {
             console.log(`[IOBoardSSE] Deadbolt state changed: ${prevDeadboltState} -> ${data.deadbolt}`);
+
+            const isOpening = data.deadbolt.toUpperCase().includes('OPEN');
+            const isClosing = data.deadbolt.toUpperCase().includes('CLOSE') ||
+                              data.deadbolt.toUpperCase().includes('LOCK');
+
+            if (isOpening) {
+                // 데드볼트 열림 → Top 카메라 활성화 + 녹화 시작
+                this._activateTopCameraWithRecording(timestamp);
+            } else if (isClosing) {
+                // 데드볼트 닫힘 → Top 카메라 녹화 중지 예약 (10초 후)
+                this._scheduleTopCameraDeactivation();
+            }
+
             this.emit('deadbolt_changed', {
                 previous: prevDeadboltState,
                 current: data.deadbolt,
                 timestamp
             });
         }
+    }
+
+    /**
+     * Top 카메라 활성화 및 녹화 시작 (Deadbolt 열릴 때)
+     * @param {string} timestamp - 타임스탬프
+     */
+    async _activateTopCameraWithRecording(timestamp) {
+        try {
+            // 기존 비활성화 타이머 취소
+            if (this.topCameraDeactivateTimer) {
+                clearTimeout(this.topCameraDeactivateTimer);
+                this.topCameraDeactivateTimer = null;
+            }
+
+            // 이미 활성화 상태면 스킵
+            if (this.topCameraActive) {
+                console.log('[IOBoardSSE] Top camera already active');
+                return;
+            }
+
+            // Top 카메라 활성화
+            await cameraClient.activateTopCamera();
+            this.topCameraActive = true;
+
+            // 녹화 시작
+            const sessionId = new Date().toISOString()
+                .replace(/[-:T.Z]/g, '')
+                .slice(2, 14);
+
+            const recordingResult = await cameraClient.startTopCameraRecording(sessionId);
+            this.topCameraRecordingSession = recordingResult.session_id || sessionId;
+
+            console.log(`[IOBoardSSE] Top camera activated and recording started: session=${this.topCameraRecordingSession}`);
+
+            this.emit('top_camera_activated', {
+                session_id: this.topCameraRecordingSession,
+                timestamp
+            });
+
+        } catch (error) {
+            console.error('[IOBoardSSE] Failed to activate top camera:', error.message);
+        }
+    }
+
+    /**
+     * Top 카메라 비활성화 스케줄링 (Deadbolt 닫힐 때)
+     */
+    _scheduleTopCameraDeactivation() {
+        // 기존 타이머 취소
+        if (this.topCameraDeactivateTimer) {
+            clearTimeout(this.topCameraDeactivateTimer);
+        }
+
+        // 10초 후 비활성화
+        this.topCameraDeactivateTimer = setTimeout(async () => {
+            try {
+                if (this.topCameraActive) {
+                    // 녹화 중지
+                    await cameraClient.stopRecording();
+
+                    // Top 카메라 비활성화
+                    await cameraClient.deactivateTopCamera();
+
+                    console.log(`[IOBoardSSE] Top camera deactivated and recording stopped: session=${this.topCameraRecordingSession}`);
+
+                    this.emit('top_camera_deactivated', {
+                        session_id: this.topCameraRecordingSession
+                    });
+
+                    this.topCameraActive = false;
+                    this.topCameraRecordingSession = null;
+                }
+            } catch (error) {
+                console.error('[IOBoardSSE] Failed to deactivate top camera:', error.message);
+            }
+            this.topCameraDeactivateTimer = null;
+        }, this.cameraDeactivateDelay);
+
+        console.log(`[IOBoardSSE] Top camera deactivation scheduled in ${this.cameraDeactivateDelay}ms`);
     }
 
     /**
@@ -334,50 +463,214 @@ class IOBoardSSESubscriber extends EventEmitter {
     async _executeWeightChangeActions(zoneId, change, timestamp) {
         console.log(`[IOBoardSSE] Processing weight change - Zone ${zoneId}, Delta: ${change.delta}g`);
 
-        // 1. 카메라 활성화
+        // 이벤트 데이터 구성 (새로운 형식)
+        const eventData = {
+            zone_id: zoneId,
+            timestamp: Date.now() / 1000,
+            weight_data: {
+                before_weights: this.lastLoadcellWeights || [],
+                after_weights: change.current || [],
+                delta_weight: change.delta,
+                channels: change.channels || [zoneId * 2, zoneId * 2 + 1]
+            },
+            media_paths: null,
+            judgment_result: null
+        };
+
         try {
-            if (!this.activeZones.has(zoneId)) {
+            // 1. 카메라 활성화 및 녹화 시작 (아직 활성화되지 않은 경우)
+            const isNewActivation = !this.activeZones.has(zoneId);
+            if (isNewActivation) {
                 await cameraClient.activateZone(zoneId);
                 this.activeZones.add(zoneId);
                 console.log(`[IOBoardSSE] Camera activated for Zone ${zoneId}`);
+
+                // 녹화 시작
+                await this._startZoneRecording(zoneId, timestamp);
+            } else {
+                // 이미 활성화된 상태에서 추가 무게 변화 → 타이머 리셋
+                console.log(`[IOBoardSSE] Zone ${zoneId} already active, extending recording timer`);
             }
 
-            // 기존 비활성화 타이머 취소
-            if (this.zoneDeactivateTimers.has(zoneId)) {
-                clearTimeout(this.zoneDeactivateTimers.get(zoneId));
+            // 2. 스냅샷 캡처 및 저장
+            const snapshotResult = await this._captureAndSaveSnapshot(zoneId, timestamp);
+            if (snapshotResult) {
+                eventData.media_paths = {
+                    image_folder: snapshotResult.session_path,
+                    top_image: snapshotResult.top_image,
+                    side_image: snapshotResult.side_image,
+                    video_path: this.zoneRecordingSessions.get(zoneId)?.videoPath || null
+                };
             }
 
-            // 새 비활성화 타이머 설정
-            const deactivateTimer = setTimeout(async () => {
-                try {
-                    await cameraClient.deactivateZone(zoneId);
-                    this.activeZones.delete(zoneId);
-                    console.log(`[IOBoardSSE] Camera deactivated for Zone ${zoneId}`);
-                } catch (error) {
-                    console.error(`[IOBoardSSE] Failed to deactivate zone ${zoneId}:`, error.message);
-                }
-                this.zoneDeactivateTimers.delete(zoneId);
-            }, this.cameraDeactivateDelay);
+            // 3. Model 서비스에 판단 요청
+            const judgeResult = await this._requestJudgment(eventData);
+            eventData.judgment_result = judgeResult;
 
-            this.zoneDeactivateTimers.set(zoneId, deactivateTimer);
+            // 4. 이벤트 발생 (외부 리스너용)
+            eventData.delta = change.delta;
+            eventData.current = change.current;
+            eventData.previous = change.previous;
+            eventData.cameras_activated = this.activeZones.has(zoneId);
+            eventData.recording_session = this.zoneRecordingSessions.get(zoneId)?.sessionId || null;
+            this.emit('weight_change', eventData);
+
+            // 5. 카메라 비활성화 + 녹화 중지 타이머 설정/리셋 (마지막 변화로부터 10초)
+            this._scheduleZoneDeactivation(zoneId);
 
         } catch (error) {
-            console.error(`[IOBoardSSE] Failed to activate camera for zone ${zoneId}:`, error.message);
+            console.error(`[IOBoardSSE] Error processing weight change:`, error.message);
+            this.emit('weight_change_error', { zoneId, error: error.message });
+        }
+    }
+
+    /**
+     * Zone 녹화 시작
+     * @param {number} zoneId - Zone ID
+     * @param {string} timestamp - 타임스탬프
+     */
+    async _startZoneRecording(zoneId, timestamp) {
+        try {
+            // 세션 ID 생성
+            const sessionId = new Date().toISOString()
+                .replace(/[-:T.Z]/g, '')
+                .slice(2, 14) + `_zone${zoneId}`;
+
+            // 녹화 시작 (Zone 카메라 + Top 카메라)
+            const result = await cameraClient.startRecording(zoneId, true, sessionId);
+
+            // 세션 정보 저장
+            this.zoneRecordingSessions.set(zoneId, {
+                sessionId: result.session_id || sessionId,
+                startTime: Date.now(),
+                videoPath: result.paths?.video || null
+            });
+
+            console.log(`[IOBoardSSE] Zone ${zoneId} recording started: session=${result.session_id || sessionId}`);
+
+            this.emit('zone_recording_started', {
+                zone_id: zoneId,
+                session_id: result.session_id || sessionId,
+                timestamp
+            });
+
+        } catch (error) {
+            console.error(`[IOBoardSSE] Failed to start zone ${zoneId} recording:`, error.message);
+        }
+    }
+
+    /**
+     * Zone 녹화 중지
+     * @param {number} zoneId - Zone ID
+     */
+    async _stopZoneRecording(zoneId) {
+        try {
+            const session = this.zoneRecordingSessions.get(zoneId);
+            if (!session) {
+                return;
+            }
+
+            // 녹화 중지
+            const result = await cameraClient.stopRecording();
+
+            console.log(`[IOBoardSSE] Zone ${zoneId} recording stopped: session=${session.sessionId}`);
+
+            this.emit('zone_recording_stopped', {
+                zone_id: zoneId,
+                session_id: session.sessionId,
+                duration_ms: Date.now() - session.startTime,
+                paths: result.session_info?.paths || null
+            });
+
+            // 세션 정보 삭제
+            this.zoneRecordingSessions.delete(zoneId);
+
+        } catch (error) {
+            console.error(`[IOBoardSSE] Failed to stop zone ${zoneId} recording:`, error.message);
+        }
+    }
+
+    /**
+     * Zone 카메라 비활성화 스케줄링 (녹화 중지 포함)
+     * 마지막 무게 변화로부터 10초 후 녹화 중지 및 카메라 비활성화
+     * @param {number} zoneId - Zone ID
+     */
+    _scheduleZoneDeactivation(zoneId) {
+        // 기존 비활성화 타이머 취소
+        if (this.zoneDeactivateTimers.has(zoneId)) {
+            clearTimeout(this.zoneDeactivateTimers.get(zoneId));
+            console.log(`[IOBoardSSE] Zone ${zoneId} deactivation timer reset (new weight change detected)`);
         }
 
-        // 2. 이벤트 발생 (외부 리스너용)
-        const eventData = {
-            zone_id: zoneId,
-            delta: change.delta,
-            current: change.current,
-            previous: change.previous,
-            timestamp,
-            cameras_activated: this.activeZones.has(zoneId)
-        };
+        // 새 비활성화 타이머 설정 (마지막 무게 변화로부터 10초 후)
+        const deactivateTimer = setTimeout(async () => {
+            try {
+                // 1. 녹화 먼저 중지
+                await this._stopZoneRecording(zoneId);
 
-        this.emit('weight_change', eventData);
+                // 2. 카메라 비활성화
+                await cameraClient.deactivateZone(zoneId);
+                this.activeZones.delete(zoneId);
 
-        // 3. 로그 저장은 WeightEventLogger에서 이벤트 구독으로 처리
+                console.log(`[IOBoardSSE] Zone ${zoneId} recording stopped and camera deactivated`);
+
+                this.emit('zone_deactivated', {
+                    zone_id: zoneId,
+                    reason: 'timeout',
+                    delay_ms: this.cameraDeactivateDelay
+                });
+
+            } catch (error) {
+                console.error(`[IOBoardSSE] Failed to deactivate zone ${zoneId}:`, error.message);
+            }
+            this.zoneDeactivateTimers.delete(zoneId);
+        }, this.cameraDeactivateDelay);
+
+        this.zoneDeactivateTimers.set(zoneId, deactivateTimer);
+        console.log(`[IOBoardSSE] Zone ${zoneId} scheduled for deactivation in ${this.cameraDeactivateDelay}ms`);
+    }
+
+    /**
+     * 스냅샷 캡처 및 저장
+     * @param {number} zoneId - Zone ID
+     * @param {string} timestamp - 타임스탬프
+     * @returns {Promise<{session_path: string, top_image: string|null, side_image: string|null}|null>}
+     */
+    async _captureAndSaveSnapshot(zoneId, timestamp) {
+        try {
+            // 세션 ID 생성 (YYMMDD_HHMMSS 형식)
+            const now = new Date();
+            const sessionId = now.toISOString()
+                .replace(/[-:T.Z]/g, '')
+                .slice(2, 14); // "260126143025" 형식
+
+            // Camera Driver에 스냅샷 요청
+            const result = await cameraClient.captureSnapshot(zoneId, sessionId);
+
+            return {
+                session_path: result.session_path || null,
+                top_image: result.images?.cam_0 || null,
+                side_image: result.images?.[`cam_${zoneId + 1}`] || null
+            };
+        } catch (error) {
+            console.error(`[IOBoardSSE] Snapshot capture failed:`, error.message);
+            return null;
+        }
+    }
+
+    /**
+     * Model 서비스에 판단 요청
+     * @param {Object} eventData - 이벤트 데이터
+     * @returns {Promise<Object>}
+     */
+    async _requestJudgment(eventData) {
+        try {
+            const productJudgeClient = require('./ProductJudgeClient');
+            return await productJudgeClient.judgeWithWeightData(eventData);
+        } catch (error) {
+            console.error(`[IOBoardSSE] Judgment request failed:`, error.message);
+            return { success: false, error: error.message };
+        }
     }
 
     /**
@@ -413,6 +706,16 @@ class IOBoardSSESubscriber extends EventEmitter {
      * @returns {Object}
      */
     getStatus() {
+        // Zone 녹화 세션 정보 수집
+        const zoneRecordingSessions = {};
+        for (const [zoneId, session] of this.zoneRecordingSessions) {
+            zoneRecordingSessions[zoneId] = {
+                sessionId: session.sessionId,
+                startTime: session.startTime,
+                duration_ms: Date.now() - session.startTime
+            };
+        }
+
         return {
             connected: this.connected,
             reconnectAttempts: this.reconnectAttempts,
@@ -424,6 +727,15 @@ class IOBoardSSESubscriber extends EventEmitter {
             doorState: this.doorState,
             deadboltState: this.deadboltState,
             lastDoorUpdateTime: this.lastDoorUpdateTime,
+            // 녹화 상태
+            recording: {
+                topCamera: {
+                    active: this.topCameraActive,
+                    sessionId: this.topCameraRecordingSession,
+                    deactivationScheduled: this.topCameraDeactivateTimer !== null
+                },
+                zones: zoneRecordingSessions
+            },
             settings: {
                 weightChangeThreshold: this.weightChangeThreshold,
                 debounceTime: this.debounceTime,

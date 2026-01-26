@@ -132,11 +132,13 @@ class YOLOWrapper:
     YOLO 모델 래퍼.
 
     YOLO 추론 결과를 YOLODetection 리스트로 변환.
+    PyTorch (.pt) 및 TensorRT (.engine) 모델 모두 지원.
 
     Attributes:
         model: YOLO 모델 (ultralytics)
         conf_threshold: 최소 confidence (기본값 0.01, 매우 낮게)
         device: 추론 디바이스 ("cuda", "cpu")
+        is_tensorrt: TensorRT 모델 여부
     """
 
     HAND_CLASS_ID = 0  # 손 클래스 ID
@@ -151,9 +153,9 @@ class YOLOWrapper:
         YOLO 래퍼 초기화.
 
         Args:
-            model_path: YOLO 모델 경로 (.pt 파일)
+            model_path: YOLO 모델 경로 (.pt 또는 .engine 파일)
             conf_threshold: 최소 confidence (기본값 0.01)
-            device: 추론 디바이스
+            device: 추론 디바이스 (TensorRT는 항상 cuda)
         """
         self.model = None
         self.model_path = model_path or config.yolo_model_path
@@ -161,10 +163,14 @@ class YOLOWrapper:
         self.device = device
         self.class_names: dict = {}
         self._loaded = False
+        self.is_tensorrt = self.model_path.endswith(".engine")
 
     def load(self) -> bool:
         """
         YOLO 모델 로드.
+
+        .pt (PyTorch) 또는 .engine (TensorRT) 파일을 로드합니다.
+        TensorRT 모델은 Jetson Orin Nano에서 최적화된 추론을 제공합니다.
 
         Returns:
             성공 여부
@@ -174,11 +180,27 @@ class YOLOWrapper:
 
         try:
             from ultralytics import YOLO
+
+            # TensorRT 모델인 경우 device 자동 설정
+            if self.is_tensorrt:
+                self.device = "cuda"  # TensorRT는 항상 GPU
+                logger.info(f"Loading TensorRT engine: {self.model_path}")
+
             self.model = YOLO(self.model_path)
-            self.model.to(self.device)
+
+            # TensorRT가 아닌 경우에만 device 이동
+            # TensorRT 모델은 이미 GPU에 최적화되어 있음
+            if not self.is_tensorrt:
+                self.model.to(self.device)
+
             self.class_names = self.model.names
             self._loaded = True
-            logger.info(f"YOLO model loaded: {self.model_path}, {len(self.class_names)} classes")
+
+            model_type = "TensorRT" if self.is_tensorrt else "PyTorch"
+            logger.info(
+                f"YOLO model loaded ({model_type}): {self.model_path}, "
+                f"{len(self.class_names)} classes, device={self.device}"
+            )
             return True
         except ImportError:
             logger.warning("ultralytics not installed. Use parse_results() for manual parsing.")

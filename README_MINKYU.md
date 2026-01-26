@@ -3,7 +3,11 @@
 ## 브랜치 정보
 - **브랜치명**: minkyu
 - **목적**: Model 서비스 개발 및 테스트
+- **최종 업데이트**: 2026-01-26
 - **Pull Request 시 제외 예정**: 이 README 파일, INTEGRATION_GUIDE.md
+
+> **중요 변경 (2026-01-26)**: Model 서비스가 **Stateless**로 전환되었습니다.
+> Node.js가 SSE 구독 및 카메라 스냅샷을 담당합니다.
 
 ---
 
@@ -43,56 +47,61 @@ Edge_Environment/
 
 ---
 
-## Model 서비스 상세
+## Model 서비스 상세 (Stateless 아키텍처)
+
+> **삭제된 폴더/파일**:
+> - `sse_client/` (SSE 구독 → Node.js로 이전)
+> - `api/node_client.py` (결과 푸시 → 동기 응답으로 변경)
 
 ### 디렉토리 구조
 ```
 services/model/
-├── main.py                      # FastAPI 진입점 + --test 모드
+├── main.py                      # FastAPI 진입점 (Stateless)
 ├── config.py                    # Zone-Channel-Camera 매핑
 ├── requirements.txt
 │
-├── sse_client/                  # io_board SSE 구독
-│   ├── io_board_subscriber.py
-│   ├── event_parser.py
-│   └── zone_detector.py
+├── api/                         # REST API
+│   ├── routes.py                # /api/judge (weight_data + media_paths)
+│   └── models.py                # Pydantic 스키마
 │
-├── camera/                      # 이미지 캡처
-│   ├── camera_client.py         # camera_driver HTTP 클라이언트
-│   └── frame_capturer.py        # FrameCapturer + FolderFrameLoader
+├── camera/                      # 이미지 로드 (Node.js가 전달한 경로에서)
+│   ├── camera_client.py         # camera_driver HTTP 클라이언트 (폴백용)
+│   └── frame_capturer.py        # FolderFrameLoader
 │
 ├── vision/                      # YOLO 추론 파이프라인
-│   ├── yolo_wrapper.py
+│   ├── yolo_wrapper.py          # .pt 또는 .engine 지원
 │   ├── hand_filter.py
 │   ├── top5_extractor.py
 │   └── multi_view_ensemble.py
 │
 ├── weight/                      # 무게 기반 개수 계산
-│   └── count_calculator.py
+│   ├── count_calculator.py
+│   └── multi_zone_monitor.py
 │
 ├── engine/                      # 판단 엔진
 │   ├── models.py
 │   ├── decision_engine.py
-│   └── event_tracker.py
+│   ├── event_tracker.py
+│   └── advanced/                # 고급 시나리오
+│       ├── baseline_tracker.py
+│       ├── return_detector.py
+│       ├── cross_zone_detector.py
+│       └── rapid_pickup_handler.py
 │
-├── database/                    # 상품 DB (50개 기본 상품)
-│   └── product_db.py
+├── database/                    # 상품 DB
+│   └── product_db.py            # IF11 형식 지원
 │
-├── api/                         # REST API
-│   ├── routes.py                # /api/judge, /api/health
-│   └── node_client.py           # Node.js 결과 전송
+├── door_payment/                # ★ 도어 결제 모듈 (신규)
+│   ├── transaction_controller.py
+│   └── payment_client.py
 │
 ├── monitor/                     # --test 모드 대시보드
 │   ├── console_dashboard.py
 │   └── test_mode.py
 │
-└── tests/                       # 단위 테스트 (6개 파일)
+└── tests/                       # 단위 테스트
     ├── conftest.py
-    ├── test_config.py
-    ├── test_count_calculator.py
-    ├── test_decision_engine.py
-    ├── test_product_db.py
-    └── test_top5_extractor.py
+    └── test_*.py
 ```
 
 ### 주요 설정 (config.py)
@@ -152,16 +161,21 @@ python -m pytest tests/ -v
 | GET | /api/health | 헬스 체크 |
 | GET | /api/products | 상품 목록 |
 
-### /api/judge 요청 예시
+### /api/judge 요청 예시 (권장 형식)
 ```json
 {
     "zone_id": 0,
-    "loadcell_weights": ["+00432", "+00433", ...],
-    "baseline_weights": ["+00800", "+00800", ...],
-    "snapshot_folder": "/data/260121_1200/",
-    "products": [
-        {"id": 26, "name": "chickenmayo_rice", "weight": 365, "price": 3500}
-    ]
+    "weight_data": {
+        "before_weights": [1000, 1005, 0, 0, 0, 0, 0, 0, 0, 0],
+        "after_weights": [480, 505, 0, 0, 0, 0, 0, 0, 0, 0],
+        "delta_weight": -520,
+        "channels": [0, 1]
+    },
+    "media_paths": {
+        "image_folder": "/data/snapshots/260126143025",
+        "top_image": "/data/snapshots/260126143025/cam_0/snapshot.jpg",
+        "side_image": "/data/snapshots/260126143025/cam_1/snapshot.jpg"
+    }
 }
 ```
 
@@ -196,17 +210,27 @@ python -m pytest tests/ -v
 
 ## 변경 이력
 
+### 2026-01-26 ★ 아키텍처 변경
+- **Model 서비스 Stateless 전환**
+  - `sse_client/` 폴더 삭제 (SSE 구독 → Node.js로 이전)
+  - `api/node_client.py` 삭제 (결과 푸시 → 동기 응답)
+- **새로운 API 형식**: `weight_data` + `media_paths`
+- **Node.js 포트 변경**: 8888 → 8889
+- **Door Payment 모듈 추가**: `door_payment/`
+- **Advanced 엔진 모듈 추가**: `engine/advanced/`
+  - `baseline_tracker.py` - 베이스라인 드리프트 감지
+  - `return_detector.py` - 반환 감지
+  - `cross_zone_detector.py` - Zone 간 이동
+  - `rapid_pickup_handler.py` - 연속 픽업
+
 ### 2026-01-22 (2차)
 - **IF11 상품 리스트 지원**: Node.js → Model 상품 동기화 (`/api/products/sync`)
-- **에러 복구 모듈**: `error_recovery/` (RecoveryManager, ErrorCode, ServiceError)
+- **에러 코드 체계**: E2xxx (IO Board), E3xxx (Camera), E4xxx (Vision), E5xxx (Network), E6xxx (Payment)
 - **카메라 디바이스 스캐너**: `device_scanner.py` (고유 ID 기반 재매핑)
-- **테스트 추가**: `test_error_recovery.py`, `test_product_registration.py` (36+ 테스트)
 
 ### 2026-01-22 (1차)
 - **모델 교체**: `1224_v8n_img480_best_aug_segment.pt` → `siyeon_best.pt`
 - **클래스 확장**: 131개 → 133개 (hand + 132개 상품)
-- **ecosystem.config.js**: YOLO_MODEL_PATH 업데이트
-- **test_offline_dataset.py**: Windows 바로가기(.lnk) 파일 지원 추가
 - **테스트 데이터셋 확장**: 2개 → 13개 세션 (Google Drive 연동)
 - **평균 Confidence 26% 향상**: 0.357 → 0.450
 
@@ -214,13 +238,10 @@ python -m pytest tests/ -v
 - **config.py**: top_k=5 → top_k=1 (최고 confidence만 추출)
 - **config.py**: 앙상블 가중치 4:6 → 5:5 (동일 가중치)
 - **decision_engine.py**: `judge_by_weight_only()` 폴백 메서드 추가
-- **decision_engine.py**: Vision 실패 시 자동 폴백 호출
 
 ### 이전 커밋
-- Model 서비스 기본 구조 생성 (30개 파일)
-- 단위 테스트 작성 (6개 파일, 1,072줄)
-- io_board 서비스 커밋
-- camera_driver, card_terminal, mqtt_client 커밋
+- Model 서비스 기본 구조 생성
+- io_board, camera_driver, mqtt_client 서비스 구현
 - .gitignore 업데이트
 
 ---
@@ -257,10 +278,10 @@ pm2 start ecosystem.config.js
 
 | 서비스명 | 포트 | 설명 |
 |---------|------|------|
-| orchestrator | 8888 | Node.js 메인 서버 |
-| io-board | 8001 | IO Board 제어 (로드셀+데드볼트) |
-| model | 8002 | AI 상품 판단 |
-| camera-driver | 8003 | 6대 카메라 관리 |
+| orchestrator | **8889** | Node.js 오케스트레이터 (SSE 구독 + 스냅샷 요청) ★ |
+| io-board | 8001 | IO Board SSE 스트림 (로드셀+데드볼트) |
+| model | 8002 | AI 상품 판단 (Stateless) |
+| camera-driver | 8003 | 6대 카메라 관리 + 스냅샷 저장 |
 | card-terminal | 5000 | 결제 터미널 |
 
 ### PM2 명령어
@@ -378,21 +399,38 @@ python -m tests.test_hardware_integration \
 
 ### 헬스 체크
 ```bash
-curl http://localhost:8002/api/health
-curl http://localhost:8001/health
-curl http://localhost:8003/health
+curl http://localhost:8002/api/health    # Model
+curl http://localhost:8001/health        # IO Board
+curl http://localhost:8003/api/health    # Camera Driver
+curl http://localhost:8889/health        # Node.js Orchestrator
+curl http://localhost:8006/health        # MQTT Client
 ```
 
-### 상품 판단 (POST /api/judge)
+### 상품 판단 (POST /api/judge) - 권장 형식
 ```bash
 curl -X POST http://localhost:8002/api/judge \
   -H "Content-Type: application/json" \
   -d '{
-    "zone_id": 1,
-    "delta_weight": -365.0,
-    "loadcell_weights": ["+00000", "+00000", "-00180", "-00185", "+00000", "+00000", "+00000", "+00000", "+00000", "+00000"],
-    "baseline_weights": ["+00000", "+00000", "+00000", "+00000", "+00000", "+00000", "+00000", "+00000", "+00000", "+00000"]
+    "zone_id": 0,
+    "weight_data": {
+      "before_weights": [1000, 1005, 0, 0, 0, 0, 0, 0, 0, 0],
+      "after_weights": [480, 505, 0, 0, 0, 0, 0, 0, 0, 0],
+      "delta_weight": -520,
+      "channels": [0, 1]
+    },
+    "media_paths": {
+      "image_folder": "/data/snapshots/test",
+      "top_image": "/data/snapshots/test/cam_0/snapshot.jpg",
+      "side_image": "/data/snapshots/test/cam_1/snapshot.jpg"
+    }
   }'
+```
+
+### 상품 판단 (레거시 형식 - 하위 호환)
+```bash
+curl -X POST http://localhost:8002/api/judge \
+  -H "Content-Type: application/json" \
+  -d '{"zone_id": 1, "delta_weight": -365.0}'
 ```
 
 ### 다중 Zone 판단 (Cross-Zone 감지)

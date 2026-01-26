@@ -1,7 +1,7 @@
 """
 Model Service - FastAPI Entry Point.
 
-AI 상품 판단 서비스.
+AI 상품 판단 서비스 (경량화 버전).
 
 실행 방법:
     # 일반 모드 (FastAPI 서버)
@@ -11,11 +11,14 @@ AI 상품 판단 서비스.
     python -m main --test
 
 기능:
-    - io_board SSE 구독 (loadcell.change 이벤트)
-    - camera_driver 연동 (Top + Side 프레임 캡처)
+    - Node.js로부터 무게 데이터 + 이미지 경로 수신
     - YOLO 추론 (Hand-Proximity ROI 필터링)
     - 무게 기반 개수 검증
-    - Node.js 결과 전송
+    - 판단 결과 반환 (stateless)
+
+Note:
+    SSE 구독과 카메라 직접 호출이 제거되었습니다.
+    모든 데이터는 Node.js 오케스트레이터가 수집하여 전달합니다.
 """
 
 import argparse
@@ -32,8 +35,6 @@ from .database.product_db import ProductDatabase
 from .engine import ProductDecisionEngine
 from .api.routes import router, init_routes
 from .api.node_client import NodeJSClient
-from .sse_client import IOBoardSubscriber
-from .sse_client.zone_detector import ZoneDetector
 
 # 로깅 설정
 logging.basicConfig(
@@ -47,64 +48,32 @@ logger = logging.getLogger(__name__)
 product_db: ProductDatabase = None
 decision_engine: ProductDecisionEngine = None
 node_client: NodeJSClient = None
-sse_subscriber: IOBoardSubscriber = None
-zone_detector: ZoneDetector = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI 애플리케이션 수명 주기 관리."""
-    global product_db, decision_engine, node_client, sse_subscriber, zone_detector
+    global product_db, decision_engine, node_client
 
-    logger.info("Model service starting...")
+    logger.info("Model service starting (lightweight mode)...")
 
     # 컴포넌트 초기화
     product_db = ProductDatabase()
     decision_engine = ProductDecisionEngine(product_db=product_db)
     node_client = NodeJSClient(base_url=config.nodejs_url)
-    zone_detector = ZoneDetector()
 
     # API 라우터 초기화
     init_routes(product_db, decision_engine)
 
-    # SSE 구독자 초기화 및 시작
-    async def on_loadcell_change(event):
-        """로드셀 변화 이벤트 핸들러."""
-        from .sse_client import LoadcellChangeEvent
-
-        zone_info = zone_detector.get_primary_zone(
-            changed_indices=event.changed_indices,
-            old_values=event.old_values,
-            new_values=event.new_values,
-        )
-
-        if zone_info:
-            logger.info(
-                f"Zone {zone_info.zone_id} change: delta={zone_info.delta_weight:.1f}g"
-            )
-            # 실제 판단 로직은 별도 태스크로 처리 (이벤트 루프 블로킹 방지)
-            # asyncio.create_task(process_zone_event(zone_info))
-
-    sse_subscriber = IOBoardSubscriber(
-        base_url=config.io_board_url,
-        on_change=on_loadcell_change,
-    )
-
-    # SSE 구독 시작 (백그라운드)
-    asyncio.create_task(sse_subscriber.start())
-
     # Node.js 클라이언트 시작
     await node_client.start()
 
-    logger.info(f"Model service ready on port {config.port}")
+    logger.info(f"Model service ready on port {config.port} (judgment-only)")
 
     yield
 
     # 종료 처리
     logger.info("Model service shutting down...")
-
-    if sse_subscriber:
-        await sse_subscriber.stop()
 
     if node_client:
         await node_client.stop()
@@ -161,7 +130,7 @@ async def run_test_mode():
 
 def main():
     """메인 진입점."""
-    parser = argparse.ArgumentParser(description="Model Service")
+    parser = argparse.ArgumentParser(description="Model Service (Lightweight)")
     parser.add_argument(
         "--test",
         action="store_true",
@@ -180,18 +149,6 @@ def main():
         help="Server port (default: 8002)",
     )
     parser.add_argument(
-        "--io-board-url",
-        type=str,
-        default=config.io_board_url,
-        help="io_board service URL",
-    )
-    parser.add_argument(
-        "--camera-url",
-        type=str,
-        default=config.camera_driver_url,
-        help="camera_driver service URL",
-    )
-    parser.add_argument(
         "--node-url",
         type=str,
         default=config.nodejs_url,
@@ -203,8 +160,6 @@ def main():
     # 설정 업데이트
     config.host = args.host
     config.port = args.port
-    config.io_board_url = args.io_board_url
-    config.camera_driver_url = args.camera_url
     config.nodejs_url = args.node_url
 
     if args.test:
@@ -213,7 +168,7 @@ def main():
         asyncio.run(run_test_mode())
     else:
         # 서버 모드
-        logger.info(f"Starting server on {config.host}:{config.port}...")
+        logger.info(f"Starting lightweight server on {config.host}:{config.port}...")
         run_server()
 
 

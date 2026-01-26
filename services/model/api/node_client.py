@@ -4,7 +4,7 @@ Node.js HTTP Client.
 Model 서비스에서 Node.js Orchestrator로 결과 전송.
 
 사용 예시:
-    client = NodeJSClient("http://localhost:8888")
+    client = NodeJSClient("http://localhost:8889")
     await client.send_judgment(zone_id=0, result=judgment_result)
 """
 
@@ -31,7 +31,7 @@ class NodeJSClient:
 
     def __init__(
         self,
-        base_url: str = "http://localhost:8888",
+        base_url: str = "http://localhost:8889",
         timeout: float = 10.0,
     ):
         """

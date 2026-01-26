@@ -47,7 +47,9 @@ class RecordingConfig:
     """녹화 설정"""
     base_path: str = "./recordings"
     fps: int = 30
-    resolution: Tuple[int, int] = (640, 480)
+    resolution: Tuple[int, int] = (640, 480)  # 캡처 해상도
+    save_resolution: Tuple[int, int] = (480, 480)  # 저장 해상도 (크롭 후)
+    crop_from_left: bool = True  # True: 왼쪽 기준 크롭 (오른쪽 제거), False: 중앙 크롭
     video_codec: str = "mp4v"  # or "avc1", "XVID"
     jpeg_quality: int = 90
     max_duration: float = 60.0  # 최대 녹화 시간 (초)
@@ -77,6 +79,7 @@ class MediaRecorder:
     - 이미지 저장 (카메라별 폴더)
     - 영상 저장 (MP4)
     - 동시 다중 카메라 지원
+    - 프레임 크롭 (640x480 → 480x480, 오른쪽 160px 제거)
     """
 
     def __init__(self, config: Optional[RecordingConfig] = None):
@@ -89,6 +92,47 @@ class MediaRecorder:
         self.config = config or RecordingConfig()
         self._sessions: Dict[str, RecordingSession] = {}
         self._lock = threading.Lock()
+
+    def _crop_frame(self, frame: Any) -> Any:
+        """
+        프레임 크롭 (640x480 → 480x480).
+
+        오른쪽 160px를 제거하고 왼쪽 480px만 유지합니다.
+
+        Args:
+            frame: 원본 프레임 (numpy array, H x W x C)
+
+        Returns:
+            크롭된 프레임
+        """
+        if not CV2_AVAILABLE or frame is None:
+            return frame
+
+        h, w = frame.shape[:2]
+        target_w, target_h = self.config.save_resolution
+
+        # 높이 조정 필요 시
+        if h != target_h:
+            # 높이 크롭 (중앙 기준)
+            if h > target_h:
+                start_y = (h - target_h) // 2
+                frame = frame[start_y:start_y + target_h, :, :]
+                h = target_h
+
+        # 너비 크롭
+        if w > target_w:
+            if self.config.crop_from_left:
+                # 왼쪽 기준 크롭: 왼쪽 target_w 픽셀 유지 (오른쪽 제거)
+                frame = frame[:, :target_w, :]
+            else:
+                # 중앙 기준 크롭
+                start_x = (w - target_w) // 2
+                frame = frame[:, start_x:start_x + target_w, :]
+        elif w < target_w:
+            # 너비가 목표보다 작으면 리사이즈
+            frame = cv2.resize(frame, (target_w, target_h))
+
+        return frame
 
     def create_session(
         self,
@@ -141,7 +185,7 @@ class MediaRecorder:
 
     def start_video_recording(self, session_id: str) -> bool:
         """
-        영상 녹화 시작
+        영상 녹화 시작 (크롭된 해상도로 저장: 480x480)
 
         Args:
             session_id: 세션 ID
@@ -163,15 +207,16 @@ class MediaRecorder:
 
         for cam_id in session.cameras:
             video_path = videos_path / f"cam_{cam_id}.mp4"
+            # 크롭된 해상도로 VideoWriter 생성 (480x480)
             writer = cv2.VideoWriter(
                 str(video_path),
                 fourcc,
                 self.config.fps,
-                self.config.resolution,
+                self.config.save_resolution,
             )
             if writer.isOpened():
                 session.video_writers[cam_id] = writer
-                logger.info(f"Video writer started: cam_{cam_id} -> {video_path}")
+                logger.info(f"Video writer started: cam_{cam_id} -> {video_path} (resolution: {self.config.save_resolution})")
             else:
                 logger.error(f"Failed to create video writer for cam_{cam_id}")
 
@@ -210,7 +255,7 @@ class MediaRecorder:
         frame: Any,
     ) -> bool:
         """
-        영상에 프레임 기록
+        영상에 프레임 기록 (크롭 적용: 640x480 → 480x480)
 
         Args:
             session_id: 세션 ID
@@ -229,11 +274,14 @@ class MediaRecorder:
             return False
 
         try:
-            # 해상도 맞춤
-            if frame.shape[:2] != self.config.resolution[::-1]:
-                frame = cv2.resize(frame, self.config.resolution)
+            # 프레임 크롭 (640x480 → 480x480)
+            cropped_frame = self._crop_frame(frame)
 
-            writer.write(frame)
+            # 해상도가 다르면 리사이즈
+            if cropped_frame.shape[:2] != self.config.save_resolution[::-1]:
+                cropped_frame = cv2.resize(cropped_frame, self.config.save_resolution)
+
+            writer.write(cropped_frame)
             return True
         except Exception as e:
             logger.error(f"Failed to write video frame: {e}")
@@ -247,7 +295,9 @@ class MediaRecorder:
         filename: Optional[str] = None,
     ) -> Optional[str]:
         """
-        이미지 저장
+        이미지 저장 (크롭 적용: 640x480 → 480x480)
+
+        오른쪽 160px를 제거하고 480x480 이미지로 저장합니다.
 
         Args:
             session_id: 세션 ID
@@ -279,10 +329,13 @@ class MediaRecorder:
         image_path = session.base_path / "images" / f"cam_{camera_id}" / filename
 
         try:
+            # 프레임 크롭 (640x480 → 480x480)
+            cropped_frame = self._crop_frame(frame)
+
             # JPEG 품질 설정
             encode_params = [cv2.IMWRITE_JPEG_QUALITY, self.config.jpeg_quality]
-            cv2.imwrite(str(image_path), frame, encode_params)
-            logger.debug(f"Image saved: {image_path}")
+            cv2.imwrite(str(image_path), cropped_frame, encode_params)
+            logger.debug(f"Image saved: {image_path} (cropped to {self.config.save_resolution})")
             return str(image_path)
         except Exception as e:
             logger.error(f"Failed to save image: {e}")

@@ -556,10 +556,12 @@ class CameraManager:
             base_path=base_path,
             fps=fps or self.fps,
             resolution=self.resolution,
+            save_resolution=(settings.save_width, settings.save_height),
+            crop_from_left=settings.crop_from_left,
         )
         self._media_recorder = MediaRecorder(config)
         self._event_recorder = EventRecorder(self._media_recorder, self)
-        logger.info(f"Media recorder initialized: {base_path}")
+        logger.info(f"Media recorder initialized: {base_path} (save_resolution: {config.save_resolution}, crop_from_left: {config.crop_from_left})")
 
     def start_recording(
         self,

@@ -102,8 +102,10 @@ def main():
         'weight.count_calculator',
         'weight.multi_zone_monitor',
         'database.product_db',
-        'sse_client.event_parser',
-        'sse_client.zone_detector',
+        # NOTE: sse_client removed - Model service is now stateless
+        # SSE subscription is handled by Node.js Orchestrator
+        # 'sse_client.event_parser',
+        # 'sse_client.zone_detector',
         'camera.frame_capturer',
         'config',
     ]

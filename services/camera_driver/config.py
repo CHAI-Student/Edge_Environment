@@ -187,6 +187,11 @@ class Settings(BaseSettings):
     # JPEG quality for streaming
     jpeg_quality: int = Field(default=80)
 
+    # Image save settings (cropping)
+    save_width: int = Field(default=480, description="저장 이미지 너비 (640에서 오른쪽 160px 크롭)")
+    save_height: int = Field(default=480, description="저장 이미지 높이")
+    crop_from_left: bool = Field(default=True, description="True: 왼쪽 기준 크롭, False: 중앙 크롭")
+
     # Device scanning settings
     max_scan_index: int = Field(default=12, description="최대 스캔 디바이스 인덱스 (Nvidia 모드 시 12까지)")
 
@@ -195,8 +200,8 @@ class Settings(BaseSettings):
     reconnect_interval: float = Field(default=5.0, description="재연결 시도 간격 (초)")
     max_reconnect_attempts: int = Field(default=10, description="최대 재연결 시도 횟수")
 
-    # Nvidia mode settings
-    nvidia_mode: bool = Field(default=False, description="Nvidia 장치 인덱싱 모드 (짝수 인덱스)")
+    # Nvidia mode settings (Jetson Orin Nano: video0, video2, video4...)
+    nvidia_mode: bool = Field(default=True, description="Nvidia 장치 인덱싱 모드 (짝수 인덱스: 0,2,4,6,8,10)")
     device_map_path: str = Field(default="", description="카메라 디바이스 매핑 설정 파일 경로")
 
 

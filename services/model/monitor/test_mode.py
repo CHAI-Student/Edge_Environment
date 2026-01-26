@@ -1,21 +1,31 @@
 """
 Test Mode Handler.
 
---test 모드 실행 핸들러.
+DEPRECATED: 이 모듈은 더 이상 사용되지 않습니다.
 
-기능:
-- io_board SSE 구독
-- 실시간 모니터링 대시보드 표시
-- 이벤트 발생 시 Vision + Weight 판단 수행
+이전에는 Model 서비스가 io_board SSE를 직접 구독했으나,
+현재 아키텍처에서는 Node.js Orchestrator가 SSE를 구독하고
+Model 서비스를 stateless하게 호출합니다.
+
+테스트는 Node.js 대시보드(http://localhost:8889/dashboard.html)를 통해 수행하세요.
 """
 
 import asyncio
 import logging
+import warnings
 from typing import Optional
 
+warnings.warn(
+    "test_mode.py is deprecated. Model service is now stateless. "
+    "Use Node.js dashboard for testing.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 from .console_dashboard import ConsoleDashboard
-from ..sse_client import IOBoardSubscriber, LoadcellChangeEvent, LoadcellUpdateEvent
-from ..sse_client.zone_detector import ZoneDetector
+# NOTE: sse_client module removed - Model is now stateless
+# from ..sse_client import IOBoardSubscriber, LoadcellChangeEvent, LoadcellUpdateEvent
+# from ..sse_client.zone_detector import ZoneDetector
 from ..camera import FrameCapturer
 from ..vision import YOLOWrapper, HandProximityFilter, Top5Extractor, MultiViewEnsemble
 from ..engine import ProductDecisionEngine, EventTracker
@@ -24,6 +34,34 @@ from ..api.node_client import NodeJSClient
 from ..config import config, ZONE_CHANNEL_MAP, ZONE_CAMERA_MAP, TOP_CAMERA_ID
 
 logger = logging.getLogger(__name__)
+
+
+# Placeholder types for removed sse_client module
+class IOBoardSubscriber:
+    """Placeholder - SSE subscription moved to Node.js Orchestrator."""
+    def __init__(self, *args, **kwargs):
+        raise NotImplementedError(
+            "IOBoardSubscriber removed. Model is now stateless. "
+            "SSE subscription is handled by Node.js Orchestrator."
+        )
+
+
+class LoadcellChangeEvent:
+    """Placeholder for removed event type."""
+    pass
+
+
+class LoadcellUpdateEvent:
+    """Placeholder for removed event type."""
+    pass
+
+
+class ZoneDetector:
+    """Placeholder - Zone detection moved to Node.js."""
+    def __init__(self):
+        raise NotImplementedError(
+            "ZoneDetector removed. Zone detection is handled by Node.js Orchestrator."
+        )
 
 
 class TestModeHandler:
@@ -58,15 +96,19 @@ class TestModeHandler:
         """
         핸들러 초기화.
 
+        DEPRECATED: 이 클래스는 더 이상 사용되지 않습니다.
+        Model 서비스는 이제 stateless하며, SSE 구독은 Node.js가 담당합니다.
+
         Args:
-            io_board_url: io_board 서비스 URL
-            camera_driver_url: camera_driver 서비스 URL
+            io_board_url: io_board 서비스 URL (DEPRECATED)
+            camera_driver_url: camera_driver 서비스 URL (DEPRECATED)
             node_js_url: Node.js 오케스트레이터 URL
             yolo_model_path: YOLO 모델 경로
             refresh_rate: 대시보드 갱신 주기
         """
-        self.io_board_url = io_board_url or config.io_board_url
-        self.camera_driver_url = camera_driver_url or config.camera_driver_url
+        # DEPRECATED: io_board_url, camera_driver_url은 더 이상 config에 없음
+        self.io_board_url = io_board_url or "http://localhost:8001"
+        self.camera_driver_url = camera_driver_url or "http://localhost:8003"
         self.node_js_url = node_js_url or config.nodejs_url
         self.yolo_model_path = yolo_model_path or config.yolo_model_path
 

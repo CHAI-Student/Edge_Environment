@@ -68,6 +68,22 @@ class Config:
     api: APIConfig
 
 
+def _get_default_serial_port() -> str:
+    """
+    플랫폼에 따른 기본 시리얼 포트 반환.
+
+    Returns:
+        Windows: COM3
+        Linux/Jetson: /dev/ttyUSB0
+    """
+    import sys
+    if sys.platform == "win32":
+        return "COM3"
+    else:
+        # Linux (Jetson Orin Nano 포함)
+        return "/dev/ttyUSB0"
+
+
 def load_config() -> Config:
     """
     Load configuration from environment variables.
@@ -79,7 +95,7 @@ def load_config() -> Config:
         ValueError: If configuration values are invalid
 
     Environment Variables:
-        IO_BOARD_PORT: Serial port path (default: COM3)
+        IO_BOARD_PORT: Serial port path (default: COM3 on Windows, /dev/ttyUSB0 on Linux)
         IO_BOARD_BAUDRATE: Serial baudrate (default: 38400)
         IO_BOARD_HEADER_TIMEOUT: Header read timeout in seconds (default: 0.5)
         IO_BOARD_BODY_TIMEOUT: Body read timeout in seconds (default: 2.0)
@@ -93,7 +109,7 @@ def load_config() -> Config:
         IO_BOARD_STREAM_INTERVAL: SSE stream update interval in seconds (default: 0.5)
     """
     serial_config = SerialConfig(
-        port=os.getenv("IO_BOARD_PORT", "COM3"),
+        port=os.getenv("IO_BOARD_PORT", _get_default_serial_port()),
         baudrate=int(os.getenv("IO_BOARD_BAUDRATE", "38400")),
         header_timeout=float(os.getenv("IO_BOARD_HEADER_TIMEOUT", "0.5")),
         body_timeout=float(os.getenv("IO_BOARD_BODY_TIMEOUT", "2.0")),

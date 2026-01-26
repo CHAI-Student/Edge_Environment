@@ -57,6 +57,12 @@ from .models import (
     ImageUploadResponse,
     ProductExportResponse,
     ProductSearchRequest,
+    # Lightweight Model (Node.js Integration)
+    WeightData,
+    MediaPaths,
+    JudgmentMetadata,
+    NewJudgeRequest,
+    NewJudgeResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,14 +81,28 @@ class ProductItem(BaseModel):
 
 
 class JudgeRequest(BaseModel):
-    """상품 판단 요청."""
+    """
+    상품 판단 요청.
+
+    Note:
+        이 형식은 deprecated입니다. NewJudgeRequest(weight_data 포함) 형식을 사용하세요.
+        하위 호환성을 위해 유지됩니다.
+    """
+    # 새로운 형식 (권장)
+    weight_data: Optional[WeightData] = None
+    media_paths: Optional[MediaPaths] = None
+
+    # 레거시 형식 (deprecated)
     snapshot_folder: Optional[str] = None
     loadcell_weights: List[str] = Field(default_factory=list)
     baseline_weights: List[str] = Field(default_factory=list)
+
+    # 공통 필드
     zone_id: int = 0
     products: List[ProductItem] = Field(default_factory=list)
     delta_weight: Optional[float] = None  # 직접 무게 변화량 지정
     vision_candidates: Optional[List[dict]] = None  # 직접 Vision 후보군 지정
+    timestamp: Optional[float] = None  # 이벤트 타임스탬프
 
 
 class ProductJudgmentResponse(BaseModel):
@@ -115,12 +135,9 @@ class JudgeResponse(BaseModel):
     timestamp: float
 
 
-class HealthResponse(BaseModel):
-    """헬스 체크 응답."""
-    status: str
-    service: str
-    version: str
-    timestamp: float
+class ModelHealthResponse(BaseModel):
+    """헬스 체크 응답 (IO Board 형식 호환)."""
+    model: str  # "HEALTHY" | "UNHEALTHY"
 
 
 class ProductInfoResponse(BaseModel):
@@ -184,14 +201,22 @@ def init_routes(product_db: ProductDatabase, decision_engine: ProductDecisionEng
     logger.info("API routes initialized with advanced modules")
 
 
-@router.get("/health", response_model=HealthResponse)
+@router.get("/health", response_model=ModelHealthResponse)
 async def health_check():
-    """헬스 체크."""
-    return HealthResponse(
-        status="healthy",
-        service="model",
-        version="1.0.0",
-        timestamp=time.time(),
+    """헬스 체크 - 모델 파일 존재 여부 확인."""
+    model_path = config.yolo_model_path
+
+    # 상대 경로인 경우 절대 경로로 변환
+    if not os.path.isabs(model_path):
+        # services/model 디렉토리 기준
+        base_dir = Path(__file__).parent.parent
+        model_path = str(base_dir / model_path)
+
+    # 모델 파일 존재 여부 확인
+    model_exists = os.path.exists(model_path)
+
+    return ModelHealthResponse(
+        model="HEALTHY" if model_exists else "UNHEALTHY",
     )
 
 
@@ -202,8 +227,23 @@ async def judge_products(request: JudgeRequest):
 
     Node.js Orchestrator에서 호출하여 상품을 판단합니다.
 
+    새로운 형식 (권장):
+        {
+            "zone_id": 0,
+            "weight_data": {"before_weights": [...], "after_weights": [...], "delta_weight": -520, "channels": [0, 1]},
+            "media_paths": {"image_folder": "/data/snapshots/...", "top_image": "...", "side_image": "..."},
+            "timestamp": 1737897025.123
+        }
+
+    레거시 형식 (하위 호환):
+        {
+            "loadcell_weights": ["+00480", ...],
+            "baseline_weights": ["+01000", ...],
+            "zone_id": 0
+        }
+
     Args:
-        request: 판단 요청 (loadcell_weights, baseline_weights, zone_id, products)
+        request: 판단 요청
 
     Returns:
         JudgeResponse: 판단 결과
@@ -213,13 +253,22 @@ async def judge_products(request: JudgeRequest):
     if _decision_engine is None:
         raise HTTPException(status_code=503, detail="Decision engine not initialized")
 
+    start_time = time.time()
+    images_processed = []
+
     logger.info(f"Judge request: zone_id={request.zone_id}")
 
     try:
-        # 1. 무게 변화량 계산
-        if request.delta_weight is not None:
+        # 1. 무게 변화량 결정 (새 형식 우선)
+        if request.weight_data is not None:
+            # 새로운 형식: weight_data에서 delta_weight 사용
+            delta_weight = request.weight_data.delta_weight
+            logger.info(f"Using weight_data: delta={delta_weight:.1f}g, channels={request.weight_data.channels}")
+        elif request.delta_weight is not None:
+            # 직접 지정된 delta_weight
             delta_weight = request.delta_weight
         else:
+            # 레거시 형식: loadcell_weights에서 계산
             delta_weight = _calculate_delta_weight(
                 request.loadcell_weights,
                 request.baseline_weights,
@@ -229,7 +278,10 @@ async def judge_products(request: JudgeRequest):
         logger.info(f"Zone {request.zone_id} delta_weight: {delta_weight:.1f}g")
 
         # 2. Vision 후보군 생성
+        vision_candidates = []
+
         if request.vision_candidates:
+            # 직접 제공된 Vision 후보군 사용
             vision_candidates = [
                 EnsembleResult(
                     class_id=c.get("class_id", 0),
@@ -241,11 +293,27 @@ async def judge_products(request: JudgeRequest):
                 )
                 for c in request.vision_candidates
             ]
+            logger.info(f"Using {len(vision_candidates)} provided vision candidates")
+
+        elif request.media_paths is not None:
+            # 이미지 경로에서 Vision 추론 수행
+            vision_candidates, images_processed = await _run_vision_from_media_paths(
+                request.media_paths,
+                request.zone_id,
+            )
+            logger.info(f"Vision inference from files: {len(vision_candidates)} candidates, {len(images_processed)} images")
+
+        elif request.snapshot_folder:
+            # 레거시: snapshot_folder에서 이미지 로드
+            media_paths = MediaPaths(image_folder=request.snapshot_folder)
+            vision_candidates, images_processed = await _run_vision_from_media_paths(
+                media_paths,
+                request.zone_id,
+            )
+            logger.info(f"Vision inference from snapshot_folder: {len(vision_candidates)} candidates")
+
         else:
-            # 실제 Vision 추론이 필요한 경우 여기서 처리
-            # 현재는 빈 리스트로 반환 (실제 구현 시 camera + YOLO 파이프라인 연동)
-            vision_candidates = []
-            logger.warning("No vision candidates provided, using empty list")
+            logger.warning("No vision candidates or image paths provided, using empty list")
 
         # 3. 판단 수행
         result = _decision_engine.judge(
@@ -253,7 +321,10 @@ async def judge_products(request: JudgeRequest):
             delta_weight=delta_weight,
         )
 
-        # 4. 응답 변환
+        # 4. 처리 시간 계산
+        processing_time_ms = (time.time() - start_time) * 1000
+
+        # 5. 응답 변환
         response = JudgeResponse(
             success=result.is_success,
             products=[
@@ -277,15 +348,16 @@ async def judge_products(request: JudgeRequest):
             ),
             productCount=result.product_count,
             isRemoval=result.is_removal,
-            timestamp=result.timestamp,
+            timestamp=request.timestamp or result.timestamp,
         )
 
         logger.info(
             f"Judge result: status={result.status.value}, "
-            f"products={len(result.products)}, totalPrice={result.total_price}"
+            f"products={len(result.products)}, totalPrice={result.total_price}, "
+            f"processing_time={processing_time_ms:.1f}ms"
         )
 
-        # 5. 성공적인 픽업 이벤트 기록 (반환 감지용)
+        # 6. 성공적인 픽업 이벤트 기록 (반환 감지용)
         if result.is_success and result.products and delta_weight < 0 and _return_detector:
             for p in result.products:
                 _return_detector.record_pickup(
@@ -302,6 +374,117 @@ async def judge_products(request: JudgeRequest):
     except Exception as e:
         logger.error(f"Judge failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _run_vision_from_media_paths(
+    media_paths: MediaPaths,
+    zone_id: int,
+) -> tuple:
+    """
+    이미지 경로에서 Vision 추론 수행.
+
+    Args:
+        media_paths: 이미지/영상 경로
+        zone_id: Zone ID
+
+    Returns:
+        (vision_candidates, images_processed)
+    """
+    from ..vision import YOLOWrapper, HandProximityFilter, Top5Extractor, MultiViewEnsemble
+
+    vision_candidates = []
+    images_processed = []
+
+    # 이미지 파일 경로 수집
+    image_paths = []
+
+    if media_paths.top_image and os.path.exists(media_paths.top_image):
+        image_paths.append(("top", media_paths.top_image))
+
+    if media_paths.side_image and os.path.exists(media_paths.side_image):
+        image_paths.append(("side", media_paths.side_image))
+
+    # image_folder가 있고 개별 이미지 경로가 없는 경우
+    if media_paths.image_folder and not image_paths:
+        folder = media_paths.image_folder
+        if os.path.isdir(folder):
+            # cam_0 (top), cam_{zone_id+1} (side) 찾기
+            for cam_name in ["cam_0", f"cam_{zone_id + 1}"]:
+                cam_dir = os.path.join(folder, cam_name)
+                if os.path.isdir(cam_dir):
+                    for img_file in ["snapshot.jpg", "frame.jpg", "capture.jpg"]:
+                        img_path = os.path.join(cam_dir, img_file)
+                        if os.path.exists(img_path):
+                            cam_type = "top" if "cam_0" in cam_name else "side"
+                            image_paths.append((cam_type, img_path))
+                            break
+
+    if not image_paths:
+        logger.warning(f"No valid images found in media_paths: {media_paths}")
+        return vision_candidates, images_processed
+
+    # YOLO 추론 수행
+    try:
+        import cv2
+
+        yolo = YOLOWrapper(model_path=config.yolo_model_path)
+        hand_filter = HandProximityFilter()
+        top5_extractor = Top5Extractor()
+        ensemble = MultiViewEnsemble()
+
+        top_candidates = []
+        side_candidates = []
+
+        for cam_type, img_path in image_paths:
+            try:
+                # 이미지 로드
+                image = cv2.imread(img_path)
+                if image is None:
+                    logger.warning(f"Failed to load image: {img_path}")
+                    continue
+
+                # YOLO 추론
+                detections = yolo.detect(image)
+                images_processed.append(img_path)
+
+                if not detections:
+                    logger.debug(f"No detections in {img_path}")
+                    continue
+
+                # 손 근접 필터링 + Top-5 추출
+                filtered = hand_filter.filter(detections)
+                top5_result = top5_extractor.extract(filtered.products)
+
+                if cam_type == "top":
+                    top_candidates = top5_result.candidates
+                else:
+                    side_candidates = top5_result.candidates
+
+                logger.debug(
+                    f"{cam_type} camera: {len(detections)} detections, "
+                    f"{len(top5_result.candidates)} candidates after filtering"
+                )
+
+            except Exception as e:
+                logger.error(f"Vision processing failed for {img_path}: {e}")
+                continue
+
+        # Multi-View Ensemble
+        if top_candidates or side_candidates:
+            vision_candidates = ensemble.ensemble(top_candidates, side_candidates)
+            logger.info(
+                f"Ensemble result: {len(vision_candidates)} candidates "
+                f"(top={len(top_candidates)}, side={len(side_candidates)})"
+            )
+
+    except ImportError as e:
+        logger.warning(f"Vision dependencies not available: {e}")
+        images_processed = [path for _, path in image_paths]
+    except Exception as e:
+        logger.error(f"Vision pipeline error: {e}", exc_info=True)
+        images_processed = [path for _, path in image_paths]
+
+    return vision_candidates, images_processed
 
 
 @router.get("/products", response_model=List[ProductInfoResponse])
@@ -1241,16 +1424,12 @@ _door_payment_controller: Optional[DoorPaymentController] = None
 
 
 def initialize_door_payment_controller(
-    io_board_url: str = "http://localhost:8001",
-    card_terminal_host: str = "127.0.0.1",
-    card_terminal_port: int = 5000,
+    card_terminal_url: str = "http://127.0.0.1:8004",
 ):
     """도어 결제 컨트롤러 초기화."""
     global _door_payment_controller
     _door_payment_controller = DoorPaymentController(
-        io_board_url=io_board_url,
-        card_terminal_host=card_terminal_host,
-        card_terminal_port=card_terminal_port,
+        card_terminal_url=card_terminal_url,
     )
     logger.info("Door payment controller initialized")
 

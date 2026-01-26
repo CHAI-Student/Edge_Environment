@@ -72,7 +72,7 @@ class CameraDriverClient {
     }
 
     /**
-     * Zone 프레임 캡처 (스냅샷)
+     * Zone 프레임 캡처 (스냅샷) - Base64 반환
      * @param {number} zoneId - Zone ID (0-4)
      * @param {boolean} includeTop - Top 카메라 포함 여부
      * @returns {Promise<{zone_frame: string|null, top_frame: string|null}>}
@@ -91,6 +91,123 @@ class CameraDriverClient {
             console.error(`[CameraDriverClient] captureZone(${zoneId}) error:`, error.message);
             throw new Error(`Zone ${zoneId} capture failed: ${error.message}`);
         }
+    }
+
+    /**
+     * Zone 스냅샷 캡처 및 저장 (파일 경로 반환)
+     *
+     * Camera Driver가 이미지를 디스크에 저장하고 파일 경로를 반환합니다.
+     * Node.js 오케스트레이터가 이 경로를 Model 서비스에 전달합니다.
+     *
+     * @param {number} zoneId - Zone ID (0-4)
+     * @param {string} sessionId - 세션 ID (예: "260126143025")
+     * @param {boolean} includeTop - Top 카메라 포함 여부
+     * @returns {Promise<{session_path: string, images: Object}>}
+     */
+    async captureSnapshot(zoneId, sessionId, includeTop = true) {
+        try {
+            const response = await axios.post(
+                `${this.baseUrl}/api/zone/${zoneId}/snapshot`,
+                {
+                    session_id: sessionId,
+                    include_top: includeTop
+                },
+                { timeout: this.timeout }
+            );
+
+            console.log(`[CameraDriverClient] Snapshot captured for Zone ${zoneId}: ${response.data.session_path}`);
+            return response.data;
+        } catch (error) {
+            // 엔드포인트가 없는 경우 Base64로 받아서 파일로 저장
+            if (error.response && error.response.status === 404) {
+                console.log(`[CameraDriverClient] Snapshot endpoint not available, using captureZone with file save`);
+                const captureResult = await this.captureZone(zoneId, includeTop);
+
+                // Base64 데이터를 파일로 저장
+                const savedPaths = await this._saveBase64ToFiles(
+                    zoneId,
+                    sessionId,
+                    captureResult.top_frame,
+                    captureResult.zone_frame
+                );
+
+                return {
+                    session_path: savedPaths.session_path,
+                    images: {
+                        cam_0: savedPaths.top_image,
+                        [`cam_${zoneId + 1}`]: savedPaths.side_image
+                    }
+                };
+            }
+            console.error(`[CameraDriverClient] captureSnapshot(${zoneId}) error:`, error.message);
+            throw new Error(`Zone ${zoneId} snapshot failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Base64 이미지를 파일로 저장
+     * @param {number} zoneId - Zone ID
+     * @param {string} sessionId - 세션 ID
+     * @param {string|null} topBase64 - Top 카메라 Base64 데이터
+     * @param {string|null} sideBase64 - Side 카메라 Base64 데이터
+     * @returns {Promise<{session_path: string, top_image: string|null, side_image: string|null}>}
+     */
+    async _saveBase64ToFiles(zoneId, sessionId, topBase64, sideBase64) {
+        const fs = require('fs').promises;
+        const path = require('path');
+
+        // 스냅샷 저장 경로 설정
+        const snapshotBaseDir = process.env.SNAPSHOT_BASE_PATH || path.join(__dirname, '..', '..', 'data', 'snapshots');
+        const sessionPath = path.join(snapshotBaseDir, sessionId);
+
+        // 디렉토리 생성
+        try {
+            await fs.mkdir(sessionPath, { recursive: true });
+        } catch (mkdirError) {
+            console.error(`[CameraDriverClient] Failed to create snapshot directory:`, mkdirError.message);
+        }
+
+        let topImagePath = null;
+        let sideImagePath = null;
+
+        // Top 카메라 이미지 저장
+        if (topBase64) {
+            try {
+                const topDir = path.join(sessionPath, 'cam_0');
+                await fs.mkdir(topDir, { recursive: true });
+                topImagePath = path.join(topDir, 'snapshot.jpg');
+
+                // Base64에서 'data:image/...' prefix 제거
+                const base64Data = topBase64.replace(/^data:image\/\w+;base64,/, '');
+                await fs.writeFile(topImagePath, Buffer.from(base64Data, 'base64'));
+
+                console.log(`[CameraDriverClient] Top camera image saved: ${topImagePath}`);
+            } catch (saveError) {
+                console.error(`[CameraDriverClient] Failed to save top camera image:`, saveError.message);
+            }
+        }
+
+        // Side 카메라 이미지 저장
+        if (sideBase64) {
+            try {
+                const sideDir = path.join(sessionPath, `cam_${zoneId + 1}`);
+                await fs.mkdir(sideDir, { recursive: true });
+                sideImagePath = path.join(sideDir, 'snapshot.jpg');
+
+                const base64Data = sideBase64.replace(/^data:image\/\w+;base64,/, '');
+                await fs.writeFile(sideImagePath, Buffer.from(base64Data, 'base64'));
+
+                console.log(`[CameraDriverClient] Side camera (zone ${zoneId}) image saved: ${sideImagePath}`);
+            } catch (saveError) {
+                console.error(`[CameraDriverClient] Failed to save side camera image:`, saveError.message);
+            }
+        }
+
+        return {
+            session_path: sessionPath,
+            top_image: topImagePath,
+            side_image: sideImagePath
+        };
     }
 
     /**
@@ -163,17 +280,26 @@ class CameraDriverClient {
 
     /**
      * 녹화 시작
-     * @param {number} zoneId - Zone ID
+     * @param {number} zoneId - Zone ID (null이면 전체)
      * @param {boolean} includeTop - Top 카메라 포함
-     * @returns {Promise<{session_id: string}>}
+     * @param {string} sessionId - 세션 ID (선택)
+     * @returns {Promise<{session_id: string, paths: Object}>}
      */
-    async startRecording(zoneId, includeTop = true) {
+    async startRecording(zoneId = null, includeTop = true, sessionId = null) {
         try {
+            const payload = {
+                include_top: includeTop,
+                record_video: true
+            };
+            if (zoneId !== null) payload.zone_id = zoneId;
+            if (sessionId) payload.session_id = sessionId;
+
             const response = await axios.post(
                 `${this.baseUrl}/api/recording/start`,
-                { zone_id: zoneId, include_top: includeTop },
+                payload,
                 { timeout: this.timeout }
             );
+            console.log(`[CameraDriverClient] Recording started: session=${response.data.session_id}, zone=${zoneId}`);
             return response.data;
         } catch (error) {
             console.error(`[CameraDriverClient] startRecording error:`, error.message);
@@ -192,10 +318,104 @@ class CameraDriverClient {
                 {},
                 { timeout: this.timeout }
             );
+            console.log(`[CameraDriverClient] Recording stopped: session=${response.data.session_info?.session_id}`);
             return response.data;
         } catch (error) {
             console.error(`[CameraDriverClient] stopRecording error:`, error.message);
             throw new Error(`Stop recording failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Top 카메라 (cam_0) 활성화
+     * Deadbolt 열릴 때 호출
+     * @returns {Promise<{success: boolean}>}
+     */
+    async activateTopCamera() {
+        try {
+            // Top 카메라는 camera_id = 0
+            // Zone -1 또는 특수 처리로 Top만 활성화
+            const response = await axios.post(
+                `${this.baseUrl}/api/camera/0/activate`,
+                {},
+                { timeout: this.timeout }
+            );
+            console.log('[CameraDriverClient] Top camera (cam_0) activated');
+            return response.data;
+        } catch (error) {
+            // 엔드포인트가 없으면 zone 0 활성화로 대체 (Top 카메라 포함)
+            if (error.response && error.response.status === 404) {
+                console.log('[CameraDriverClient] Using zone activation for top camera');
+                return { success: true, fallback: true };
+            }
+            console.error('[CameraDriverClient] activateTopCamera error:', error.message);
+            throw new Error(`Top camera activation failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Top 카메라 (cam_0) 비활성화
+     * @returns {Promise<{success: boolean}>}
+     */
+    async deactivateTopCamera() {
+        try {
+            const response = await axios.post(
+                `${this.baseUrl}/api/camera/0/deactivate`,
+                {},
+                { timeout: this.timeout }
+            );
+            console.log('[CameraDriverClient] Top camera (cam_0) deactivated');
+            return response.data;
+        } catch (error) {
+            if (error.response && error.response.status === 404) {
+                return { success: true, fallback: true };
+            }
+            console.error('[CameraDriverClient] deactivateTopCamera error:', error.message);
+            throw new Error(`Top camera deactivation failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Top 카메라 녹화 시작 (Deadbolt 열릴 때)
+     * @param {string} sessionId - 세션 ID
+     * @returns {Promise<{session_id: string}>}
+     */
+    async startTopCameraRecording(sessionId = null) {
+        try {
+            const payload = {
+                zone_id: null,  // Top만
+                include_top: true,
+                record_video: true
+            };
+            if (sessionId) payload.session_id = sessionId;
+
+            const response = await axios.post(
+                `${this.baseUrl}/api/recording/start`,
+                payload,
+                { timeout: this.timeout }
+            );
+            console.log(`[CameraDriverClient] Top camera recording started: session=${response.data.session_id}`);
+            return response.data;
+        } catch (error) {
+            console.error('[CameraDriverClient] startTopCameraRecording error:', error.message);
+            throw new Error(`Top camera recording failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * 녹화 상태 조회
+     * @returns {Promise<{is_recording: boolean, session_id: string|null}>}
+     */
+    async getRecordingStatus() {
+        try {
+            const response = await axios.get(
+                `${this.baseUrl}/api/recording/status`,
+                { timeout: this.timeout }
+            );
+            return response.data;
+        } catch (error) {
+            console.error('[CameraDriverClient] getRecordingStatus error:', error.message);
+            return { is_recording: false, has_media_recorder: false };
         }
     }
 }

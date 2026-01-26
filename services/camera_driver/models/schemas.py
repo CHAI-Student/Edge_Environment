@@ -57,3 +57,10 @@ class HealthResponse(BaseModel):
     initialized: bool
     streaming: bool
     connected_cameras: int
+
+
+class CameraHealthResponse(BaseModel):
+    """Camera health check response (IO Board 형식 호환)"""
+
+    cameras: str  # "HEALTHY" | "UNHEALTHY"
+    storage: str  # "HEALTHY" | "UNHEALTHY"

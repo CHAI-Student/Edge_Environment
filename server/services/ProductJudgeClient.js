@@ -131,8 +131,9 @@ class ProductJudgeClient {
     }
 
     /**
-     * 실제 상품 판단 (스냅샷 폴더 + 로드셀)
+     * 실제 상품 판단 (스냅샷 폴더 + 로드셀) - 레거시 형식
      *
+     * @deprecated Use judgeWithWeightData() instead
      * @param {Object} params
      * @param {string} params.snapshot_folder - 스냅샷 이미지 폴더 경로
      * @param {number[]} params.loadcell_weights - 현재 로드셀 값 (10채널)
@@ -156,6 +157,48 @@ class ProductJudgeClient {
         } catch (error) {
             console.error('[ProductJudgeClient] judge error:', error.message);
             throw new Error(`Judge failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * 상품 판단 (새로운 형식: 무게 데이터 + 이미지 경로)
+     *
+     * Node.js 오케스트레이터가 SSE 이벤트와 이미지를 수집하여
+     * Model 서비스에 전달하는 새로운 API.
+     *
+     * @param {Object} params
+     * @param {number} params.zone_id - Zone ID (0-4)
+     * @param {Object} params.weight_data - 무게 데이터
+     * @param {number[]} params.weight_data.before_weights - 변화 전 무게 (10채널)
+     * @param {number[]} params.weight_data.after_weights - 변화 후 무게 (10채널)
+     * @param {number} params.weight_data.delta_weight - 무게 변화량 (g)
+     * @param {number[]} [params.weight_data.channels] - 변화 감지된 채널
+     * @param {Object} [params.media_paths] - 이미지 경로
+     * @param {string} [params.media_paths.image_folder] - 스냅샷 폴더 경로
+     * @param {string} [params.media_paths.top_image] - Top 카메라 이미지
+     * @param {string} [params.media_paths.side_image] - Side 카메라 이미지
+     * @param {number} params.timestamp - 이벤트 발생 시각 (Unix timestamp)
+     * @param {Array} [params.vision_candidates] - 미리 추론한 Vision 후보군
+     * @returns {Promise<JudgeResponse>}
+     */
+    async judgeWithWeightData(params) {
+        try {
+            const response = await axios.post(
+                `${this.baseUrl}/api/judge`,
+                {
+                    zone_id: params.zone_id,
+                    weight_data: params.weight_data,
+                    media_paths: params.media_paths || null,
+                    timestamp: params.timestamp,
+                    vision_candidates: params.vision_candidates || null,
+                },
+                { timeout: this.timeout }
+            );
+            console.log(`[ProductJudgeClient] judgeWithWeightData completed: zone=${params.zone_id}, status=${response.data.status}`);
+            return response.data;
+        } catch (error) {
+            console.error('[ProductJudgeClient] judgeWithWeightData error:', error.message);
+            throw new Error(`Judge with weight data failed: ${error.message}`);
         }
     }
 
