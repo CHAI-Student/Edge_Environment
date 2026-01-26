@@ -179,10 +179,19 @@ class ProductJudgeClient {
      * @param {string} [params.media_paths.side_image] - Side 카메라 이미지
      * @param {number} params.timestamp - 이벤트 발생 시각 (Unix timestamp)
      * @param {Array} [params.vision_candidates] - 미리 추론한 Vision 후보군
+     * @param {string} [params.inference_id] - 추론 ID (취소용)
+     * @param {AbortSignal} [abortSignal] - 취소 시그널
      * @returns {Promise<JudgeResponse>}
      */
-    async judgeWithWeightData(params) {
+    async judgeWithWeightData(params, abortSignal = null) {
         try {
+            const requestConfig = { timeout: this.timeout };
+
+            // AbortSignal 지원
+            if (abortSignal) {
+                requestConfig.signal = abortSignal;
+            }
+
             const response = await axios.post(
                 `${this.baseUrl}/api/judge`,
                 {
@@ -191,14 +200,88 @@ class ProductJudgeClient {
                     media_paths: params.media_paths || null,
                     timestamp: params.timestamp,
                     vision_candidates: params.vision_candidates || null,
+                    inference_id: params.inference_id || null,
                 },
-                { timeout: this.timeout }
+                requestConfig
             );
             console.log(`[ProductJudgeClient] judgeWithWeightData completed: zone=${params.zone_id}, status=${response.data.status}`);
             return response.data;
         } catch (error) {
+            // AbortError 처리
+            if (axios.isCancel(error) || error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+                const abortError = new Error('Request aborted');
+                abortError.name = 'AbortError';
+                throw abortError;
+            }
             console.error('[ProductJudgeClient] judgeWithWeightData error:', error.message);
             throw new Error(`Judge with weight data failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * 카메라 전용 상품 판단 (로드셀 없이)
+     *
+     * 로드셀 연결 없이 카메라만으로 상품을 판단합니다.
+     * 무게 검증이 없으므로 개수는 1로 고정되고 신뢰도가 낮아집니다.
+     *
+     * @param {Object} params
+     * @param {number} params.zone_id - Zone ID (0-4)
+     * @param {Object} params.media_paths - 이미지 경로
+     * @param {string} [params.media_paths.image_folder] - 스냅샷 폴더 경로
+     * @param {string} [params.media_paths.top_image] - Top 카메라 이미지
+     * @param {string} [params.media_paths.side_image] - Side 카메라 이미지
+     * @param {number} [params.timestamp] - 이벤트 발생 시각 (Unix timestamp)
+     * @param {string} [params.inference_id] - 추론 ID (취소용)
+     * @returns {Promise<JudgeResponse>}
+     */
+    async judgeWithCameraOnly(params) {
+        try {
+            const response = await axios.post(
+                `${this.baseUrl}/api/judge`,
+                {
+                    zone_id: params.zone_id,
+                    weight_data: null,  // 무게 데이터 없음
+                    media_paths: params.media_paths,
+                    timestamp: params.timestamp || Date.now() / 1000,
+                    vision_candidates: params.vision_candidates || null,
+                    inference_id: params.inference_id || null,
+                    vision_only: true,  // Vision 전용 모드 명시
+                },
+                { timeout: this.timeout }
+            );
+            console.log(`[ProductJudgeClient] judgeWithCameraOnly completed: zone=${params.zone_id}, status=${response.data.status}`);
+            return response.data;
+        } catch (error) {
+            console.error('[ProductJudgeClient] judgeWithCameraOnly error:', error.message);
+            throw new Error(`Camera-only judge failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * 진행 중인 추론 취소
+     *
+     * Model 서비스에서 진행 중인 추론을 중단합니다.
+     *
+     * @param {string} inferenceId - 추론 ID
+     * @returns {Promise<{cancelled: boolean, inference_id: string}>}
+     */
+    async cancelInference(inferenceId) {
+        try {
+            const response = await axios.post(
+                `${this.baseUrl}/api/judge/cancel`,
+                { inference_id: inferenceId },
+                { timeout: 5000 }  // 취소는 빠르게
+            );
+            console.log(`[ProductJudgeClient] Inference cancelled: ${inferenceId}`);
+            return response.data;
+        } catch (error) {
+            // 404는 이미 완료된 추론
+            if (error.response && error.response.status === 404) {
+                console.log(`[ProductJudgeClient] Inference not found (already completed): ${inferenceId}`);
+                return { cancelled: false, inference_id: inferenceId, reason: 'not_found' };
+            }
+            console.error('[ProductJudgeClient] cancelInference error:', error.message);
+            throw new Error(`Cancel inference failed: ${error.message}`);
         }
     }
 

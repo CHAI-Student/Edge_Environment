@@ -19,6 +19,8 @@ import logging
 import time
 import os
 import shutil
+import asyncio
+import uuid
 from pathlib import Path
 
 from ..config import config
@@ -103,6 +105,8 @@ class JudgeRequest(BaseModel):
     delta_weight: Optional[float] = None  # 직접 무게 변화량 지정
     vision_candidates: Optional[List[dict]] = None  # 직접 Vision 후보군 지정
     timestamp: Optional[float] = None  # 이벤트 타임스탬프
+    inference_id: Optional[str] = None  # 추론 ID (취소용)
+    vision_only: bool = False  # Vision 전용 모드 (로드셀 없이 카메라만 사용)
 
 
 class ProductJudgmentResponse(BaseModel):
@@ -127,12 +131,13 @@ class JudgeResponse(BaseModel):
     success: bool
     products: List[ProductJudgmentResponse]
     totalPrice: int
-    status: str  # complete, partial, uncertain, no_detection
+    status: str  # complete, partial, uncertain, no_detection, cancelled
     confidence: float
     weightInfo: WeightInfoResponse
     productCount: int
     isRemoval: bool
     timestamp: float
+    inference_id: Optional[str] = None  # 추론 ID
 
 
 class ModelHealthResponse(BaseModel):
@@ -180,6 +185,10 @@ _zone_stats: Dict[int, Dict[str, int]] = {
     for i in range(5)
 }
 
+# Active inferences tracking (for cancellation support)
+_active_inferences: Dict[str, asyncio.Event] = {}
+_inference_lock = asyncio.Lock()
+
 
 def init_routes(product_db: ProductDatabase, decision_engine: ProductDecisionEngine):
     """라우터 초기화 (main.py에서 호출)."""
@@ -220,6 +229,94 @@ async def health_check():
     )
 
 
+# ===== Inference Cancellation =====
+
+class InferenceCancelRequest(BaseModel):
+    """추론 취소 요청."""
+    inference_id: str
+
+
+class InferenceCancelResponse(BaseModel):
+    """추론 취소 응답."""
+    cancelled: bool
+    inference_id: str
+    reason: Optional[str] = None
+
+
+@router.post("/judge/cancel", response_model=InferenceCancelResponse)
+async def cancel_inference(request: InferenceCancelRequest):
+    """
+    진행 중인 추론 취소.
+
+    Node.js에서 새로운 무게 이벤트 발생 시 기존 추론을 중단하기 위해 호출합니다.
+
+    Args:
+        request: 취소 요청 (inference_id)
+
+    Returns:
+        InferenceCancelResponse: 취소 결과
+    """
+    global _active_inferences
+
+    inference_id = request.inference_id
+
+    async with _inference_lock:
+        if inference_id not in _active_inferences:
+            return InferenceCancelResponse(
+                cancelled=False,
+                inference_id=inference_id,
+                reason="not_found",
+            )
+
+        # 취소 이벤트 설정
+        cancel_event = _active_inferences[inference_id]
+        cancel_event.set()
+
+        logger.info(f"Inference cancelled: {inference_id}")
+
+        return InferenceCancelResponse(
+            cancelled=True,
+            inference_id=inference_id,
+        )
+
+
+@router.get("/judge/active")
+async def get_active_inferences():
+    """
+    진행 중인 추론 목록 조회.
+
+    Returns:
+        활성 추론 ID 목록
+    """
+    global _active_inferences
+
+    async with _inference_lock:
+        return {
+            "active_inferences": list(_active_inferences.keys()),
+            "count": len(_active_inferences),
+            "timestamp": time.time(),
+        }
+
+
+async def _register_inference(inference_id: str) -> asyncio.Event:
+    """추론 등록 및 취소 이벤트 생성."""
+    global _active_inferences
+
+    async with _inference_lock:
+        cancel_event = asyncio.Event()
+        _active_inferences[inference_id] = cancel_event
+        return cancel_event
+
+
+async def _unregister_inference(inference_id: str):
+    """추론 등록 해제."""
+    global _active_inferences
+
+    async with _inference_lock:
+        if inference_id in _active_inferences:
+            del _active_inferences[inference_id]
+
+
 @router.post("/judge", response_model=JudgeResponse)
 async def judge_products(request: JudgeRequest):
     """
@@ -232,7 +329,8 @@ async def judge_products(request: JudgeRequest):
             "zone_id": 0,
             "weight_data": {"before_weights": [...], "after_weights": [...], "delta_weight": -520, "channels": [0, 1]},
             "media_paths": {"image_folder": "/data/snapshots/...", "top_image": "...", "side_image": "..."},
-            "timestamp": 1737897025.123
+            "timestamp": 1737897025.123,
+            "inference_id": "inf_123456789"
         }
 
     레거시 형식 (하위 호환):
@@ -253,14 +351,48 @@ async def judge_products(request: JudgeRequest):
     if _decision_engine is None:
         raise HTTPException(status_code=503, detail="Decision engine not initialized")
 
+    # inference_id 생성 또는 사용
+    inference_id = request.inference_id or f"inf_{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}"
+
+    # 추론 등록
+    cancel_event = await _register_inference(inference_id)
+
     start_time = time.time()
     images_processed = []
 
-    logger.info(f"Judge request: zone_id={request.zone_id}")
+    logger.info(f"Judge request: zone_id={request.zone_id}, inference_id={inference_id}")
 
     try:
+        # 취소 체크
+        if cancel_event.is_set():
+            return JudgeResponse(
+                success=False,
+                products=[],
+                totalPrice=0,
+                status="cancelled",
+                confidence=0.0,
+                weightInfo=WeightInfoResponse(delta=0, explained=0, residual=0),
+                productCount=0,
+                isRemoval=False,
+                timestamp=time.time(),
+                inference_id=inference_id,
+            )
+
+        # Vision 전용 모드 체크
+        vision_only = request.vision_only
+
+        # media_paths만 있고 weight_data가 없으면 자동으로 vision_only 모드
+        if request.media_paths is not None and request.weight_data is None and request.delta_weight is None:
+            if not request.loadcell_weights:
+                vision_only = True
+                logger.info("Auto-enabled vision_only mode (no weight data provided)")
+
         # 1. 무게 변화량 결정 (새 형식 우선)
-        if request.weight_data is not None:
+        if vision_only:
+            # Vision 전용 모드: 무게 데이터 불필요
+            delta_weight = 0.0
+            logger.info(f"Vision-only mode: zone={request.zone_id}, no weight data required")
+        elif request.weight_data is not None:
             # 새로운 형식: weight_data에서 delta_weight 사용
             delta_weight = request.weight_data.delta_weight
             logger.info(f"Using weight_data: delta={delta_weight:.1f}g, channels={request.weight_data.channels}")
@@ -275,7 +407,22 @@ async def judge_products(request: JudgeRequest):
                 request.zone_id,
             )
 
-        logger.info(f"Zone {request.zone_id} delta_weight: {delta_weight:.1f}g")
+        logger.info(f"Zone {request.zone_id} delta_weight: {delta_weight:.1f}g, vision_only={vision_only}")
+
+        # 취소 체크 (Vision 처리 전)
+        if cancel_event.is_set():
+            return JudgeResponse(
+                success=False,
+                products=[],
+                totalPrice=0,
+                status="cancelled",
+                confidence=0.0,
+                weightInfo=WeightInfoResponse(delta=delta_weight, explained=0, residual=delta_weight),
+                productCount=0,
+                isRemoval=delta_weight < 0,
+                timestamp=time.time(),
+                inference_id=inference_id,
+            )
 
         # 2. Vision 후보군 생성
         vision_candidates = []
@@ -315,10 +462,26 @@ async def judge_products(request: JudgeRequest):
         else:
             logger.warning("No vision candidates or image paths provided, using empty list")
 
+        # 취소 체크 (Vision 처리 후, Decision Engine 전)
+        if cancel_event.is_set():
+            return JudgeResponse(
+                success=False,
+                products=[],
+                totalPrice=0,
+                status="cancelled",
+                confidence=0.0,
+                weightInfo=WeightInfoResponse(delta=delta_weight, explained=0, residual=delta_weight),
+                productCount=0,
+                isRemoval=delta_weight < 0,
+                timestamp=time.time(),
+                inference_id=inference_id,
+            )
+
         # 3. 판단 수행
         result = _decision_engine.judge(
             vision_candidates=vision_candidates,
             delta_weight=delta_weight,
+            vision_only=vision_only,
         )
 
         # 4. 처리 시간 계산
@@ -349,12 +512,13 @@ async def judge_products(request: JudgeRequest):
             productCount=result.product_count,
             isRemoval=result.is_removal,
             timestamp=request.timestamp or result.timestamp,
+            inference_id=inference_id,
         )
 
         logger.info(
             f"Judge result: status={result.status.value}, "
             f"products={len(result.products)}, totalPrice={result.total_price}, "
-            f"processing_time={processing_time_ms:.1f}ms"
+            f"processing_time={processing_time_ms:.1f}ms, inference_id={inference_id}"
         )
 
         # 6. 성공적인 픽업 이벤트 기록 (반환 감지용)
@@ -374,6 +538,9 @@ async def judge_products(request: JudgeRequest):
     except Exception as e:
         logger.error(f"Judge failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # 추론 등록 해제 보장 (성공/실패/예외 모두)
+        await _unregister_inference(inference_id)
 
 
 async def _run_vision_from_media_paths(
@@ -420,7 +587,11 @@ async def _run_vision_from_media_paths(
                             break
 
     if not image_paths:
-        logger.warning(f"No valid images found in media_paths: {media_paths}")
+        logger.warning(
+            f"No valid images found in media_paths: folder={media_paths.image_folder}, "
+            f"top={media_paths.top_image}, side={media_paths.side_image}"
+        )
+        # 빈 결과 반환 (호출자가 no_images 상태 확인 가능)
         return vision_candidates, images_processed
 
     # YOLO 추론 수행

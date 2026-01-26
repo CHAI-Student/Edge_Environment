@@ -100,6 +100,7 @@ class ProductDecisionEngine:
         self,
         vision_candidates: List[EnsembleResult],
         delta_weight: float,
+        vision_only: bool = False,
     ) -> JudgmentResult:
         """
         상품 판단 수행.
@@ -107,6 +108,7 @@ class ProductDecisionEngine:
         Args:
             vision_candidates: Multi-View Ensemble 결과 (Top-5)
             delta_weight: 무게 변화량 (음수 = 제거)
+            vision_only: Vision 전용 모드 (로드셀 없이 카메라만 사용)
 
         Returns:
             JudgmentResult (Node.js 전달용)
@@ -116,8 +118,12 @@ class ProductDecisionEngine:
 
         logger.info(
             f"Starting judgment: {len(vision_candidates)} candidates, "
-            f"delta_weight={delta_weight:.1f}g"
+            f"delta_weight={delta_weight:.1f}g, vision_only={vision_only}"
         )
+
+        # Vision 전용 모드: 카메라만으로 판단
+        if vision_only:
+            return self._judge_vision_only(vision_candidates, timestamp)
 
         # 1. 후보군이 없는 경우 → Loadcell-only 폴백
         if not vision_candidates:
@@ -156,6 +162,78 @@ class ProductDecisionEngine:
         # 6. 불완전 결과 반환 (최선의 추정)
         logger.info("Returning partial/uncertain result")
         return self._create_partial_result(estimates, delta_weight, timestamp)
+
+    def _judge_vision_only(
+        self,
+        vision_candidates: List[EnsembleResult],
+        timestamp: float,
+    ) -> JudgmentResult:
+        """
+        Vision 전용 판단 (로드셀 없이 카메라만 사용).
+
+        무게 검증 없이 Vision 신뢰도만으로 상품을 판단합니다.
+        개수는 1로 고정되며, 신뢰도는 Vision 신뢰도의 70%로 감소합니다.
+
+        Args:
+            vision_candidates: Vision 후보군
+            timestamp: 판단 시각
+
+        Returns:
+            JudgmentResult (status: PARTIAL, 무게 검증 없음)
+        """
+        logger.info(f"Vision-only judgment: {len(vision_candidates)} candidates")
+
+        if not vision_candidates:
+            logger.warning("No vision candidates for vision-only judgment")
+            return self._create_no_detection_result(0.0, timestamp)
+
+        # 가장 높은 신뢰도의 후보 선택
+        best_candidate = max(vision_candidates, key=lambda c: c.combined_confidence)
+
+        if best_candidate.combined_confidence < self.confidence_threshold:
+            logger.info(
+                f"Vision confidence too low: {best_candidate.combined_confidence:.3f} "
+                f"< {self.confidence_threshold}"
+            )
+            return self._create_no_detection_result(0.0, timestamp)
+
+        # 상품 정보 조회
+        product = self.product_db.get_product(best_candidate.class_id)
+
+        if product is None:
+            logger.warning(f"Product not found for class_id: {best_candidate.class_id}")
+            return self._create_no_detection_result(0.0, timestamp)
+
+        # Vision 전용: 신뢰도 70%로 감소, 개수는 1로 고정
+        confidence = best_candidate.combined_confidence * 0.7
+        count = 1  # 무게 없이 개수 추정 불가
+
+        logger.info(
+            f"Vision-only result: {product.name}, "
+            f"vision_conf={best_candidate.combined_confidence:.3f}, "
+            f"final_conf={confidence:.3f}, count={count}"
+        )
+
+        product_judgment = ProductJudgment(
+            product_id=product.product_id,
+            name=product.name,
+            count=count,
+            unit_price=product.price,
+            total_price=product.price * count,
+            confidence=confidence,
+            unit_weight=product.weight,
+        )
+
+        return JudgmentResult(
+            products=[product_judgment],
+            total_price=product_judgment.total_price,
+            confidence=confidence,
+            status=JudgmentStatus.PARTIAL,  # 무게 미검증
+            weight_delta=0.0,  # 무게 데이터 없음
+            weight_explained=0.0,
+            weight_residual=0.0,
+            timestamp=timestamp,
+        )
 
     def judge_by_weight_only(
         self,

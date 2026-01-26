@@ -150,6 +150,31 @@ curl http://localhost:8001/status
 curl -X POST http://localhost:8001/deadbolt -d '{"action": "OPEN"}'
 ```
 
+### 카메라 전용 테스트 (로드셀 없이)
+
+로드셀 연결 없이 카메라만으로 테스트할 때 사용합니다.
+자세한 내용: [docs/CAMERA_ONLY_TEST.md](docs/CAMERA_ONLY_TEST.md)
+
+```bash
+# 서비스 상태 확인
+curl http://localhost:8889/api/camera/test/status
+
+# Zone 0 카메라 테스트 (스냅샷 + 판단)
+curl -X POST http://localhost:8889/api/camera/test/snapshot-and-judge \
+  -H "Content-Type: application/json" \
+  -d '{"zone_id": 0, "include_top": true}'
+
+# 기존 이미지로 판단
+curl -X POST http://localhost:8889/api/camera/test/judge-from-folder \
+  -H "Content-Type: application/json" \
+  -d '{"zone_id": 0, "image_folder": "/data/snapshots/260126143025"}'
+
+# Python 스크립트
+python scripts/test_camera_only.py --zone 0
+```
+
+**주의**: 카메라 전용 모드는 개수=1 고정, 신뢰도 70%로 감소, 상태=PARTIAL
+
 ## 환경 변수
 
 ### IO Board
