@@ -1,6 +1,3 @@
-const { model } = require("mongoose");
-const { ca } = require("zod/locales");
-
 // 외부 API 접근에 쓰는 값들
 module.exports = {
     mongoURI: 'mongodb://admin:%40crkchai2025@139.150.81.182:27017/CHAI?authSource=admin', // MongoDB로 연결
