@@ -2,7 +2,7 @@
   "version": "1.0",
   "description": "Camera logical ID to physical device index mapping",
   "nvidia_mode": true,
-  "comment": "Nvidia Jetson devices use even-numbered indices (0, 2, 4, 6, 8, 10)",
+  "comment": "4 cameras: video0, video2, video4, video6",
   "device_map": {
     "0": {
       "name": "Top Camera",
@@ -23,16 +23,6 @@
       "name": "Zone 2 Side Camera",
       "physical_index": 6,
       "description": "Side camera for Zone 2"
-    },
-    "4": {
-      "name": "Zone 3 Side Camera",
-      "physical_index": 8,
-      "description": "Side camera for Zone 3"
-    },
-    "5": {
-      "name": "Zone 4 Side Camera",
-      "physical_index": 10,
-      "description": "Side camera for Zone 4"
     }
   }
 }

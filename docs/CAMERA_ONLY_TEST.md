@@ -52,10 +52,10 @@ curl http://localhost:8889/api/camera/test/status
 
 ```bash
 # Zone 0 카메라 테스트
-curl -X POST http://localhost:8889/api/camera/test/snapshot-and-judge \
+curl -X POST http://localhost:8889/api/camera/test/record-and-judge \
   -H "Content-Type: application/json" \
-  -d '{"zone_id": 0, "include_top": true}'
-```
+  -d '{"zone_id": 0, "include_top": true, "duration_ms": 3000, "fps": 30, "top_k": 5}'
+'''
 
 ## API 엔드포인트
 
@@ -101,6 +101,50 @@ curl -X POST http://localhost:8889/api/camera/test/snapshot-and-judge \
     ],
     "totalPrice": 1500,
     "productCount": 1
+  }
+}
+```
+
+### POST /api/camera/test/record-and-judge
+
+3초간 연속 스냅샷 촬영 후 Vision 판단을 수행합니다. 로드셀 정합성 비교 전 후보군 도출에 사용합니다.
+
+**Request:**
+```json
+{
+  "zone_id": 0,
+  "include_top": true,
+  "duration_ms": 3000,
+  "snapshot_interval_ms": 500
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "mode": "camera_only_recording",
+  "zone_id": 0,
+  "session_id": "20260126_214859",
+  "recording": {
+    "duration_ms": 3000,
+    "snapshot_count": 6,
+    "session_path": "/data/snapshots/20260126_214859"
+  },
+  "snapshots": [
+    {
+      "index": 0,
+      "timestamp": 1769431740131,
+      "images": {
+        "cam_0": "/data/snapshots/.../cam_0/snapshot_000.jpg",
+        "cam_1": "/data/snapshots/.../cam_1/snapshot_000.jpg"
+      }
+    }
+  ],
+  "judgment": {
+    "success": true,
+    "status": "partial",
+    "products": [...]
   }
 }
 ```

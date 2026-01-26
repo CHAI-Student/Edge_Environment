@@ -124,6 +124,7 @@ const cameraRouter = require("./routes/camera");
 app.use('/api/camera', cameraRouter);
 console.log('[APP] Camera routes loaded');
 
+
 // Door Control 라우트
 const doorRouter = require("./routes/door");
 app.use('/api/door', doorRouter);
