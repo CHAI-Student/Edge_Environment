@@ -27,11 +27,11 @@ module.exports = {
         return process.env.JWT_TOKEN_AT;
     },
     // IO Board API 설정(로드셀, 데드볼트)
-    ioboardApi: 'http://localhost:8001',
+    ioboardApi: 'http://localhost:8000',
     // 카메라 서버 API 설정
     cameraApi: "http://localhost:8003",
     // 카드단말기 서버 API 설정
-    cardTerminalApi: "http://localhost:5000",
+    cardTerminalApi: "http://localhost:8001",
     // 모델 서버 API 설정
     modelApi: "http://localhost:8002",
 
