@@ -4,18 +4,18 @@ const { getClient } = require("./MqttClient");
 const config = require("../../config/key");
 
 // 분리한 API 서비스 모듈을 가져옵니다.
-const { callApiToControlDoor } = require("./DoorApiService");
+const { callApiToControlDeadbolt } = require("./DeadboltApiService");
 
 // =========================================================
 // [메인 로직: MQTT 메시지 처리]
 // =========================================================
 
-async function ManualDoor() {
+async function ManualDeadbolt() {
   const deviceIdx = config.deviceIdx;
   const divisionIdx = config.divisionIdx;
 
   if (!deviceIdx || !divisionIdx) {
-    console.error("[DOOR] Missing deviceIdx/divisionIdx in config");
+    console.error("[DEADBOLT] Missing deviceIdx/divisionIdx in config");
     return;
   }
 
@@ -25,10 +25,10 @@ async function ManualDoor() {
   const client = getClient();
 
   client.on("connect", () => {
-    console.log("[DOOR] MQTT Connected");
+    console.log("[DEADBOLT] MQTT Connected");
     client.subscribe(manualDoorSub, { qos: 1 }, (err, granted) => {
-      if (err) console.error("[DOOR] subscribe error:", err.message);
-      else console.log("[DOOR] subscribed:", granted);
+      if (err) console.error("[DEADBOLT] subscribe error:", err.message);
+      else console.log("[DEADBOLT] subscribed:", granted);
     });
   });
 
@@ -39,17 +39,17 @@ async function ManualDoor() {
     try {
       msg = JSON.parse(payloadBuf.toString());
     } catch (e) {
-      console.error("[DOOR] invalid JSON:", payloadBuf.toString());
+      console.error("[DEADBOLT] invalid JSON:", payloadBuf.toString());
       return;
     }
 
     const targetState = msg?.DATA?.door_state; // 'OPEN' or 'CLOSE'
     const ifSysId = msg?.HEADER?.IF_SYSID || uuidv4();
 
-    console.log(`[DOOR] MQTT CMD Received. ID=${ifSysId}, Target=${targetState}`);
+    console.log(`[DEADBOLT] MQTT CMD Received. ID=${ifSysId}, Target=${targetState}`);
 
     if (targetState !== "OPEN" && targetState !== "CLOSE") {
-      console.error("[DOOR] Invalid door_state:", targetState);
+      console.error("[DEADBOLT] Invalid deadbolt_state:", targetState);
       return;
     }
 
@@ -62,7 +62,7 @@ async function ManualDoor() {
 
     try {
       // 1. 분리된 함수 호출 (API 제어 요청)
-      const apiResultState = await callApiToControlDoor(targetState);
+      const apiResultState = await callApiToControlDeadbolt(targetState);
 
       // 2. 결과 검증
       if (apiResultState === "OPEN" || apiResultState === "CLOSE") {
@@ -101,8 +101,8 @@ async function ManualDoor() {
     });
 
     client.publish(manualDoorPub, ackPayload, { qos: 1, retain: false }, (e) => {
-      if (e) console.error("[DOOR] Publish Error:", e.message);
-      else console.log(`[DOOR] ACK Sent. Result=${resultCd}, State=${finalState}`);
+      if (e) console.error("[DEADBOLT] Publish Error:", e.message);
+      else console.log(`[DEADBOLT] ACK Sent. Result=${resultCd}, State=${finalState}`);
     });
   });
 
@@ -112,4 +112,4 @@ async function ManualDoor() {
   }
 }
 
-module.exports = { ManualDoor };
+module.exports = { ManualDeadbolt };

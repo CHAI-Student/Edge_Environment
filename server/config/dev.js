@@ -17,13 +17,23 @@ module.exports = {
     deviceIdx: 'DE17683631997086480',
     // PNT RestAPI 연결
     restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
-    userId: 'chai',
-    userPassword: 'carrier041!',
+    userId: 'chaitest',   
+    // userId: 'chaitest2',    
+    userPassword: 'iljin123!',
     get jwtToken() {
         return process.env.JWT_TOKEN;
     },
     get jwtTokenAt() {
         return process.env.JWT_TOKEN_AT;
     },
-    doorControlApi: "http://localhost:8000",
+    ioboardApi: 'http://localhost:8000',
+    // 카메라 서버 API 설정
+    cameraApi: "http://localhost:8003",
+    // 카드단말기 서버 API 설정
+    cardTerminalApi: "http://localhost:8001",
+    // 모델 서버 API 설정
+    modelApi: "http://localhost:8002",
+
+    // 임베딩 모델 버전
+    modelVersion: "v1.0.0",
 }
