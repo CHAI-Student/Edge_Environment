@@ -27,10 +27,12 @@ module.exports = {
         return process.env.JWT_TOKEN_AT;
     },
     ioboardApi: 'http://localhost:8000',
+    // ioboardApi: 'http://192.168.0.20:8000',
     // 카메라 서버 API 설정
     cameraApi: "http://localhost:8003",
     // 카드단말기 서버 API 설정
     cardTerminalApi: "http://localhost:8001",
+    // cardTerminalApi: "http://192.168.0.20:8001",
     // 모델 서버 API 설정
     modelApi: "http://localhost:8002",
 

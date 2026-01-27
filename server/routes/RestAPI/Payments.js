@@ -3,13 +3,16 @@ const axios = require("axios");
 const config = require("../../config/key");
 const { v4: uuidv4 } = require("uuid");
 const { devAutoLogin } = require("../auth");
-const { HealthMqtt } = require("../Mqtt/HealthMqtt");
+const express = require("express");
+const router = express.Router();
+// const { HealthMqtt } = require("../Mqtt/HealthMqtt");
+const { CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI } = require('../Mqtt/HealthMqtt')
 const { ProductList } = require("./ProductList");
 const fs = require("fs");
 const path = require("path");
-const { ManualDoor } = require("../Mqtt/ManualDeadbolt");
+const { ManualDeadbolt } = require("../Mqtt/ManualDeadbolt");
 const { callApiToControlDeadbolt } = require('../Mqtt/DeadboltApiService'); // [추가] 도어 제어 함수 임포트 가정
-const EventSource = require('eventsource');
+const { EventSource } = require('eventsource');
 const { model } = require("mongoose");
 
 
@@ -41,62 +44,89 @@ async function requestTopCameraCapture({ folderPath, action }) {
   }
 }
 
-// --- 1. 이벤트 리스너 설정 ---
-const TokenHandler = new EventSource(`${config.cardTerminalApi}/sse`);
-console.log("[Card Terminal] Listening for card tokens...");
+let token = ''
 
-TokenHandler.addEventListener('tx_token_generate', (event) => {
-    if (event.data) {
-        try {
-            const token = event.data.vankey_hash;
-            const card_method = tokenHash.startsWith("SPAYKEY") ? "S" : "N"
-            // S = 삼성페이, N = 일반카드
-            console.log('[CardToken] Token received:', token);
-            
-            // 토큰을 받으면 프로세스 시작 (비동기 호출)
-            startProcess(token, card_method); 
-        } catch (err) {
-            console.error('[CardToken] Error parsing token:', err);
-        }
-    } else {
-        console.log('[CardToken] No token data received');
-    }
-});
+async function init() {
+    // --- 1. 이벤트 리스너 설정 ---
+    const TokenHandler = new EventSource(`${config.cardTerminalApi}/sse`);
+    console.log("[Card Terminal] Listening for card tokens...");
 
-const DeadboltHandler = new EventSource(`${config.ioboardApi}/deadbolt`); // 엔드포인트 확인 필요
-function waitForDeadboltClose() {
-    return new Promise((resolve) => {
-        console.log("[Door] Waiting for CLOSE event & Log Path from sensor...");
-
-        const statusHandler = (event) => {
-            if (!event.data) return;
+    TokenHandler.addEventListener('tx_token_generate', (event) => {
+        // e {"status": "Y", "vankey_hash": "0027057596824048aafeea42", "card_info": {"SERIAL_NUMBER": "", "ACQUIRER_ID": "003", "ACQUIRER_NAME": "\ud558\ub098\uce74\ub4dc", "ISSUER_ID": "003", "ISSUER_NAME": "\ud1a0\uc2a4\ubc45\ud06c\uce74\ub4dc", "MERCHANT_ID": "00915100663"}, "response_code": 0, "message": ""}
+        console.log('e', event.data)
+        if (event.data) {
             try {
-                const data = JSON.parse(event.data);
-                const currentState = data.state || data; 
-                const logPath = data.log_path || data.logPath || null; // 로그 경로 추출
-
-                if (currentState === "CLOSE") {
-                    console.log(`[Door] Event Received: CLOSE. (LogPath: ${logPath})`);
-                    
-                    DeadboltHandler.removeEventListener('status', statusHandler);
-                    
-                    // 상태뿐만 아니라 로그 경로도 함께 반환
-                    resolve({ 
-                        state: "CLOSE", 
-                        logPath: logPath 
-                    });
-                }
+                token = event.data.vankey_hash;
+                // const card_method = token.startsWith("SPAYKEY") ? "S" : "N"
+                const card_method = 'N'
+                // S = 삼성페이, N = 일반카드
+                console.log('[CardToken] Token received:', token);
+                
+                // 토큰을 받으면 프로세스 시작 (비동기 호출)
+                startProcess(token, card_method); 
             } catch (err) {
-                console.error("[Door] Event parsing error:", err);
+                console.error('[CardToken] Error parsing token:', err);
             }
-        };
-        DeadboltHandler.addEventListener('status', statusHandler);
+        } else {
+            console.log('[CardToken] No token data received');
+        }
+    });
+
+    /**
+     {
+        "amount": "000005000",
+        "authorization_type": "PURCHASE",
+        "display_message": "삼성페이 결제"
+    }
+     */
+    TokenHandler.addEventListener('samsung_pay_init', (event) => {
+        console.log('samsungpay::::', event.data); // {}
+    });
+
+    // rfid:::: {"data": "1763193013"}
+    TokenHandler.addEventListener('rfid_init', (event) => {
+        console.log('rfid::::', event.data)
     });
 }
+// const DeadboltHandler = axios.post(`${config.ioboardApi}/deadbolt`); // 엔드포인트 확인 필요
+// function waitForDeadboltClose() {
+//     return new Promise((resolve) => {
+//         console.log("[Door] Waiting for CLOSE event & Log Path from sensor...");
+
+//         const statusHandler = (event) => {
+//             if (!event.data) return;
+//             try {
+//                 const data = JSON.parse(event.data);
+//                 const currentState = data.state || data; 
+//                 const logPath = data.log_path || data.logPath || null; // 로그 경로 추출
+
+//                 if (currentState === "CLOSE") {
+//                     console.log(`[Door] Event Received: CLOSE. (LogPath: ${logPath})`);
+                    
+//                     DeadboltHandler.removeEventListener('status', statusHandler);
+                    
+//                     // 상태뿐만 아니라 로그 경로도 함께 반환
+//                     resolve({ 
+//                         state: "CLOSE", 
+//                         logPath: logPath 
+//                     });
+//                 }
+//             } catch (err) {
+//                 console.error("[Door] Event parsing error:", err);
+//             }
+//         };
+//         DeadboltHandler.addEventListener('status', statusHandler);
+//     });
+// }
 
 // --- 2. 프로세스 시작 및 상태 체크 ---
 async function startProcess(token, card_method) {
-    LoadcellStatus, CameraStatus, CardTerminalStatus, DeadboltStatus = HealthMqtt()
+    // const LoadcellStatus = LoadcellStatusAPI
+    const CameraStatus = '09'
+    const CardTerminalStatus = await CardTerminalStatusAPI()
+    // const DeadboltStatus = DeadboltStatusAPI
+    const DeadboltStatus = '19'
+    const LoadcellStatus = '29'
 
     if (CardTerminalStatus == '39' && DeadboltStatus == '19' && LoadcellStatus == '29' && CameraStatus == '09') {
         console.log('[PAYMENT] Health check passed. Starting Payments process...');
@@ -192,6 +222,7 @@ async function Payments(token, card_method) {
     
     await requestTopCameraCapture({ folderPath: folderPath, action: 'on' });
 
+    //여기서부터 내일 테스트
     // [5] 문 열기 (OPEN)
     const openResult = await callApiToControlDeadbolt("OPEN");
     if (openResult !== "OPEN") throw new Error(`Failed to open door. Status: ${openResult}`);
@@ -267,4 +298,4 @@ async function Payments(token, card_method) {
     }
 }
 
-module.exports = { Payments };
+module.exports = { Payments, router, init };
