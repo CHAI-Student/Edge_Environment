@@ -120,11 +120,41 @@ async function DeadboltStatusAPI() {
     } else if (error.response) {
       // 서버가 4xx, 5xx 에러를 보낸 경우
       DeadboltState = "30"
-      throw new Error(`[CARD-DEVICE] Server Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
+      throw new Error(`[DEADBOLT] Server Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
     } else {
       DeadboltState = "30"
       throw new Error(error.message);
     } return DeadboltState
+  }
+}
+
+async function CameraStatusAPI() {
+  //camera status check
+  let CameraState = ''
+  try {
+    console.log(`[CAMERA] Sending Request to ${config.cameraApi}`);
+    const CameraRes = await axios.get(`${config.cameraApi}/health`, { timeout: 5000 });
+    console.log(CameraRes.data)
+    if (CameraRes.data) {
+      CameraState = '09'
+      console.log('[CAMERA] camera connect success')
+    } else {
+      CameraState = '00'
+      console.log('[CAMERA] camera unconnected')
+    }
+  } catch (error) {
+    // camera timeout
+    if (error.code === "ECONNABORTED") {
+      CameraState = "00"
+      console.log(`[CAMERA] Camera connect timeout: ${CameraState}`);
+    } else if (error.response) {
+      // 서버가 4xx, 5xx 에러를 보낸 경우
+      CameraState = "00"
+      throw new Error(`[CAMERA] Server Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
+    } else {
+      CameraState = "00"
+      throw new Error(error.message);
+    } return CameraState
   }
 }
 
@@ -140,26 +170,20 @@ async function HealthMqtt() {
   const client = getClient(); // 연결 시작
   client.on("connect", () => {
     console.log("[MQTT] connected");
-    // const CardTerminalStatus = CardTerminalStatusAPI();
-    // const DeadboltStatus = DeadboltStatusAPI();
-    // const LoadcellStatus = LoadcellStatusAPI();
-    // const LoadcellStatus = "29" // 현재는 값을 못불러오니, 이렇게 지정
-    // const CameraStatus = "09" // 현재는 값을 못불러오니, 이렇게 지정
-    // const apiCardTerminalStatus = "39" // 현재는 값을 못불러오니, 이렇게 지정
-    // const apiDeadboltStatus = "19" // 현재는 값을 못불러오니, 이렇게 지정
-    const CameraStatus = "09";
-    const DeadboltStatus = '19'
-    const LoadcellStatus = '29'
+    // const CameraStatus = "09";
+    // const DeadboltStatus = '19'
+    // const LoadcellStatus = '29'
 
     const publishOnce = async () => {
-      // const [CardTerminalStatus, DeadboltStatus, LoadcellStatus] = await Promise.all([
-      //   CardTerminalStatusAPI(),
-      //   DeadboltStatusAPI(),
-      //   LoadcellStatusAPI(),
-      // ]);
-      const [CardTerminalStatus] = await Promise.all([
-        CardTerminalStatusAPI()
+      const [CardTerminalStatus, DeadboltStatus, LoadcellStatus, CameraStatus] = await Promise.all([
+        CardTerminalStatusAPI(),
+        DeadboltStatusAPI(),
+        LoadcellStatusAPI(),
+        CameraStatusAPI()
       ]);
+      // const [CardTerminalStatus] = await Promise.all([
+      //   CardTerminalStatusAPI()
+      // ]);
 
       const timestamp = Date.now();
       const header = {
