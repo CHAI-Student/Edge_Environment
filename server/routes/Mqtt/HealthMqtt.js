@@ -10,7 +10,8 @@ async function CardTerminalStatusAPI() {
 
     // POST 요청 전송
     const response = await axios.get(`${config.cardTerminalApi}/status`, {
-      timeout: 5000 // 5초 안에 응답 없으면 에러 처리
+      timeout: 30000 // 5초 안에 응답 없으면 에러 처리
+
     });
     console.log(response.data)
 
@@ -50,7 +51,7 @@ async function CardTerminalStatusAPI() {
     } return CardTerminalState
   } catch (error) {
     // 카드 단말기에서 return이 없는 경우 -- timeout
-    if (error.code === "ECONNABORTED") {
+    if (error.code === "ECONNABORTED" || error.code === 'EHOSTUNREACH') {
       CardTerminalState = "30"
       console.log(`[CARD-DEVICE] Card Terminal connect timeout: ${CardTerminalState}`);
     } else if (error.response) {
@@ -147,12 +148,17 @@ async function HealthMqtt() {
     // const apiCardTerminalStatus = "39" // 현재는 값을 못불러오니, 이렇게 지정
     // const apiDeadboltStatus = "19" // 현재는 값을 못불러오니, 이렇게 지정
     const CameraStatus = "09";
+    const DeadboltStatus = '19'
+    const LoadcellStatus = '29'
 
     const publishOnce = async () => {
-      const [CardTerminalStatus, DeadboltStatus, LoadcellStatus] = await Promise.all([
-        CardTerminalStatusAPI(),
-        DeadboltStatusAPI(),
-        LoadcellStatusAPI(),
+      // const [CardTerminalStatus, DeadboltStatus, LoadcellStatus] = await Promise.all([
+      //   CardTerminalStatusAPI(),
+      //   DeadboltStatusAPI(),
+      //   LoadcellStatusAPI(),
+      // ]);
+      const [CardTerminalStatus] = await Promise.all([
+        CardTerminalStatusAPI()
       ]);
 
       const timestamp = Date.now();
@@ -185,5 +191,5 @@ async function HealthMqtt() {
   });
 }
 
-// module.exports = { HealthMqtt, CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI };
-module.exports = { HealthMqtt };
+module.exports = { HealthMqtt, CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI };
+// module.exports = { HealthMqtt };

@@ -2,7 +2,7 @@
 const axios = require("axios");
 const config = require("../../config/key");
 
-const API_HOST = config.doorApiHost; // 기본값 설정
+const API_HOST = config.deadboltApi; // 기본값 설정
 const API_ENDPOINT = "/deadbolt"; // 상세 경로
 
 /**
@@ -11,13 +11,13 @@ const API_ENDPOINT = "/deadbolt"; // 상세 경로
  * @param {string} targetState - "OPEN" or "CLOSE"
  * @returns {Promise<string>} - 서버가 반환한 최종 상태 ("OPEN" or "CLOSE")
  */
-async function callApiToControlDoor(targetState) {
-  const DOOR_API_URL = `${API_HOST}${API_ENDPOINT}`;
+async function callApiToControlDeadbolt(targetState) {
+  const DEADBOLT_API_URL = `${API_HOST}${API_ENDPOINT}`;
   try {
-    console.log(`[API] Sending Request to ${DOOR_API_URL} (state: ${targetState})...`);
+    console.log(`[API] Sending Request to ${DEADBOLT_API_URL} (state: ${targetState})...`);
 
     // POST 요청 전송
-    const response = await axios.post(DOOR_API_URL, {
+    const response = await axios.post(DEADBOLT_API_URL, {
       state: targetState 
     }, {
       timeout: 5000 // 5초 타임아웃
@@ -41,4 +41,4 @@ async function callApiToControlDoor(targetState) {
   }
 }
 
-module.exports = { callApiToControlDoor };
+module.exports = { callApiToControlDeadbolt };

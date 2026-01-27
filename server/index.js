@@ -78,6 +78,16 @@ app.use("/api/auth", authModule.router);
 const productRouter = require("../server/routes/AIServer/Products"); // 네 라우터 파일 경로
 app.use("/api", productRouter);
 
+const paymentRouter = require("./routes/RestAPI/Payments");
+// app.use('/payment', paymentRouter.router)
+(async () => {
+  try {
+    await paymentRouter.init();
+  } catch (e) {
+    console.error("[APP] dev auto payment failed:", e?.message || e);
+  }
+})();
+
 app.use('/products', express.static('uploads'));
 app.use('/uploads/images', express.static('images'));
 
