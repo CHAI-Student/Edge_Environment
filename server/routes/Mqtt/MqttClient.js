@@ -90,8 +90,8 @@ function publish(topic, payload, opts = {}) {
   const message = typeof payload === "string" ? payload : JSON.stringify(payload);
 
   const options = {
-    qos: opts.qos ?? 0,
-    retain: opts.retain ?? false,
+    qos: 1,
+    retain: false,
   };
 
   return new Promise((resolve, reject) => {

@@ -26,21 +26,13 @@ module.exports = {
     get jwtTokenAt() {
         return process.env.JWT_TOKEN_AT;
     },
-<<<<<<< HEAD
-    // IO Board API 설정(로드셀, 데드볼트)
-    ioboardApi: 'http://localhost:8000',
-=======
     ioboardApi: 'http://localhost:8000',
     // ioboardApi: 'http://192.168.0.20:8000',
->>>>>>> origin/daehan
     // 카메라 서버 API 설정
     cameraApi: "http://localhost:8003",
     // 카드단말기 서버 API 설정
     cardTerminalApi: "http://localhost:8001",
-<<<<<<< HEAD
-=======
     // cardTerminalApi: "http://192.168.0.20:8001",
->>>>>>> origin/daehan
     // 모델 서버 API 설정
     modelApi: "http://localhost:8002",
 

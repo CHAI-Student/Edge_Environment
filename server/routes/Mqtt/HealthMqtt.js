@@ -170,17 +170,18 @@ async function HealthMqtt() {
   const client = getClient(); // 연결 시작
   client.on("connect", () => {
     console.log("[MQTT] connected");
-    // const CameraStatus = "09";
-    // const DeadboltStatus = '19'
-    // const LoadcellStatus = '29'
+    const CameraStatus = "09";
+    const DeadboltStatus = '19'
+    const LoadcellStatus = '29'
+    const CardTerminalStatus = '39'
 
     const publishOnce = async () => {
-      const [CardTerminalStatus, DeadboltStatus, LoadcellStatus, CameraStatus] = await Promise.all([
-        CardTerminalStatusAPI(),
-        DeadboltStatusAPI(),
-        LoadcellStatusAPI(),
-        CameraStatusAPI()
-      ]);
+      // const [CardTerminalStatus, DeadboltStatus, LoadcellStatus, CameraStatus] = await Promise.all([
+      //   CardTerminalStatusAPI(),
+      //   DeadboltStatusAPI(),
+      //   LoadcellStatusAPI(),
+      //   CameraStatusAPI()
+      // ]);
       // const [CardTerminalStatus] = await Promise.all([
       //   CardTerminalStatusAPI()
       // ]);
@@ -206,7 +207,7 @@ async function HealthMqtt() {
       const payload = JSON.stringify({ HEADER: header, DATA: body });
       console.log("Health Check", payload);
 
-      client.publish(healthCheck, payload, { qos: 0, retain: false }, (e) => {
+      client.publish(healthCheck, payload, { qos: 1, retain: false }, (e) => {
         if (e) console.error("[MQTT] publish error:", e.message);
       });
     };

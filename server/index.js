@@ -63,31 +63,30 @@ app.use(function (req, res, next) {
 const authModule = require("./routes/auth");
 app.use("/api/auth", authModule.router);
 
-(async () => {
-  try {
-    const token = await authModule.devAutoLogin();
-  } catch (e) {
-    console.error("[APP] dev auto login failed:", e?.message || e);
-  }
-})();
+// (async () => {
+//   try {
+//     await authModule.devAutoLogin();
+//   } catch (e) {
+//     console.error("[APP] dev auto login failed:", e?.message || e);
+//   }
+// })();
 
 
 //use this to show the image you have in node js server to client (react js)
 //https://stackoverflow.com/questions/48914987/send-image-path-from-node-js-express-server-to-react-client
 
+// app.use('/payment', paymentRouter.router)
+// (async () => {
+//   try {
+//     await authModule.devAutoLogin();
+//     await paymentRouter.init();
+//   } catch (e) {
+//     console.error("[APP] dev auto payment failed:", e?.message || e);
+//   }
+// })();
+
 const productRouter = require("../server/routes/AIServer/Products"); // 네 라우터 파일 경로
 app.use("/api", productRouter);
-
-const paymentRouter = require("./routes/RestAPI/Payments");
-// app.use('/payment', paymentRouter.router)
-(async () => {
-  try {
-    await paymentRouter.init();
-  } catch (e) {
-    console.error("[APP] dev auto payment failed:", e?.message || e);
-  }
-})();
-
 app.use('/products', express.static('uploads'));
 app.use('/uploads/images', express.static('images'));
 
@@ -135,3 +134,14 @@ process.on("SIGTERM", async () => {
   try { await disconnect(); } catch (e) { console.error(e); }
   process.exit(0);
 });
+
+const paymentRouter = require("./routes/RestAPI/Payments");
+
+(async () => {
+  try {
+    const token = await authModule.devAutoLogin();
+    await paymentRouter.init({ token });
+  } catch (e) {
+    console.error("[APP] dev auto login failed:", e?.message || e);
+  }
+})();

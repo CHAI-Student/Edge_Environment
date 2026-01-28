@@ -30,20 +30,20 @@ function MakeCameraFolder({ localRoot } = {}) {
   return { folderName, folderPath };
 }
 
-// 2. 장비 상태 체크
-// const apiCardTerminalStatus = callCardTerminalStatusApi();
-// const apiDeadboltStatus = callIOStatusApi();
-const CardTerminalStatus = "39" // 현재는 값을 못불러오니, 이렇게 지정
-const DeadboltStatus = "19" // 현재는 값을 못불러오니, 이렇게 지정
-const LoadcellStatus = "29" // 현재는 값을 못불러오니, 이렇게 지정
-const CameraStatus = "09" // 현재는 값을 못불러오니, 이렇게 지정
+// // 2. 장비 상태 체크
+// // const apiCardTerminalStatus = callCardTerminalStatusApi();
+// // const apiDeadboltStatus = callIOStatusApi();
+// const CardTerminalStatus = "39" // 현재는 값을 못불러오니, 이렇게 지정
+// const DeadboltStatus = "19" // 현재는 값을 못불러오니, 이렇게 지정
+// const LoadcellStatus = "29" // 현재는 값을 못불러오니, 이렇게 지정
+// const CameraStatus = "09" // 현재는 값을 못불러오니, 이렇게 지정
 
-if (CardTerminalStatus == '39' && DeadboltStatus == '19' && LoadcellStatus == '29' && CameraStatus == '09') {
-    console.log('[PAYMENT] health check passed, starting Payments process')
-    Payments();
-} else {
-    console.log('[PAYMENT] health status is bad, it cannot run')
-}
+// if (CardTerminalStatus == '39' && DeadboltStatus == '19' && LoadcellStatus == '29' && CameraStatus == '09') {
+//     console.log('[PAYMENT] health check passed, starting Payments process')
+//     Payments();
+// } else {
+//     console.log('[PAYMENT] health status is bad, it cannot run')
+// }
 
 async function init() {
     // --- 1. 이벤트 리스너 설정 ---
