@@ -6,19 +6,19 @@ Media Recorder
 저장 구조:
     {base_path}/{session_id}/
     ├── images/
-    │   ├── cam_0/          # Top camera
+    │   ├── cam0/           # Top camera
     │   │   ├── frame_001.jpg
     │   │   └── ...
-    │   ├── cam_1/          # Side Zone 0
-    │   └── cam_5/          # Side Zone 4
+    │   ├── cam1/           # Side Zone 0
+    │   └── cam5/           # Side Zone 4
     └── videos/
-        ├── cam_0.mp4       # Top camera
-        ├── cam_1.mp4
-        └── cam_5.mp4
+        ├── cam0.mp4        # Top camera
+        ├── cam1.mp4
+        └── cam5.mp4
 
 카메라 번호:
-    - cam_0: Top camera (손 감지, 전체 Zone 커버)
-    - cam_1 ~ cam_5: Side camera (Zone 0 ~ Zone 4)
+    - cam0: Top camera (손 감지, 전체 Zone 커버)
+    - cam1 ~ cam5: Side camera (Zone 0 ~ Zone 4)
 """
 
 from dataclasses import dataclass, field
@@ -163,7 +163,7 @@ class MediaRecorder:
 
         # 카메라별 이미지 폴더 생성
         for cam_id in cameras:
-            cam_images_path = images_path / f"cam_{cam_id}"
+            cam_images_path = images_path / f"cam{cam_id}"
             cam_images_path.mkdir(exist_ok=True)
 
         # 세션 객체 생성

@@ -131,28 +131,67 @@ class ProductJudgeClient {
     }
 
     /**
-     * 실제 상품 판단 (스냅샷 폴더 + 로드셀) - 레거시 형식
+     * 상품 판단 (통합 API)
      *
-     * @deprecated Use judgeWithWeightData() instead
+     * 레거시 형식과 새로운 형식 모두 지원합니다.
+     *
      * @param {Object} params
-     * @param {string} params.snapshot_folder - 스냅샷 이미지 폴더 경로
-     * @param {number[]} params.loadcell_weights - 현재 로드셀 값 (10채널)
-     * @param {number[]} params.baseline_weights - 기준 로드셀 값 (10채널)
-     * @param {number} [params.zone_id] - Zone ID (optional)
+     * @param {number} [params.zone_id] - Zone ID (0-4)
+     * @param {boolean} [params.vision_only] - Vision 전용 모드 (로드셀 없이)
+     * @param {Object} [params.weight_data] - 무게 데이터
+     * @param {Object} [params.media_paths] - 이미지 경로
+     * @param {string} [params.snapshot_folder] - 스냅샷 폴더 (레거시)
+     * @param {number[]} [params.loadcell_weights] - 현재 로드셀 값 (레거시)
+     * @param {number[]} [params.baseline_weights] - 기준 로드셀 값 (레거시)
      * @returns {Promise<JudgeResponse>}
      */
     async judge(params) {
         try {
+            // vision_only 또는 media_paths가 있으면 새 형식 사용
+            const requestBody = {
+                zone_id: params.zone_id,
+            };
+
+            // 새 형식 필드
+            if (params.vision_only !== undefined) {
+                requestBody.vision_only = params.vision_only;
+            }
+            if (params.media_paths) {
+                requestBody.media_paths = params.media_paths;
+            }
+            if (params.weight_data) {
+                requestBody.weight_data = params.weight_data;
+            }
+            if (params.delta_weight !== undefined) {
+                requestBody.delta_weight = params.delta_weight;
+            }
+            if (params.timestamp) {
+                requestBody.timestamp = params.timestamp;
+            }
+            if (params.inference_id) {
+                requestBody.inference_id = params.inference_id;
+            }
+            if (params.vision_candidates) {
+                requestBody.vision_candidates = params.vision_candidates;
+            }
+
+            // 레거시 형식 필드
+            if (params.snapshot_folder) {
+                requestBody.snapshot_folder = params.snapshot_folder;
+            }
+            if (params.loadcell_weights) {
+                requestBody.loadcell_weights = params.loadcell_weights;
+            }
+            if (params.baseline_weights) {
+                requestBody.baseline_weights = params.baseline_weights;
+            }
+
             const response = await axios.post(
                 `${this.baseUrl}/api/judge`,
-                {
-                    snapshot_folder: params.snapshot_folder,
-                    loadcell_weights: params.loadcell_weights,
-                    baseline_weights: params.baseline_weights,
-                    zone_id: params.zone_id,
-                },
+                requestBody,
                 { timeout: this.timeout }
             );
+            console.log(`[ProductJudgeClient] judge completed: zone=${params.zone_id}, status=${response.data.status}`);
             return response.data;
         } catch (error) {
             console.error('[ProductJudgeClient] judge error:', error.message);
@@ -174,7 +213,8 @@ class ProductJudgeClient {
      * @param {number} params.weight_data.delta_weight - 무게 변화량 (g)
      * @param {number[]} [params.weight_data.channels] - 변화 감지된 채널
      * @param {Object} [params.media_paths] - 이미지 경로
-     * @param {string} [params.media_paths.image_folder] - 스냅샷 폴더 경로
+     * @param {string} [params.media_paths.image_folder] - 스냅샷 폴더 경로 (예: data/20260128_115230/images)
+     * @param {number[]} [params.media_paths.active_zones] - 활성화할 zone 목록 (예: [0, 1, 2])
      * @param {string} [params.media_paths.top_image] - Top 카메라 이미지
      * @param {string} [params.media_paths.side_image] - Side 카메라 이미지
      * @param {number} params.timestamp - 이벤트 발생 시각 (Unix timestamp)
@@ -192,12 +232,23 @@ class ProductJudgeClient {
                 requestConfig.signal = abortSignal;
             }
 
+            // media_paths 구성 (active_zones 포함)
+            let mediaPaths = null;
+            if (params.media_paths) {
+                mediaPaths = {
+                    image_folder: params.media_paths.image_folder || null,
+                    active_zones: params.media_paths.active_zones || null,
+                    top_image: params.media_paths.top_image || null,
+                    side_image: params.media_paths.side_image || null,
+                };
+            }
+
             const response = await axios.post(
                 `${this.baseUrl}/api/judge`,
                 {
                     zone_id: params.zone_id,
                     weight_data: params.weight_data,
-                    media_paths: params.media_paths || null,
+                    media_paths: mediaPaths,
                     timestamp: params.timestamp,
                     vision_candidates: params.vision_candidates || null,
                     inference_id: params.inference_id || null,
@@ -227,7 +278,8 @@ class ProductJudgeClient {
      * @param {Object} params
      * @param {number} params.zone_id - Zone ID (0-4)
      * @param {Object} params.media_paths - 이미지 경로
-     * @param {string} [params.media_paths.image_folder] - 스냅샷 폴더 경로
+     * @param {string} [params.media_paths.image_folder] - 스냅샷 폴더 경로 (예: data/20260128_115230/images)
+     * @param {number[]} [params.media_paths.active_zones] - 활성화할 zone 목록 (예: [0, 1, 2])
      * @param {string} [params.media_paths.top_image] - Top 카메라 이미지
      * @param {string} [params.media_paths.side_image] - Side 카메라 이미지
      * @param {number} [params.timestamp] - 이벤트 발생 시각 (Unix timestamp)
@@ -236,12 +288,23 @@ class ProductJudgeClient {
      */
     async judgeWithCameraOnly(params) {
         try {
+            // media_paths 구성 (active_zones 포함)
+            let mediaPaths = null;
+            if (params.media_paths) {
+                mediaPaths = {
+                    image_folder: params.media_paths.image_folder || null,
+                    active_zones: params.media_paths.active_zones || null,
+                    top_image: params.media_paths.top_image || null,
+                    side_image: params.media_paths.side_image || null,
+                };
+            }
+
             const response = await axios.post(
                 `${this.baseUrl}/api/judge`,
                 {
                     zone_id: params.zone_id,
                     weight_data: null,  // 무게 데이터 없음
-                    media_paths: params.media_paths,
+                    media_paths: mediaPaths,
                     timestamp: params.timestamp || Date.now() / 1000,
                     vision_candidates: params.vision_candidates || null,
                     inference_id: params.inference_id || null,

@@ -187,6 +187,13 @@ class ProductDecisionEngine:
             logger.warning("No vision candidates for vision-only judgment")
             return self._create_no_detection_result(0.0, timestamp)
 
+        # 후보군 로그 출력
+        for i, c in enumerate(vision_candidates[:5]):
+            logger.debug(
+                f"  Candidate {i+1}: class_id={c.class_id}, name={c.class_name}, "
+                f"conf={c.combined_confidence:.3f}"
+            )
+
         # 가장 높은 신뢰도의 후보 선택
         best_candidate = max(vision_candidates, key=lambda c: c.combined_confidence)
 
@@ -200,9 +207,44 @@ class ProductDecisionEngine:
         # 상품 정보 조회
         product = self.product_db.get_product(best_candidate.class_id)
 
+        # ProductDatabase에 없으면 Vision 결과에서 직접 생성 (fallback)
         if product is None:
-            logger.warning(f"Product not found for class_id: {best_candidate.class_id}")
-            return self._create_no_detection_result(0.0, timestamp)
+            logger.warning(
+                f"Product not found in DB for class_id={best_candidate.class_id}, "
+                f"using Vision class_name as fallback: {best_candidate.class_name}"
+            )
+            # Vision 전용: 신뢰도 70%로 감소, 개수는 1로 고정
+            confidence = best_candidate.combined_confidence * 0.7
+            count = 1
+
+            # Vision 결과에서 상품 정보 생성 (가격은 0원, 무게는 0g)
+            product_judgment = ProductJudgment(
+                product_id=best_candidate.class_id,
+                name=best_candidate.class_name,
+                count=count,
+                unit_price=0,  # 가격 미정
+                total_price=0,
+                confidence=confidence,
+                unit_weight=0.0,  # 무게 미정
+            )
+
+            logger.info(
+                f"Vision-only result (fallback): {best_candidate.class_name}, "
+                f"class_id={best_candidate.class_id}, "
+                f"vision_conf={best_candidate.combined_confidence:.3f}, "
+                f"final_conf={confidence:.3f}, count={count}"
+            )
+
+            return JudgmentResult(
+                products=[product_judgment],
+                total_price=0,
+                confidence=confidence,
+                status=JudgmentStatus.PARTIAL,  # 무게 미검증
+                weight_delta=0.0,
+                weight_explained=0.0,
+                weight_residual=0.0,
+                timestamp=timestamp,
+            )
 
         # Vision 전용: 신뢰도 70%로 감소, 개수는 1로 고정
         confidence = best_candidate.combined_confidence * 0.7

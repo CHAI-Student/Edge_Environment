@@ -107,7 +107,7 @@ curl -N http://localhost:8889/sse/events
 
 ### 상품 판단 테스트
 ```bash
-# 권장 형식: weight_data + media_paths
+# 권장 형식: weight_data + media_paths (image_folder만 지정)
 curl -X POST http://localhost:8002/api/judge \
   -H "Content-Type: application/json" \
   -d '{
@@ -119,9 +119,8 @@ curl -X POST http://localhost:8002/api/judge \
       "channels": [0, 1]
     },
     "media_paths": {
-      "image_folder": "/data/snapshots/260126143025",
-      "top_image": "/data/snapshots/260126143025/cam_0/snapshot.jpg",
-      "side_image": "/data/snapshots/260126143025/cam_1/snapshot.jpg"
+      "image_folder": "data/20260128_115230/images",
+      "active_zones": [0, 1]
     }
   }'
 
@@ -279,8 +278,7 @@ Edge_Environment/
 │   │   ├── CameraDriverClient.js    # 스냅샷 요청
 │   │   └── ProductJudgeClient.js    # Model 호출
 │   └── routes/
-├── client/public/dashboard.html
-└── docker-compose.yaml
+└── client/public/dashboard.html
 ```
 
 ## 주요 API
@@ -320,26 +318,6 @@ GET  /sse/events                 # 실시간 SSE
 POST /api/camera/zone/{id}/activate
 POST /api/camera/zone/{id}/deactivate
 GET  /api/weight/events          # 무게 이벤트
-```
-
-## Docker 배포
-
-### 빌드 및 실행
-```bash
-docker compose build --parallel
-docker compose up -d
-docker compose logs -f
-```
-
-### Jetson 전용
-```bash
-docker compose -f docker-compose.yaml -f docker-compose.jetson.yaml up -d
-```
-
-### 상태 확인
-```bash
-docker compose ps
-curl http://localhost:8889/api/dashboard/status | jq
 ```
 
 ## 개발 가이드

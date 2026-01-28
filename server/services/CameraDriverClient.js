@@ -134,8 +134,8 @@ class CameraDriverClient {
                 return {
                     session_path: savedPaths.session_path,
                     images: {
-                        cam_0: savedPaths.top_image,
-                        [`cam_${zoneId + 1}`]: savedPaths.side_image
+                        cam0: savedPaths.top_image,
+                        [`cam${zoneId + 1}`]: savedPaths.side_image
                     }
                 };
             }
@@ -173,7 +173,7 @@ class CameraDriverClient {
         // Top 카메라 이미지 저장
         if (topBase64) {
             try {
-                const topDir = path.join(sessionPath, 'cam_0');
+                const topDir = path.join(sessionPath, 'cam0');
                 await fs.mkdir(topDir, { recursive: true });
                 topImagePath = path.join(topDir, 'snapshot.jpg');
 
@@ -190,7 +190,7 @@ class CameraDriverClient {
         // Side 카메라 이미지 저장
         if (sideBase64) {
             try {
-                const sideDir = path.join(sessionPath, `cam_${zoneId + 1}`);
+                const sideDir = path.join(sessionPath, `cam${zoneId + 1}`);
                 await fs.mkdir(sideDir, { recursive: true });
                 sideImagePath = path.join(sideDir, 'snapshot.jpg');
 
@@ -327,7 +327,7 @@ class CameraDriverClient {
     }
 
     /**
-     * Top 카메라 (cam_0) 활성화
+     * Top 카메라 (cam0) 활성화
      * Deadbolt 열릴 때 호출
      * @returns {Promise<{success: boolean}>}
      */
@@ -340,7 +340,7 @@ class CameraDriverClient {
                 {},
                 { timeout: this.timeout }
             );
-            console.log('[CameraDriverClient] Top camera (cam_0) activated');
+            console.log('[CameraDriverClient] Top camera (cam0) activated');
             return response.data;
         } catch (error) {
             // 엔드포인트가 없으면 zone 0 활성화로 대체 (Top 카메라 포함)
@@ -354,7 +354,7 @@ class CameraDriverClient {
     }
 
     /**
-     * Top 카메라 (cam_0) 비활성화
+     * Top 카메라 (cam0) 비활성화
      * @returns {Promise<{success: boolean}>}
      */
     async deactivateTopCamera() {
@@ -364,7 +364,7 @@ class CameraDriverClient {
                 {},
                 { timeout: this.timeout }
             );
-            console.log('[CameraDriverClient] Top camera (cam_0) deactivated');
+            console.log('[CameraDriverClient] Top camera (cam0) deactivated');
             return response.data;
         } catch (error) {
             if (error.response && error.response.status === 404) {

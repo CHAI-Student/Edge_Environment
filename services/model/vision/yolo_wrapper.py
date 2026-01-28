@@ -147,7 +147,7 @@ class YOLOWrapper:
         self,
         model_path: Optional[str] = None,
         conf_threshold: float = 0.01,
-        device: str = "cuda",
+        device: str = "auto",  # auto: CUDA if available, else CPU
     ):
         """
         YOLO 래퍼 초기화.
@@ -180,8 +180,19 @@ class YOLOWrapper:
 
         try:
             from ultralytics import YOLO
+            import torch
 
-            # TensorRT 모델인 경우 device 자동 설정
+            # Device 자동 결정
+            if self.device == "auto":
+                if self.is_tensorrt:
+                    self.device = "cuda"  # TensorRT는 항상 GPU
+                elif torch.cuda.is_available():
+                    self.device = "cuda"
+                else:
+                    self.device = "cpu"
+                logger.info(f"Auto-selected device: {self.device}")
+
+            # TensorRT 모델인 경우
             if self.is_tensorrt:
                 self.device = "cuda"  # TensorRT는 항상 GPU
                 logger.info(f"Loading TensorRT engine: {self.model_path}")
