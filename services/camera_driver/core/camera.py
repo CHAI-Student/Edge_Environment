@@ -31,10 +31,11 @@ class CameraConfig:
     camera_id: int  # 논리적 카메라 ID (0-5)
     resolution: Tuple[int, int] = (640, 480)
     fps: int = 30
-    buffer_size: int = 60
+    buffer_size: int = 90  # 3초 @ 30fps (이벤트 전후 버퍼링용)
     is_top_camera: bool = False
     zone_id: Optional[int] = None
     device_index: Optional[int] = None  # 물리적 디바이스 인덱스 (None이면 camera_id 사용)
+    always_buffer: bool = True  # 항상 버퍼링 활성화 (activate/deactivate 무관)
 
 
 class ZoneCamera:
@@ -146,7 +147,8 @@ class ZoneCamera:
                     with self._lock:
                         self._last_frame = frame
                         self._last_frame_time = current_time
-                        if self._active:
+                        # always_buffer가 True이면 활성화 상태와 관계없이 항상 버퍼링
+                        if self._active or self.config.always_buffer:
                             self._frame_buffer.append((current_time, frame))
                         self._frame_count += 1
 
@@ -186,6 +188,40 @@ class ZoneCamera:
             return [
                 (ts, frame.copy()) for ts, frame in self._frame_buffer if ts >= cutoff_time
             ]
+
+    def get_frames_in_range(
+        self, start_time: float, end_time: float
+    ) -> List[Tuple[float, Any]]:
+        """
+        특정 시간 범위의 버퍼된 프레임 가져오기
+
+        Args:
+            start_time: 시작 시간 (Unix timestamp)
+            end_time: 종료 시간 (Unix timestamp)
+
+        Returns:
+            [(timestamp, frame), ...] 리스트
+        """
+        with self._lock:
+            return [
+                (ts, frame.copy())
+                for ts, frame in self._frame_buffer
+                if start_time <= ts <= end_time
+            ]
+
+    def get_buffer_info(self) -> dict:
+        """버퍼 상태 정보"""
+        with self._lock:
+            if not self._frame_buffer:
+                return {"count": 0, "oldest": None, "newest": None, "duration": 0}
+            oldest_ts = self._frame_buffer[0][0] if self._frame_buffer else None
+            newest_ts = self._frame_buffer[-1][0] if self._frame_buffer else None
+            return {
+                "count": len(self._frame_buffer),
+                "oldest": oldest_ts,
+                "newest": newest_ts,
+                "duration": (newest_ts - oldest_ts) if oldest_ts and newest_ts else 0,
+            }
 
     def activate(self) -> None:
         """활성화 (버퍼링 시작)"""

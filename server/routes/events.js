@@ -160,10 +160,12 @@ router.get('/weight/stats/:zoneId', async (req, res) => {
         const zoneId = parseInt(req.params.zoneId);
         const hours = parseInt(req.query.hours) || 24;
 
-        if (isNaN(zoneId) || zoneId < 0 || zoneId > 4) {
+        const configManager = require('../services/ConfigManager');
+        if (isNaN(zoneId) || !configManager.isZoneEnabled(zoneId)) {
+            const enabledZones = configManager.getEnabledZones();
             return res.status(400).json({
                 success: false,
-                error: 'Invalid zone ID. Must be 0-4.'
+                error: `Invalid zone ID. Enabled zones: ${enabledZones.join(', ')}`
             });
         }
 

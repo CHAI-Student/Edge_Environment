@@ -23,7 +23,7 @@ import asyncio
 import uuid
 from pathlib import Path
 
-from ..config import config
+from ..config import config, get_enabled_zones, get_zone_count, is_zone_enabled
 from ..database.product_db import ProductDatabase
 from ..engine import ProductDecisionEngine, EnsembleResult, JudgmentStatus
 from ..engine.event_tracker import EventTracker, EventDirection
@@ -138,6 +138,7 @@ class JudgeResponse(BaseModel):
     isRemoval: bool
     timestamp: float
     inference_id: Optional[str] = None  # 추론 ID
+    camera_results: Optional[Dict] = None  # 카메라별 Vision 결과
 
 
 class ModelHealthResponse(BaseModel):
@@ -174,16 +175,27 @@ _stats: Dict[str, int] = {
     "return_events": 0,
     "cross_zone_moves": 0,
 }
-_zone_stats: Dict[int, Dict[str, int]] = {
-    i: {
-        "total_events": 0,
-        "successful_judgments": 0,
-        "failed_judgments": 0,
-        "return_events": 0,
-        "cross_zone_moves": 0,
+# Zone별 통계 (활성화된 zone 기반으로 초기화)
+_zone_stats: Dict[int, Dict[str, int]] = {}
+
+
+def _init_zone_stats():
+    """활성화된 zone 기반으로 통계 초기화."""
+    global _zone_stats
+    _zone_stats = {
+        zone_id: {
+            "total_events": 0,
+            "successful_judgments": 0,
+            "failed_judgments": 0,
+            "return_events": 0,
+            "cross_zone_moves": 0,
+        }
+        for zone_id in get_enabled_zones()
     }
-    for i in range(5)
-}
+
+
+# 모듈 로드 시 초기화
+_init_zone_stats()
 
 # Active inferences tracking (for cancellation support)
 _active_inferences: Dict[str, asyncio.Event] = {}
@@ -199,15 +211,22 @@ def init_routes(product_db: ProductDatabase, decision_engine: ProductDecisionEng
     _product_db = product_db
     _decision_engine = decision_engine
 
+    # Zone 통계 재초기화 (설정 변경 대응)
+    _init_zone_stats()
+
+    # 활성화된 zone 개수 가져오기
+    zone_count = get_zone_count()
+
     # Initialize advanced modules
     _event_tracker = EventTracker(max_history=100)
     _return_detector = ReturnDetector(return_window=60.0)
     _cross_zone_detector = CrossZoneDetector()
-    _baseline_manager = BaselineManager(drift_rate=0.5, zone_count=5)
+    _baseline_manager = BaselineManager(drift_rate=0.5, zone_count=zone_count)
     _rapid_pickup_handler = RapidPickupHandler(buffer_window=3.0)
-    _multi_zone_monitor = MultiZoneWeightMonitor(zone_count=5)
+    _multi_zone_monitor = MultiZoneWeightMonitor(zone_count=zone_count)
 
-    logger.info("API routes initialized with advanced modules")
+    enabled_zones = get_enabled_zones()
+    logger.info(f"API routes initialized with {zone_count} zones: {enabled_zones}")
 
 
 @router.get("/health", response_model=ModelHealthResponse)
@@ -227,6 +246,30 @@ async def health_check():
     return ModelHealthResponse(
         model="HEALTHY" if model_exists else "UNHEALTHY",
     )
+
+
+@router.get("/zones/config")
+async def get_zones_config():
+    """
+    현재 Zone 설정 조회.
+
+    활성화된 zone 목록과 채널/카메라 매핑 정보를 반환합니다.
+    ENABLED_ZONE_COUNT 환경변수로 zone 개수를 조절할 수 있습니다.
+
+    Returns:
+        Zone 설정 정보
+    """
+    from ..config import ZONE_CHANNEL_MAP, ZONE_CAMERA_MAP, ZONE_CONFIG, TOP_CAMERA_ID
+
+    return {
+        "enabled_zones": get_enabled_zones(),
+        "zone_count": get_zone_count(),
+        "zone_channel_map": dict(ZONE_CHANNEL_MAP),
+        "zone_camera_map": dict(ZONE_CAMERA_MAP),
+        "zone_config": dict(ZONE_CONFIG),
+        "top_camera_id": TOP_CAMERA_ID,
+        "timestamp": time.time(),
+    }
 
 
 # ===== Inference Cancellation =====
@@ -359,6 +402,7 @@ async def judge_products(request: JudgeRequest):
 
     start_time = time.time()
     images_processed = []
+    camera_results = {}  # 카메라별 Vision 결과
 
     logger.info(f"Judge request: zone_id={request.zone_id}, inference_id={inference_id}")
 
@@ -444,16 +488,16 @@ async def judge_products(request: JudgeRequest):
 
         elif request.media_paths is not None:
             # 이미지 경로에서 Vision 추론 수행
-            vision_candidates, images_processed = await _run_vision_from_media_paths(
+            vision_candidates, images_processed, camera_results = await _run_vision_from_media_paths(
                 request.media_paths,
                 request.zone_id,
             )
-            logger.info(f"Vision inference from files: {len(vision_candidates)} candidates, {len(images_processed)} images")
+            logger.info(f"Vision inference from files: {len(vision_candidates)} candidates, {len(images_processed)} images, {len(camera_results)} cameras")
 
         elif request.snapshot_folder:
             # 레거시: snapshot_folder에서 이미지 로드
             media_paths = MediaPaths(image_folder=request.snapshot_folder)
-            vision_candidates, images_processed = await _run_vision_from_media_paths(
+            vision_candidates, images_processed, camera_results = await _run_vision_from_media_paths(
                 media_paths,
                 request.zone_id,
             )
@@ -513,6 +557,7 @@ async def judge_products(request: JudgeRequest):
             isRemoval=result.is_removal,
             timestamp=request.timestamp or result.timestamp,
             inference_id=inference_id,
+            camera_results=camera_results if camera_results else None,
         )
 
         logger.info(
@@ -550,41 +595,53 @@ async def _run_vision_from_media_paths(
     """
     이미지 경로에서 Vision 추론 수행.
 
+    모든 카메라(cam0~cam5)를 자동 탐색하고 개별 결과를 반환합니다.
+
     Args:
         media_paths: 이미지/영상 경로
         zone_id: Zone ID
 
     Returns:
-        (vision_candidates, images_processed)
+        (vision_candidates, images_processed, camera_results)
+        - vision_candidates: Ensemble 결과
+        - images_processed: 처리된 이미지 경로 목록
+        - camera_results: 카메라별 결과 {cam0: {...}, cam1: {...}, ...}
     """
-    from ..vision import YOLOWrapper, HandProximityFilter, Top5Extractor, MultiViewEnsemble
+    from ..vision import YOLOWrapper, Top5Extractor, MultiViewEnsemble
 
     vision_candidates = []
     images_processed = []
+    camera_results = {}  # cam0, cam1, ... 개별 결과
 
-    # 이미지 파일 경로 수집
+    # 이미지 파일 경로 수집: (cam_id, cam_type, img_path) 형식
     image_paths = []
 
+    # 명시적 top_image/side_image가 있으면 우선 사용
     if media_paths.top_image and os.path.exists(media_paths.top_image):
-        image_paths.append(("top", media_paths.top_image))
+        image_paths.append((0, "top", media_paths.top_image))
 
     if media_paths.side_image and os.path.exists(media_paths.side_image):
-        image_paths.append(("side", media_paths.side_image))
+        image_paths.append((zone_id + 1, "side", media_paths.side_image))
 
-    # image_folder가 있고 개별 이미지 경로가 없는 경우
+    # image_folder가 있으면 모든 cam0~cam5 자동 탐색
     if media_paths.image_folder and not image_paths:
         folder = media_paths.image_folder
         if os.path.isdir(folder):
-            # cam_0 (top), cam_{zone_id+1} (side) 찾기
-            for cam_name in ["cam_0", f"cam_{zone_id + 1}"]:
-                cam_dir = os.path.join(folder, cam_name)
-                if os.path.isdir(cam_dir):
-                    for img_file in ["snapshot.jpg", "frame.jpg", "capture.jpg"]:
-                        img_path = os.path.join(cam_dir, img_file)
-                        if os.path.exists(img_path):
-                            cam_type = "top" if "cam_0" in cam_name else "side"
-                            image_paths.append((cam_type, img_path))
-                            break
+            # 모든 카메라 폴더 탐색 (cam0 ~ cam5)
+            for cam_id in range(6):
+                # 새 형식 (cam0) 우선, 이전 형식 (cam_0) 폴백
+                cam_names = [f"cam{cam_id}", f"cam_{cam_id}"]
+                for cam_name in cam_names:
+                    cam_dir = os.path.join(folder, cam_name)
+                    if os.path.isdir(cam_dir):
+                        # 이미지 파일 탐색
+                        for img_file in ["snapshot.jpg", "frame.jpg", "capture.jpg", "frame_0001.jpg"]:
+                            img_path = os.path.join(cam_dir, img_file)
+                            if os.path.exists(img_path):
+                                cam_type = "top" if cam_id == 0 else "side"
+                                image_paths.append((cam_id, cam_type, img_path))
+                                break
+                        break  # 한 형식에서 찾았으면 다른 형식 탐색 불필요
 
     if not image_paths:
         logger.warning(
@@ -592,70 +649,107 @@ async def _run_vision_from_media_paths(
             f"top={media_paths.top_image}, side={media_paths.side_image}"
         )
         # 빈 결과 반환 (호출자가 no_images 상태 확인 가능)
-        return vision_candidates, images_processed
+        return vision_candidates, images_processed, camera_results
 
     # YOLO 추론 수행
     try:
         import cv2
 
         yolo = YOLOWrapper(model_path=config.yolo_model_path)
-        hand_filter = HandProximityFilter()
-        top5_extractor = Top5Extractor()
+        top5_extractor = Top5Extractor()  # 내부적으로 HandProximityFilter 사용
         ensemble = MultiViewEnsemble()
 
         top_candidates = []
-        side_candidates = []
+        all_side_candidates = []
 
-        for cam_type, img_path in image_paths:
+        for cam_id, cam_type, img_path in image_paths:
+            cam_key = f"cam{cam_id}"
             try:
                 # 이미지 로드
                 image = cv2.imread(img_path)
                 if image is None:
                     logger.warning(f"Failed to load image: {img_path}")
+                    camera_results[cam_key] = {
+                        "detected": False,
+                        "confidence": 0.0,
+                        "candidates": [],
+                        "error": "failed_to_load",
+                    }
                     continue
 
                 # YOLO 추론
                 detections = yolo.detect(image)
                 images_processed.append(img_path)
 
+                logger.info(f"YOLO detection result for {img_path}: {len(detections)} objects")
+                for det in detections[:5]:  # 상위 5개만 로그
+                    logger.debug(f"  - {det.name} (cls={det.cls}, conf={det.conf:.3f})")
+
                 if not detections:
                     logger.debug(f"No detections in {img_path}")
+                    camera_results[cam_key] = {
+                        "detected": False,
+                        "confidence": 0.0,
+                        "candidates": [],
+                    }
                     continue
 
-                # 손 근접 필터링 + Top-5 추출
-                filtered = hand_filter.filter(detections)
-                top5_result = top5_extractor.extract(filtered.products)
+                # Top-5 추출 (내부에서 손 근접 필터링 수행)
+                top5_result = top5_extractor.extract(detections)
 
+                # 카메라별 결과 저장
+                candidates_list = [
+                    {
+                        "class_name": c.class_name,
+                        "class_id": c.class_id,
+                        "confidence": round(c.confidence, 3),
+                    }
+                    for c in top5_result.candidates
+                ]
+                max_conf = max((c.confidence for c in top5_result.candidates), default=0.0)
+                camera_results[cam_key] = {
+                    "detected": len(top5_result.candidates) > 0,
+                    "confidence": round(max_conf, 3),
+                    "candidates": candidates_list,
+                }
+
+                # Ensemble용 후보 수집
                 if cam_type == "top":
                     top_candidates = top5_result.candidates
                 else:
-                    side_candidates = top5_result.candidates
+                    all_side_candidates.extend(top5_result.candidates)
 
-                logger.debug(
-                    f"{cam_type} camera: {len(detections)} detections, "
+                logger.info(
+                    f"{cam_key} ({cam_type}): {len(detections)} detections, "
                     f"{len(top5_result.candidates)} candidates after filtering"
                 )
 
             except Exception as e:
-                logger.error(f"Vision processing failed for {img_path}: {e}")
+                logger.error(f"Vision processing failed for {img_path}: {e}", exc_info=True)
+                camera_results[cam_key] = {
+                    "detected": False,
+                    "confidence": 0.0,
+                    "candidates": [],
+                    "error": str(e),
+                }
                 continue
 
-        # Multi-View Ensemble
-        if top_candidates or side_candidates:
-            vision_candidates = ensemble.ensemble(top_candidates, side_candidates)
+        # Multi-View Ensemble (Top + 모든 Side 카메라 합산)
+        if top_candidates or all_side_candidates:
+            vision_candidates = ensemble.ensemble(top_candidates, all_side_candidates)
             logger.info(
                 f"Ensemble result: {len(vision_candidates)} candidates "
-                f"(top={len(top_candidates)}, side={len(side_candidates)})"
+                f"(top={len(top_candidates)}, sides={len(all_side_candidates)})"
             )
 
     except ImportError as e:
         logger.warning(f"Vision dependencies not available: {e}")
-        images_processed = [path for _, path in image_paths]
+        images_processed = [path for _, _, path in image_paths]
     except Exception as e:
         logger.error(f"Vision pipeline error: {e}", exc_info=True)
-        images_processed = [path for _, path in image_paths]
+        images_processed = [path for _, _, path in image_paths]
 
-    return vision_candidates, images_processed
+    return vision_candidates, images_processed, camera_results
 
 
 @router.get("/products", response_model=List[ProductInfoResponse])
@@ -1261,16 +1355,19 @@ async def judge_multi_zone(request: MultiZoneJudgeRequest):
                 delta_weight=delta,
             )
 
-            # 통계 업데이트
+            # 통계 업데이트 (활성화된 zone만)
             _stats["total_events"] += 1
-            _zone_stats[zone_id]["total_events"] += 1
+            if zone_id in _zone_stats:
+                _zone_stats[zone_id]["total_events"] += 1
 
             if result.is_success:
                 _stats["successful_judgments"] += 1
-                _zone_stats[zone_id]["successful_judgments"] += 1
+                if zone_id in _zone_stats:
+                    _zone_stats[zone_id]["successful_judgments"] += 1
             else:
                 _stats["failed_judgments"] += 1
-                _zone_stats[zone_id]["failed_judgments"] += 1
+                if zone_id in _zone_stats:
+                    _zone_stats[zone_id]["failed_judgments"] += 1
 
             # 결과 생성
             zone_result = ZoneJudgmentResult(
@@ -1503,10 +1600,16 @@ async def get_recognition_rate():
     successful = _stats["successful_judgments"]
     overall_rate = successful / total if total > 0 else 0.0
 
-    # Zone별 통계 생성
+    # Zone별 통계 생성 (활성화된 zone만)
     zone_statistics = []
-    for zone_id in range(5):
-        zone_data = _zone_stats[zone_id]
+    for zone_id in get_enabled_zones():
+        zone_data = _zone_stats.get(zone_id, {
+            "total_events": 0,
+            "successful_judgments": 0,
+            "failed_judgments": 0,
+            "return_events": 0,
+            "cross_zone_moves": 0,
+        })
         zone_total = zone_data["total_events"]
         zone_successful = zone_data["successful_judgments"]
         zone_rate = zone_successful / zone_total if zone_total > 0 else 0.0
@@ -1557,20 +1660,16 @@ async def reset_statistics():
         "cross_zone_moves": 0,
     }
 
-    for zone_id in range(5):
-        _zone_stats[zone_id] = {
-            "total_events": 0,
-            "successful_judgments": 0,
-            "failed_judgments": 0,
-            "return_events": 0,
-            "cross_zone_moves": 0,
-        }
+    # 활성화된 zone만 초기화
+    _init_zone_stats()
 
-    logger.info("Statistics reset")
+    enabled_zones = get_enabled_zones()
+    logger.info(f"Statistics reset for zones: {enabled_zones}")
 
     return {
         "success": True,
-        "message": "Statistics reset successfully",
+        "message": f"Statistics reset successfully for {len(enabled_zones)} zones",
+        "enabled_zones": enabled_zones,
         "timestamp": time.time(),
     }
 

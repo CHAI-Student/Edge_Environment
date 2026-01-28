@@ -7,28 +7,138 @@ Zone-Channel-Camera 매핑 및 서비스 설정.
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 import os
+import json
+import logging
 
+logger = logging.getLogger(__name__)
 
-# Zone-Channel 매핑 (채널 인덱스는 0-based, io_board SSE 응답 기준)
-ZONE_CHANNEL_MAP: Dict[int, List[int]] = {
-    0: [0, 1],   # Zone 0: 로드셀 인덱스 0, 1
-    1: [2, 3],   # Zone 1: 로드셀 인덱스 2, 3
-    2: [4, 5],   # Zone 2: 로드셀 인덱스 4, 5
-    3: [6, 7],   # Zone 3: 로드셀 인덱스 6, 7
-    4: [8, 9],   # Zone 4: 로드셀 인덱스 8, 9
-}
+# Zone 설정 (zone_mapping.json에서 로드)
+ZONE_CONFIG: Dict[str, Dict] = {}
 
-# Zone-Camera 매핑
-ZONE_CAMERA_MAP: Dict[int, int] = {
-    0: 1,  # Zone 0 → Side Camera 1
-    1: 2,  # Zone 1 → Side Camera 2
-    2: 3,  # Zone 2 → Side Camera 3
-    3: 4,  # Zone 3 → Side Camera 4
-    4: 5,  # Zone 4 → Side Camera 5
-}
+# Zone-Channel 매핑 (동적으로 로드됨)
+ZONE_CHANNEL_MAP: Dict[int, List[int]] = {}
+
+# Zone-Camera 매핑 (동적으로 로드됨)
+ZONE_CAMERA_MAP: Dict[int, int] = {}
 
 # 상단 카메라 ID (공유)
 TOP_CAMERA_ID = 0
+
+
+def load_zone_config(config_path: Optional[str] = None) -> Dict[str, Dict]:
+    """
+    Zone 매핑 설정 로드.
+
+    zone_mapping.json에서 zone 설정을 로드하고,
+    enabled된 zone만 ZONE_CHANNEL_MAP, ZONE_CAMERA_MAP에 등록합니다.
+
+    Args:
+        config_path: 설정 파일 경로 (없으면 기본 경로 사용)
+
+    Returns:
+        전체 zone 설정
+    """
+    global ZONE_CONFIG, ZONE_CHANNEL_MAP, ZONE_CAMERA_MAP
+
+    if config_path is None:
+        # 기본 경로: project/config/zone_mapping.json
+        config_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "config",
+            "zone_mapping.json"
+        )
+
+    # 기본값 (fallback) - 5개 zone 전부 활성화
+    default_zones = {
+        "0": {"loadcell_channels": [0, 1], "side_camera_id": 1, "enabled": True},
+        "1": {"loadcell_channels": [2, 3], "side_camera_id": 2, "enabled": True},
+        "2": {"loadcell_channels": [4, 5], "side_camera_id": 3, "enabled": True},
+        "3": {"loadcell_channels": [6, 7], "side_camera_id": 4, "enabled": True},
+        "4": {"loadcell_channels": [8, 9], "side_camera_id": 5, "enabled": True},
+    }
+
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if "zones" in data:
+                ZONE_CONFIG = data["zones"]
+            else:
+                ZONE_CONFIG = default_zones
+
+            logger.info(f"Zone config loaded from {config_path}")
+
+        except Exception as e:
+            logger.warning(f"Failed to load zone config: {e}, using defaults")
+            ZONE_CONFIG = default_zones
+    else:
+        logger.info(f"Zone config not found at {config_path}, using defaults")
+        ZONE_CONFIG = default_zones
+
+    # 환경변수로 zone 개수 override 가능
+    env_zone_count = os.environ.get("ENABLED_ZONE_COUNT")
+    if env_zone_count:
+        try:
+            max_zones = int(env_zone_count)
+            for zone_id_str, zone_data in ZONE_CONFIG.items():
+                try:
+                    zone_id = int(zone_id_str)
+                    zone_data["enabled"] = zone_id < max_zones
+                except ValueError:
+                    pass
+            logger.info(f"ENABLED_ZONE_COUNT={max_zones}: overriding zone enabled states")
+        except ValueError:
+            logger.warning(f"Invalid ENABLED_ZONE_COUNT value: {env_zone_count}")
+
+    # enabled된 zone만 매핑에 등록
+    ZONE_CHANNEL_MAP.clear()
+    ZONE_CAMERA_MAP.clear()
+
+    for zone_id_str, zone_data in ZONE_CONFIG.items():
+        try:
+            zone_id = int(zone_id_str)
+            if zone_data.get("enabled", True):
+                # Channel 매핑
+                channels = zone_data.get("loadcell_channels", [zone_id * 2, zone_id * 2 + 1])
+                ZONE_CHANNEL_MAP[zone_id] = channels
+                # Camera 매핑
+                side_camera_id = zone_data.get("side_camera_id", zone_id + 1)
+                ZONE_CAMERA_MAP[zone_id] = side_camera_id
+        except ValueError:
+            continue
+
+    logger.info(f"Model service enabled zones: {list(ZONE_CHANNEL_MAP.keys())}")
+    logger.info(f"ZONE_CHANNEL_MAP: {ZONE_CHANNEL_MAP}")
+    logger.info(f"ZONE_CAMERA_MAP: {ZONE_CAMERA_MAP}")
+
+    return ZONE_CONFIG
+
+
+def get_enabled_zones() -> List[int]:
+    """활성화된 zone ID 목록 반환."""
+    return sorted(ZONE_CHANNEL_MAP.keys())
+
+
+def get_max_zone_id() -> int:
+    """활성화된 zone 중 최대 ID 반환."""
+    if not ZONE_CHANNEL_MAP:
+        return -1
+    return max(ZONE_CHANNEL_MAP.keys())
+
+
+def is_zone_enabled(zone_id: int) -> bool:
+    """특정 zone이 활성화되어 있는지 확인."""
+    return zone_id in ZONE_CHANNEL_MAP
+
+
+def get_zone_count() -> int:
+    """활성화된 zone 개수 반환."""
+    return len(ZONE_CHANNEL_MAP)
+
+
+# 모듈 로드 시 zone 설정 로드
+load_zone_config()
 
 
 def get_zone_from_channels(changed_indices: List[int]) -> Optional[int]:
@@ -60,7 +170,7 @@ def get_zone_cameras(zone_id: int) -> tuple:
     Zone에 대한 Top + Side 카메라 ID 반환.
 
     Args:
-        zone_id: Zone ID (0-4)
+        zone_id: Zone ID (활성화된 zone만 유효)
 
     Returns:
         (top_camera_id, side_camera_id)
@@ -99,7 +209,7 @@ class ModelServiceConfig:
 
     # Vision 설정
     yolo_model_path: str = field(
-        default_factory=lambda: os.getenv("YOLO_MODEL_PATH", "models/yolov8n-products.pt")
+        default_factory=lambda: os.getenv("YOLO_MODEL_PATH", "models/siyeon_best.pt")
     )
     hand_class_id: int = 0  # 손 클래스 ID
     max_distance_px: float = 150.0  # 손-상품 최대 거리 (픽셀)
@@ -160,7 +270,7 @@ def get_side_camera_path(session_id: str, zone_id: int) -> str:
 
     Args:
         session_id: 세션 ID
-        zone_id: Zone ID (0-4)
+        zone_id: Zone ID (활성화된 zone만 유효)
 
     Returns:
         이미지 파일 경로

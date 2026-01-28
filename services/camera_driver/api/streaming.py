@@ -11,7 +11,7 @@ from typing import AsyncGenerator
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from ..config import settings
+from ..config import settings, ALL_CAMERA_IDS, is_zone_enabled, get_enabled_zones
 from .routes import get_manager
 
 router = APIRouter()
@@ -43,8 +43,11 @@ async def generate_mjpeg_stream(camera_id: int) -> AsyncGenerator[bytes, None]:
 @router.get("/stream/{camera_id}")
 async def stream_camera(camera_id: int):
     """MJPEG stream for a camera"""
-    if camera_id < 0 or camera_id > 5:
-        raise HTTPException(status_code=400, detail="camera_id must be 0-5")
+    if camera_id not in ALL_CAMERA_IDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"camera_id must be one of {ALL_CAMERA_IDS}"
+        )
 
     return StreamingResponse(
         generate_mjpeg_stream(camera_id),
@@ -84,8 +87,12 @@ async def generate_zone_mjpeg_stream(zone_id: int) -> AsyncGenerator[bytes, None
 @router.get("/stream/zone/{zone_id}")
 async def stream_zone(zone_id: int):
     """MJPEG stream for zone side camera"""
-    if zone_id < 0 or zone_id > 4:
-        raise HTTPException(status_code=400, detail="zone_id must be 0-4")
+    if not is_zone_enabled(zone_id):
+        enabled = get_enabled_zones()
+        raise HTTPException(
+            status_code=400,
+            detail=f"zone_id {zone_id} is not enabled. Enabled zones: {enabled}"
+        )
 
     return StreamingResponse(
         generate_zone_mjpeg_stream(zone_id),

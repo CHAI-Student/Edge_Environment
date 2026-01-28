@@ -16,6 +16,8 @@ from typing import Dict, List, Optional
 import time
 import logging
 
+from ..config import get_enabled_zones
+
 logger = logging.getLogger(__name__)
 
 
@@ -198,10 +200,9 @@ class EventTracker:
             self.match_tolerance = match_tolerance
             self.max_history = max_history
 
-        # Zone-based tracking
+        # Zone-based tracking (활성화된 zone만)
         self.zones: Dict[int, ZoneEvent] = {}
-        # 5개 Zone 초기화
-        for zone_id in range(5):
+        for zone_id in get_enabled_zones():
             self.zones[zone_id] = ZoneEvent(zone_id=zone_id)
 
         # Event history (for advanced features)

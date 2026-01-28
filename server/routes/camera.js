@@ -18,10 +18,11 @@ router.post('/zone/:zoneId/activate', async (req, res) => {
     try {
         const zoneId = parseInt(req.params.zoneId);
 
-        if (isNaN(zoneId) || zoneId < 0 || zoneId > 4) {
+        if (isNaN(zoneId) || !configManager.isZoneEnabled(zoneId)) {
+            const enabledZones = configManager.getEnabledZones();
             return res.status(400).json({
                 success: false,
-                error: 'Invalid zone ID. Must be 0-4.'
+                error: `Invalid zone ID. Enabled zones: ${enabledZones.join(', ')}`
             });
         }
 
@@ -49,10 +50,11 @@ router.post('/zone/:zoneId/deactivate', async (req, res) => {
     try {
         const zoneId = parseInt(req.params.zoneId);
 
-        if (isNaN(zoneId) || zoneId < 0 || zoneId > 4) {
+        if (isNaN(zoneId) || !configManager.isZoneEnabled(zoneId)) {
+            const enabledZones = configManager.getEnabledZones();
             return res.status(400).json({
                 success: false,
-                error: 'Invalid zone ID. Must be 0-4.'
+                error: `Invalid zone ID. Enabled zones: ${enabledZones.join(', ')}`
             });
         }
 
@@ -114,10 +116,11 @@ router.get('/zone/:zoneId/capture', async (req, res) => {
         const zoneId = parseInt(req.params.zoneId);
         const includeTop = req.query.include_top !== 'false';
 
-        if (isNaN(zoneId) || zoneId < 0 || zoneId > 4) {
+        if (isNaN(zoneId) || !configManager.isZoneEnabled(zoneId)) {
+            const enabledZones = configManager.getEnabledZones();
             return res.status(400).json({
                 success: false,
-                error: 'Invalid zone ID. Must be 0-4.'
+                error: `Invalid zone ID. Enabled zones: ${enabledZones.join(', ')}`
             });
         }
 
@@ -143,11 +146,12 @@ router.get('/zone/:zoneId/capture', async (req, res) => {
 router.get('/:cameraId/frame', async (req, res) => {
     try {
         const cameraId = parseInt(req.params.cameraId);
+        const enabledCameraIds = configManager.getEnabledCameraIds();
 
-        if (isNaN(cameraId) || cameraId < 0 || cameraId > 5) {
+        if (isNaN(cameraId) || !enabledCameraIds.includes(cameraId)) {
             return res.status(400).json({
                 success: false,
-                error: 'Invalid camera ID. Must be 0-5.'
+                error: `Invalid camera ID. Enabled cameras: ${enabledCameraIds.join(', ')}`
             });
         }
 
@@ -260,9 +264,18 @@ router.get('/test/status', async (req, res) => {
             productJudgeClient.healthCheck()
         ]);
 
+        const enabledZones = configManager.getEnabledZones();
+        const enabledCameras = configManager.getEnabledCameraIds();
+
         res.json({
             success: true,
             mode: 'camera_only_test',
+            zone_config: {
+                enabled_zones: enabledZones,
+                enabled_cameras: enabledCameras,
+                zone_count: enabledZones.length,
+                camera_count: enabledCameras.length
+            },
             services: {
                 camera_driver: {
                     healthy: cameraHealth.status === 'fulfilled',
@@ -299,6 +312,15 @@ router.post('/test/snapshot-and-judge', async (req, res) => {
 
     try {
         const { zone_id = 0, include_top = true } = req.body;
+
+        // Zone 유효성 검사
+        if (!configManager.isZoneEnabled(zone_id)) {
+            const enabledZones = configManager.getEnabledZones();
+            return res.status(400).json({
+                success: false,
+                error: `Invalid zone ID. Enabled zones: ${enabledZones.join(', ')}`
+            });
+        }
 
         // 세션 ID 생성 (YYMMDDHHMMSS 형식)
         const now = new Date();
@@ -374,6 +396,15 @@ router.post('/test/judge-from-folder', async (req, res) => {
     try {
         const { zone_id = 0, image_folder, top_image, side_image } = req.body;
 
+        // Zone 유효성 검사
+        if (!configManager.isZoneEnabled(zone_id)) {
+            const enabledZones = configManager.getEnabledZones();
+            return res.status(400).json({
+                success: false,
+                error: `Invalid zone ID. Enabled zones: ${enabledZones.join(', ')}`
+            });
+        }
+
         const judgeResult = await productJudgeClient.judge({
             zone_id,
             vision_only: true,
@@ -423,6 +454,15 @@ router.post('/test/record-and-judge', async (req, res) => {
             fps = 30,  // 초당 프레임 수 (기본 30fps)
             top_k = 5  // 상위 후보군 개수
         } = req.body;
+
+        // Zone 유효성 검사
+        if (!configManager.isZoneEnabled(zone_id)) {
+            const enabledZones = configManager.getEnabledZones();
+            return res.status(400).json({
+                success: false,
+                error: `Invalid zone ID. Enabled zones: ${enabledZones.join(', ')}`
+            });
+        }
 
         const snapshot_interval_ms = Math.floor(1000 / fps);  // 30fps = 33ms 간격
         const numSnapshots = Math.floor(duration_ms / snapshot_interval_ms);

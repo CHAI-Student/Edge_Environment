@@ -1,13 +1,14 @@
 """
 Camera Manager
 
-6대 카메라 동시 관리 (Top 1 + Zone 5)
+카메라 동시 관리 (Top 1 + 활성화된 Zone 카메라)
 
 기능:
 - 고유 ID 기반 카메라 매핑
 - 동적 디바이스 재매핑
 - 자동 재연결 (reconnect)
 - 헬스 체크
+- Zone 활성화/비활성화 지원
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -37,9 +38,13 @@ class CameraManager:
     """
     Camera Manager
 
-    6대 카메라 동시 관리:
+    활성화된 카메라 동시 관리:
     - Camera 0: Top 카메라 (손 감지, 전체 Zone 커버)
-    - Camera 1-5: Zone별 전용 Side 카메라
+    - Camera 1-N: 활성화된 Zone별 전용 Side 카메라
+
+    활성화할 Zone 개수는 다음 방법으로 설정:
+    - config/zone_mapping.json의 enabled 필드
+    - ENABLED_ZONE_COUNT 환경변수 (우선순위 높음)
 
     기능:
     - 고유 ID 기반 카메라 매핑 (USB 시리얼)
@@ -95,10 +100,13 @@ class CameraManager:
 
     def initialize_all(self) -> Dict[int, bool]:
         """
-        모든 카메라 초기화
+        활성화된 카메라 초기화
 
         물리적 디바이스 인덱스 매핑을 적용하여 카메라를 초기화합니다.
         Nvidia 모드에서는 짝수 인덱스(0, 2, 4, 6, 8, 10)를 사용합니다.
+
+        활성화된 Zone만 초기화됩니다 (zone_mapping.json의 enabled 또는
+        ENABLED_ZONE_COUNT 환경변수 기반).
 
         Returns:
             {camera_id: success} 딕셔너리
@@ -120,7 +128,10 @@ class CameraManager:
         self._cameras[TOP_CAMERA_ID] = top_camera
         logger.info(f"Top camera: logical_id={TOP_CAMERA_ID}, device_index={top_device_index}")
 
-        # Zone 카메라
+        # 활성화된 Zone 카메라만 초기화
+        enabled_zones = list(ZONE_CAMERA_MAP.keys())
+        logger.info(f"Initializing cameras for enabled zones: {enabled_zones}")
+
         for zone_id, camera_id in ZONE_CAMERA_MAP.items():
             device_index = get_physical_device_index(camera_id)
             zone_config = CameraConfig(
@@ -139,7 +150,8 @@ class CameraManager:
 
         self._initialized = True
         connected_count = sum(status.values())
-        logger.info(f"CameraManager: {connected_count}/{len(status)} cameras connected")
+        total_expected = 1 + len(ZONE_CAMERA_MAP)  # Top + enabled zones
+        logger.info(f"CameraManager: {connected_count}/{total_expected} cameras connected (enabled zones: {enabled_zones})")
 
         return status
 

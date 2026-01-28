@@ -10,8 +10,10 @@ API Models for Model Service.
 """
 
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
+
+from ..config import is_zone_enabled, get_enabled_zones
 
 
 # ===== Enums =====
@@ -35,9 +37,17 @@ class JudgmentStatusEnum(str, Enum):
 
 class ZoneDeltaItem(BaseModel):
     """Zone별 무게 변화량."""
-    zone_id: int = Field(..., ge=0, le=4, description="Zone ID (0-4)")
+    zone_id: int = Field(..., ge=0, description="Zone ID (활성화된 zone만 허용)")
     delta: float = Field(..., description="무게 변화량 (g)")
     timestamp: Optional[float] = Field(None, description="이벤트 시각")
+
+    @field_validator('zone_id')
+    @classmethod
+    def validate_zone_id(cls, v: int) -> int:
+        if not is_zone_enabled(v):
+            enabled = get_enabled_zones()
+            raise ValueError(f"zone_id {v} is not enabled. Enabled zones: {enabled}")
+        return v
 
 
 class VisionCandidateItem(BaseModel):
@@ -112,10 +122,18 @@ class WeightEventItem(BaseModel):
 
 class CurrentJudgeRequest(BaseModel):
     """현재 판단 요청."""
-    zone_id: int = Field(..., ge=0, le=4)
+    zone_id: int = Field(..., ge=0, description="Zone ID (활성화된 zone만 허용)")
     delta_weight: float
     vision_candidates: Optional[List[VisionCandidateItem]] = None
     timestamp: Optional[float] = None
+
+    @field_validator('zone_id')
+    @classmethod
+    def validate_zone_id(cls, v: int) -> int:
+        if not is_zone_enabled(v):
+            enabled = get_enabled_zones()
+            raise ValueError(f"zone_id {v} is not enabled. Enabled zones: {enabled}")
+        return v
 
 
 class HistoryJudgeRequest(BaseModel):
@@ -328,7 +346,11 @@ class MediaPaths(BaseModel):
     """이미지/영상 경로 (Node.js가 저장 후 전달)."""
     image_folder: Optional[str] = Field(
         None,
-        description="스냅샷 폴더 경로 (예: /data/snapshots/260126_143025)",
+        description="스냅샷 폴더 경로 (예: data/20260128_115230/images)",
+    )
+    active_zones: Optional[List[int]] = Field(
+        None,
+        description="활성화할 zone 목록 (예: [0, 1, 2]). None이면 설정 파일 기준",
     )
     top_image: Optional[str] = Field(
         None,
@@ -361,7 +383,7 @@ class NewJudgeRequest(BaseModel):
     Node.js 오케스트레이터가 SSE 이벤트 수신, 이미지 캡처 후
     수집된 데이터를 이 형식으로 Model 서비스에 전달합니다.
     """
-    zone_id: int = Field(..., ge=0, le=4, description="Zone ID (0-4)")
+    zone_id: int = Field(..., ge=0, description="Zone ID (활성화된 zone만 허용)")
     weight_data: WeightData = Field(..., description="무게 데이터")
     media_paths: Optional[MediaPaths] = Field(
         None,
@@ -371,6 +393,24 @@ class NewJudgeRequest(BaseModel):
     vision_candidates: Optional[List[Dict]] = Field(
         None,
         description="Node.js에서 미리 추론한 Vision 후보군 (옵션)",
+    )
+
+    @field_validator('zone_id')
+    @classmethod
+    def validate_zone_id(cls, v: int) -> int:
+        if not is_zone_enabled(v):
+            enabled = get_enabled_zones()
+            raise ValueError(f"zone_id {v} is not enabled. Enabled zones: {enabled}")
+        return v
+
+
+class CameraResult(BaseModel):
+    """카메라별 Vision 추론 결과."""
+    detected: bool = Field(False, description="객체 감지 여부")
+    confidence: float = Field(0.0, description="최고 신뢰도")
+    candidates: List[Dict] = Field(
+        default_factory=list,
+        description="감지된 후보 목록 [{class_name, confidence}, ...]",
     )
 
 
@@ -390,3 +430,7 @@ class NewJudgeResponse(BaseModel):
     isRemoval: bool = False
     timestamp: float
     judgment_metadata: Optional[JudgmentMetadata] = None
+    camera_results: Optional[Dict[str, CameraResult]] = Field(
+        None,
+        description="카메라별 Vision 결과 (cam0, cam1, ...)",
+    )

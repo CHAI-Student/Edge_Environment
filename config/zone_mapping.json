@@ -1,6 +1,7 @@
 {
   "version": "1.0",
   "description": "Zone to loadcell channel and camera mapping configuration",
+  "comment": "Set enabled=false to disable a zone, or use ENABLED_ZONE_COUNT env var to limit zones",
   "zones": {
     "0": {
       "name": "Zone 0",
@@ -24,13 +25,13 @@
       "name": "Zone 3",
       "loadcell_channels": [6, 7],
       "side_camera_id": 4,
-      "enabled": false
+      "enabled": true
     },
     "4": {
       "name": "Zone 4",
       "loadcell_channels": [8, 9],
       "side_camera_id": 5,
-      "enabled": false
+      "enabled": true
     }
   },
   "top_camera_id": 0,

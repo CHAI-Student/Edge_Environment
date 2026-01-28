@@ -19,7 +19,7 @@ import os
 import logging
 
 from ..engine.models import JudgmentResult, JudgmentStatus, EnsembleResult
-from ..config import ZONE_CHANNEL_MAP
+from ..config import ZONE_CHANNEL_MAP, get_enabled_zones
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +56,8 @@ class DashboardState:
     last_update: float = 0.0
 
     def __post_init__(self):
-        # 5개 Zone 초기화
-        for zone_id in range(5):
+        # 활성화된 Zone만 초기화
+        for zone_id in get_enabled_zones():
             channels = ZONE_CHANNEL_MAP.get(zone_id, [])
             self.zones[zone_id] = ZoneStatus(
                 zone_id=zone_id,
@@ -223,7 +223,7 @@ class ConsoleDashboard:
         # 로드셀 무게
         lines.append(self._box_line(""))
         lines.append(self._box_line("[LoadCell Weights]"))
-        for zone_id in range(5):
+        for zone_id in get_enabled_zones():
             zone = self.state.zones.get(zone_id)
             if zone:
                 channels = ZONE_CHANNEL_MAP.get(zone_id, [])

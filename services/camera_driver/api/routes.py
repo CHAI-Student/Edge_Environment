@@ -12,7 +12,16 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from ..config import settings, ZONE_CAMERA_MAP, TOP_CAMERA_ID, get_physical_device_index
+from ..config import (
+    settings,
+    ZONE_CAMERA_MAP,
+    TOP_CAMERA_ID,
+    ALL_CAMERA_IDS,
+    get_physical_device_index,
+    get_enabled_zones,
+    get_max_zone_id,
+    is_zone_enabled,
+)
 from ..core import CameraManager
 from ..models import (
     AllCamerasStatus,
@@ -84,8 +93,11 @@ async def get_status() -> AllCamerasStatus:
 @router.get("/frame/{camera_id}")
 async def get_frame(camera_id: int) -> Response:
     """Get single frame as JPEG"""
-    if camera_id < 0 or camera_id > 5:
-        raise HTTPException(status_code=400, detail="camera_id must be 0-5")
+    if camera_id not in ALL_CAMERA_IDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"camera_id must be one of {ALL_CAMERA_IDS}"
+        )
 
     manager = get_manager()
     frame = manager.get_frame(camera_id)
@@ -115,8 +127,12 @@ async def get_frame(camera_id: int) -> Response:
 @router.get("/frame/zone/{zone_id}")
 async def get_zone_frames(zone_id: int) -> ZoneFramesResponse:
     """Get zone frame metadata (use /frame/{camera_id} for actual frames)"""
-    if zone_id < 0 or zone_id > 4:
-        raise HTTPException(status_code=400, detail="zone_id must be 0-4")
+    if not is_zone_enabled(zone_id):
+        enabled = get_enabled_zones()
+        raise HTTPException(
+            status_code=400,
+            detail=f"zone_id {zone_id} is not enabled. Enabled zones: {enabled}"
+        )
 
     manager = get_manager()
     side_frame, top_frame = manager.get_zone_frames(zone_id)
@@ -135,8 +151,12 @@ async def get_zone_frames(zone_id: int) -> ZoneFramesResponse:
 @router.post("/zone/{zone_id}/activate")
 async def activate_zone(zone_id: int) -> dict:
     """Activate zone camera (start buffering)"""
-    if zone_id < 0 or zone_id > 4:
-        raise HTTPException(status_code=400, detail="zone_id must be 0-4")
+    if not is_zone_enabled(zone_id):
+        enabled = get_enabled_zones()
+        raise HTTPException(
+            status_code=400,
+            detail=f"zone_id {zone_id} is not enabled. Enabled zones: {enabled}"
+        )
 
     manager = get_manager()
     manager.activate_zone_camera(zone_id)
@@ -146,8 +166,12 @@ async def activate_zone(zone_id: int) -> dict:
 @router.post("/zone/{zone_id}/deactivate")
 async def deactivate_zone(zone_id: int) -> dict:
     """Deactivate zone camera (stop buffering)"""
-    if zone_id < 0 or zone_id > 4:
-        raise HTTPException(status_code=400, detail="zone_id must be 0-4")
+    if not is_zone_enabled(zone_id):
+        enabled = get_enabled_zones()
+        raise HTTPException(
+            status_code=400,
+            detail=f"zone_id {zone_id} is not enabled. Enabled zones: {enabled}"
+        )
 
     manager = get_manager()
     manager.deactivate_zone_camera(zone_id)
@@ -157,15 +181,15 @@ async def deactivate_zone(zone_id: int) -> dict:
 def _test_storage_writable() -> bool:
     """저장 경로 쓰기 가능 여부 테스트."""
     try:
-        # 프로젝트 루트 기준: Edge_Environment/{날짜시간}/images/cam_0~cam_5
+        # 프로젝트 루트 기준: Edge_Environment/{날짜시간}/images/cam0~cam5
         # camera_driver/api/routes.py 기준 상위 4단계가 프로젝트 루트
         project_root = Path(__file__).parent.parent.parent.parent
         test_session = datetime.now().strftime("%Y%m%d_%H%M%S_healthcheck")
         test_path = project_root / test_session / "images"
 
-        # 6개 카메라 폴더 생성 테스트
-        for cam_id in range(6):
-            cam_folder = test_path / f"cam_{cam_id}"
+        # 활성화된 카메라 폴더 생성 테스트
+        for cam_id in ALL_CAMERA_IDS:
+            cam_folder = test_path / f"cam{cam_id}"
             cam_folder.mkdir(parents=True, exist_ok=True)
 
             # 쓰기 테스트
@@ -188,9 +212,10 @@ async def health_check() -> CameraHealthResponse:
     # 1. 카메라 상태 확인 (기존 health_check() 메서드 활용)
     camera_health = manager.health_check()  # {camera_id: bool}
 
-    # 6대 전부 연결 + 프레임 캡처 가능해야 HEALTHY
+    # 활성화된 카메라 전부 연결 + 프레임 캡처 가능해야 HEALTHY
+    expected_camera_count = len(ALL_CAMERA_IDS)
     all_cameras_ok = (
-        len(camera_health) == 6 and
+        len(camera_health) == expected_camera_count and
         all(camera_health.values())
     )
 
@@ -229,13 +254,39 @@ async def scan_devices() -> dict:
     }
 
 
+@router.get("/zones/config")
+async def get_zone_config() -> dict:
+    """
+    현재 Zone 설정 조회.
+
+    활성화된 zone 목록과 카메라 매핑 정보를 반환합니다.
+    ENABLED_ZONE_COUNT 환경변수로 zone 개수를 조절할 수 있습니다.
+
+    Returns:
+        Zone 설정 정보
+    """
+    from ..config import ZONE_CONFIG
+
+    return {
+        "enabled_zones": get_enabled_zones(),
+        "max_zone_id": get_max_zone_id(),
+        "zone_camera_map": dict(ZONE_CAMERA_MAP),
+        "all_camera_ids": list(ALL_CAMERA_IDS),
+        "zone_config": dict(ZONE_CONFIG),
+        "top_camera_id": TOP_CAMERA_ID,
+    }
+
+
 @router.get("/camera/{camera_id}/frame")
 async def get_camera_frame_base64(camera_id: int) -> dict:
     """Get single frame as base64 encoded JPEG"""
     import base64
 
-    if camera_id < 0 or camera_id > 5:
-        raise HTTPException(status_code=400, detail="camera_id must be 0-5")
+    if camera_id not in ALL_CAMERA_IDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"camera_id must be one of {ALL_CAMERA_IDS}"
+        )
 
     manager = get_manager()
     frame, timestamp = manager.get_frame_with_timestamp(camera_id)
@@ -266,8 +317,12 @@ async def capture_zone(zone_id: int, include_top: bool = True) -> dict:
     """Capture zone frames as base64"""
     import base64
 
-    if zone_id < 0 or zone_id > 4:
-        raise HTTPException(status_code=400, detail="zone_id must be 0-4")
+    if not is_zone_enabled(zone_id):
+        enabled = get_enabled_zones()
+        raise HTTPException(
+            status_code=400,
+            detail=f"zone_id {zone_id} is not enabled. Enabled zones: {enabled}"
+        )
 
     manager = get_manager()
     side_frame, top_frame = manager.get_zone_frames(zone_id, include_top=include_top)
@@ -319,20 +374,24 @@ async def capture_zone_snapshot(zone_id: int, request: ZoneSnapshotRequest) -> d
     이미지를 디스크에 저장하고 파일 경로를 반환합니다.
 
     Args:
-        zone_id: Zone ID (0-4)
+        zone_id: Zone ID (활성화된 zone만 허용)
         request: 요청 본문 (session_id, include_top)
 
     Returns:
         {
             "session_path": "/data/snapshots/260126143025",
             "images": {
-                "cam_0": "/data/snapshots/260126143025/cam_0/snapshot.jpg",
-                "cam_1": "/data/snapshots/260126143025/cam_1/snapshot.jpg"
+                "cam0": "data/260126143025/images/cam0/snapshot.jpg",
+                "cam1": "data/260126143025/images/cam1/snapshot.jpg"
             }
         }
     """
-    if zone_id < 0 or zone_id > 4:
-        raise HTTPException(status_code=400, detail="zone_id must be 0-4")
+    if not is_zone_enabled(zone_id):
+        enabled = get_enabled_zones()
+        raise HTTPException(
+            status_code=400,
+            detail=f"zone_id {zone_id} is not enabled. Enabled zones: {enabled}"
+        )
 
     manager = get_manager()
 
@@ -344,14 +403,14 @@ async def capture_zone_snapshot(zone_id: int, request: ZoneSnapshotRequest) -> d
     )
 
     # 세션 경로 계산
-    # 기본 경로: Edge_Environment/{session_id}/images/cam_X
+    # 기본 경로: Edge_Environment/data/{session_id}/images/camX
     project_root = Path(__file__).parent.parent.parent.parent
     session_path = str(project_root / request.session_id / "images")
 
     # 응답 형식 (Node.js 클라이언트 호환)
     images = {}
     for cam_id, path in saved_paths.items():
-        images[f"cam_{cam_id}"] = path
+        images[f"cam{cam_id}"] = path
 
     return {
         "success": True,
@@ -448,7 +507,7 @@ async def capture_snapshot(
     스냅샷 캡처.
 
     Args:
-        zone_id: Zone ID (0-4)
+        zone_id: Zone ID (활성화된 zone만 허용)
         all_cameras: 모든 카메라 캡처
         session_id: 기존 세션에 저장 (없으면 새 세션)
 
@@ -457,8 +516,12 @@ async def capture_snapshot(
     """
     manager = get_manager()
 
-    if zone_id is not None and (zone_id < 0 or zone_id > 4):
-        raise HTTPException(status_code=400, detail="zone_id must be 0-4")
+    if zone_id is not None and not is_zone_enabled(zone_id):
+        enabled = get_enabled_zones()
+        raise HTTPException(
+            status_code=400,
+            detail=f"zone_id {zone_id} is not enabled. Enabled zones: {enabled}"
+        )
 
     saved_paths = manager.capture_snapshot(
         session_id=session_id,
@@ -469,7 +532,7 @@ async def capture_snapshot(
     return {
         "success": True,
         "saved_count": len(saved_paths),
-        "images": {f"cam_{k}": v for k, v in saved_paths.items()},
+        "images": {f"cam{k}": v for k, v in saved_paths.items()},
     }
 
 
@@ -505,4 +568,140 @@ async def close_session(session_id: str) -> dict:
     return {
         "success": True,
         "session_info": result,
+    }
+
+
+# =========================================================================
+# SSE 구독 및 이벤트 녹화 API
+# =========================================================================
+
+# Global SSE subscriber and event recording manager
+_sse_subscriber = None
+_event_recording_manager = None
+
+
+def get_sse_subscriber():
+    """Get SSE subscriber instance"""
+    global _sse_subscriber
+    return _sse_subscriber
+
+
+def get_event_recording_manager():
+    """Get event recording manager instance"""
+    global _event_recording_manager
+    return _event_recording_manager
+
+
+def init_sse_components(sse_subscriber, event_recording_manager):
+    """Initialize SSE components (called from main.py)"""
+    global _sse_subscriber, _event_recording_manager
+    _sse_subscriber = sse_subscriber
+    _event_recording_manager = event_recording_manager
+
+
+class CallbackRegisterRequest(BaseModel):
+    """콜백 등록 요청."""
+    url: str
+
+
+@router.post("/callback/register")
+async def register_callback(request: CallbackRegisterRequest) -> dict:
+    """
+    Node.js 콜백 URL 등록.
+
+    Camera Driver가 미디어 저장 완료 시 이 URL로 알림을 보냅니다.
+
+    Args:
+        request: 콜백 URL
+
+    Returns:
+        등록 결과
+    """
+    event_manager = get_event_recording_manager()
+
+    if event_manager is None:
+        raise HTTPException(status_code=503, detail="Event recording manager not initialized")
+
+    # 콜백 URL 업데이트
+    event_manager._nodejs_callback_url = request.url
+
+    return {
+        "success": True,
+        "message": f"Callback URL registered: {request.url}",
+        "timestamp": time.time(),
+    }
+
+
+@router.get("/sse/status")
+async def get_sse_status() -> dict:
+    """
+    SSE 연결 상태 조회.
+
+    Returns:
+        SSE 구독 상태 및 이벤트 녹화 상태
+    """
+    sse_sub = get_sse_subscriber()
+    event_manager = get_event_recording_manager()
+
+    sse_status = sse_sub.get_status() if sse_sub else {"running": False, "connected": False}
+    recording_status = event_manager.get_status() if event_manager else {}
+
+    return {
+        "sse_subscriber": sse_status,
+        "event_recording": recording_status,
+        "timestamp": time.time(),
+    }
+
+
+@router.post("/sse/start")
+async def start_sse_subscription() -> dict:
+    """
+    SSE 구독 시작.
+
+    IO Board SSE 스트림 구독을 수동으로 시작합니다.
+
+    Returns:
+        시작 결과
+    """
+    sse_sub = get_sse_subscriber()
+
+    if sse_sub is None:
+        raise HTTPException(status_code=503, detail="SSE subscriber not initialized")
+
+    if sse_sub._running:
+        return {
+            "success": True,
+            "message": "SSE subscriber already running",
+            "status": sse_sub.get_status(),
+        }
+
+    await sse_sub.start()
+
+    return {
+        "success": True,
+        "message": "SSE subscriber started",
+        "status": sse_sub.get_status(),
+    }
+
+
+@router.post("/sse/stop")
+async def stop_sse_subscription() -> dict:
+    """
+    SSE 구독 중지.
+
+    IO Board SSE 스트림 구독을 수동으로 중지합니다.
+
+    Returns:
+        중지 결과
+    """
+    sse_sub = get_sse_subscriber()
+
+    if sse_sub is None:
+        raise HTTPException(status_code=503, detail="SSE subscriber not initialized")
+
+    await sse_sub.stop()
+
+    return {
+        "success": True,
+        "message": "SSE subscriber stopped",
     }

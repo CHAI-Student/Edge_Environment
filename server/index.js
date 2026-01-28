@@ -124,6 +124,10 @@ const cameraRouter = require("./routes/camera");
 app.use('/api/camera', cameraRouter);
 console.log('[APP] Camera routes loaded');
 
+// Camera Callback 라우트 (Event-Driven Architecture)
+const cameraCallbackRouter = require("./routes/cameraCallback");
+app.use('/api/camera', cameraCallbackRouter);
+console.log('[APP] Camera callback routes loaded');
 
 // Door Control 라우트
 const doorRouter = require("./routes/door");
@@ -180,7 +184,16 @@ app.get('/api/dashboard/status', async (req, res) => {
     }
 });
 
-// IO Board SSE 구독 시작
+// Event-Driven Architecture 서비스 초기화
+// 주의: SSE 구독 시작 전에 모듈들을 먼저 초기화해야 함
+const weightAccumulator = require("./services/WeightChangeAccumulator");
+const pendingItemsStack = require("./services/PendingItemsStack");
+
+// WeightChangeAccumulator에 PendingItemsStack 연결
+weightAccumulator.setPendingItemsStack(pendingItemsStack);
+console.log('[APP] Weight accumulator connected to pending items stack');
+
+// IO Board SSE 구독 시작 (모듈 초기화 후)
 ioBoardSSE.start();
 console.log('[APP] IO Board SSE subscriber started');
 

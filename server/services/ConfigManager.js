@@ -89,19 +89,19 @@ class ConfigManager {
     }
 
     /**
-     * 기본 카메라 디바이스 매핑 반환
+     * 기본 카메라 디바이스 매핑 반환 (6대 카메라: Top + 5 Zone)
      */
     _getDefaultCameraDeviceMap() {
         return {
             version: '1.0',
-            nvidia_mode: false,
+            nvidia_mode: true,
             device_map: {
                 '0': { name: 'Top Camera', physical_index: 0 },
-                '1': { name: 'Zone 0 Side', physical_index: 1 },
-                '2': { name: 'Zone 1 Side', physical_index: 2 },
-                '3': { name: 'Zone 2 Side', physical_index: 3 },
-                '4': { name: 'Zone 3 Side', physical_index: 4 },
-                '5': { name: 'Zone 4 Side', physical_index: 5 }
+                '1': { name: 'Zone 0 Side', physical_index: 2 },
+                '2': { name: 'Zone 1 Side', physical_index: 4 },
+                '3': { name: 'Zone 2 Side', physical_index: 6 },
+                '4': { name: 'Zone 3 Side', physical_index: 8 },
+                '5': { name: 'Zone 4 Side', physical_index: 10 }
             }
         };
     }
@@ -190,6 +190,77 @@ class ConfigManager {
             }
         }
         return null;
+    }
+
+    /**
+     * 활성화된 Zone ID 목록 조회
+     * @returns {number[]} 활성화된 zone ID 배열
+     */
+    getEnabledZones() {
+        // ENABLED_ZONE_COUNT 환경변수 확인
+        const envZoneCount = process.env.ENABLED_ZONE_COUNT;
+        let maxZones = null;
+
+        if (envZoneCount) {
+            maxZones = parseInt(envZoneCount);
+            if (isNaN(maxZones)) maxZones = null;
+        }
+
+        const enabledZones = [];
+        for (const [zoneId, zone] of Object.entries(this.zoneMapping.zones)) {
+            const id = parseInt(zoneId);
+            // 환경변수로 override되면 해당 개수만, 아니면 enabled 플래그 확인
+            const isEnabled = maxZones !== null
+                ? id < maxZones
+                : zone.enabled !== false;  // enabled가 명시적으로 false가 아니면 활성화
+
+            if (isEnabled) {
+                enabledZones.push(id);
+            }
+        }
+
+        return enabledZones.sort((a, b) => a - b);
+    }
+
+    /**
+     * 특정 Zone이 활성화되어 있는지 확인
+     * @param {number} zoneId - Zone ID
+     * @returns {boolean}
+     */
+    isZoneEnabled(zoneId) {
+        return this.getEnabledZones().includes(zoneId);
+    }
+
+    /**
+     * 활성화된 Zone 개수 조회
+     * @returns {number}
+     */
+    getEnabledZoneCount() {
+        return this.getEnabledZones().length;
+    }
+
+    /**
+     * 활성화된 카메라 ID 목록 조회 (Top + 활성화된 Zone 카메라)
+     * @returns {number[]}
+     */
+    getEnabledCameraIds() {
+        const cameraIds = [this.getTopCameraId()];
+        for (const zoneId of this.getEnabledZones()) {
+            const cameraId = this.getCameraIdForZone(zoneId);
+            if (!cameraIds.includes(cameraId)) {
+                cameraIds.push(cameraId);
+            }
+        }
+        return cameraIds.sort((a, b) => a - b);
+    }
+
+    /**
+     * 활성화된 최대 Zone ID 조회
+     * @returns {number}
+     */
+    getMaxEnabledZoneId() {
+        const enabledZones = this.getEnabledZones();
+        return enabledZones.length > 0 ? Math.max(...enabledZones) : -1;
     }
 
     /**

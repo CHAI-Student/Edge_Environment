@@ -2,19 +2,29 @@
  * IOBoardSSESubscriber - IO Board SSE 스트림 구독자
  *
  * IO Board 서비스(8001)의 SSE 스트림을 구독하여
- * 로드셀 변화 이벤트를 감지하고 카메라 활성화 및 로그 저장을 수행합니다.
+ * 로드셀 변화 이벤트를 감지합니다.
+ *
+ * [Event-Driven Architecture 변경]
+ * - Camera Driver가 자체적으로 SSE를 구독하고 이미지/영상을 저장
+ * - Node.js는 media-ready 콜백을 받아 WeightChangeAccumulator로 처리
+ * - 카메라 활성화/비활성화 직접 호출 제거
  *
  * 데이터 흐름:
- * IO Board SSE → IOBoardSSESubscriber → CameraDriverClient (활성화)
- *                                     → WeightEventLogger (로그 저장)
- *                                     → EventEmitter (내부 이벤트)
+ * IO Board SSE → IOBoardSSESubscriber → 문 열림/닫힘 처리 (PendingItemsStack)
+ *                                     → loadcell.update → Dashboard SSE 전달
+ *
+ * Camera Driver SSE → EventRecordingManager → Node.js callback → WeightChangeAccumulator
  */
 
 const { EventSource } = require('eventsource');
 const EventEmitter = require('events');
 const config = require('../config/key');
-const cameraClient = require('./CameraDriverClient');
 const configManager = require('./ConfigManager');
+const cameraClient = require('./CameraDriverClient');
+
+// Lazy-loaded modules (avoid circular dependencies)
+let pendingItemsStack = null;
+let weightAccumulator = null;
 
 class IOBoardSSESubscriber extends EventEmitter {
     constructor() {
@@ -22,6 +32,7 @@ class IOBoardSSESubscriber extends EventEmitter {
         this.ioBoardUrl = config.ioBoardUrl || 'http://localhost:8001';
         this.eventSource = null;
         this.connected = false;
+        this.reconnecting = false; // 재연결 중 플래그 (race condition 방지)
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 10;
         this.reconnectDelay = 5000; // 5초
@@ -47,7 +58,7 @@ class IOBoardSSESubscriber extends EventEmitter {
         this.zoneRecordingSessions = new Map(); // zoneId -> {sessionId, startTime}
         this.zoneRecordingStopTimers = new Map(); // zoneId -> timerId
 
-        // Top 카메라 (cam_0) 상태
+        // Top 카메라 (cam0) 상태
         this.topCameraActive = false;
         this.topCameraRecordingSession = null;
         this.topCameraDeactivateTimer = null;
@@ -56,6 +67,9 @@ class IOBoardSSESubscriber extends EventEmitter {
         this.doorState = null; // 'OPEN', 'CLOSED' or null
         this.deadboltState = null; // 'OPEN', 'CLOSED' or null
         this.lastDoorUpdateTime = null;
+
+        // 정산 타이머
+        this.settlementTimer = null;
     }
 
     /**
@@ -143,9 +157,11 @@ class IOBoardSSESubscriber extends EventEmitter {
             this.emit('disconnected');
         }
 
-        // 타이머 정리
+        // 타이머 정리 (안전하게 존재 확인 후 정리)
         for (const [zoneId, timer] of this.pendingChanges) {
-            clearTimeout(timer.timeout);
+            if (timer && timer.timeout) {
+                clearTimeout(timer.timeout);
+            }
         }
         this.pendingChanges.clear();
 
@@ -154,56 +170,60 @@ class IOBoardSSESubscriber extends EventEmitter {
         }
         this.zoneDeactivateTimers.clear();
 
-        // 녹화 세션 정리
+        // 정산 타이머 정리
+        if (this.settlementTimer) {
+            clearTimeout(this.settlementTimer);
+            this.settlementTimer = null;
+        }
+
+        // 녹화 세션 정리 (레거시 - Camera Driver가 자체 관리)
         for (const [zoneId, session] of this.zoneRecordingSessions) {
-            try {
-                await this._stopZoneRecording(zoneId);
-            } catch (error) {
-                console.error(`[IOBoardSSE] Failed to stop zone ${zoneId} recording on shutdown:`, error.message);
-            }
+            console.log(`[IOBoardSSE] Cleaning up zone ${zoneId} recording session`);
         }
         this.zoneRecordingSessions.clear();
 
-        // Top 카메라 정리
+        // Top 카메라 정리 (레거시 - Camera Driver가 자체 관리)
         if (this.topCameraDeactivateTimer) {
             clearTimeout(this.topCameraDeactivateTimer);
             this.topCameraDeactivateTimer = null;
         }
 
-        if (this.topCameraActive) {
-            try {
-                await cameraClient.stopRecording();
-                await cameraClient.deactivateTopCamera();
-                this.topCameraActive = false;
-                this.topCameraRecordingSession = null;
-                console.log('[IOBoardSSE] Top camera deactivated on shutdown');
-            } catch (error) {
-                console.error('[IOBoardSSE] Failed to deactivate top camera on shutdown:', error.message);
-            }
-        }
+        this.topCameraActive = false;
+        this.topCameraRecordingSession = null;
     }
 
     /**
      * 재연결 시도
      */
     _handleReconnect() {
+        // 이미 재연결 중이면 무시 (race condition 방지)
+        if (this.reconnecting) {
+            console.log('[IOBoardSSE] Already reconnecting, skipping');
+            return;
+        }
+
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
             console.error('[IOBoardSSE] Max reconnect attempts reached');
             this.emit('max_reconnect_reached');
             return;
         }
 
+        this.reconnecting = true;
         this.reconnectAttempts++;
         const delay = this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1);
 
         console.log(`[IOBoardSSE] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
 
         setTimeout(() => {
-            if (this.eventSource) {
-                this.eventSource.close();
-                this.eventSource = null;
+            try {
+                if (this.eventSource) {
+                    this.eventSource.close();
+                    this.eventSource = null;
+                }
+                this.start();
+            } finally {
+                this.reconnecting = false;
             }
-            this.start();
         }, delay);
     }
 
@@ -293,7 +313,7 @@ class IOBoardSSESubscriber extends EventEmitter {
             }
         }
 
-        // 데드볼트 상태 변화 감지 + Top 카메라 제어
+        // 데드볼트 상태 변화 감지
         if (prevDeadboltState && prevDeadboltState !== data.deadbolt) {
             console.log(`[IOBoardSSE] Deadbolt state changed: ${prevDeadboltState} -> ${data.deadbolt}`);
 
@@ -302,11 +322,11 @@ class IOBoardSSESubscriber extends EventEmitter {
                               data.deadbolt.toUpperCase().includes('LOCK');
 
             if (isOpening) {
-                // 데드볼트 열림 → Top 카메라 활성화 + 녹화 시작
-                this._activateTopCameraWithRecording(timestamp);
+                // 데드볼트 열림 → PendingItemsStack 세션 시작
+                this._onDeadboltOpened(timestamp);
             } else if (isClosing) {
-                // 데드볼트 닫힘 → Top 카메라 녹화 중지 예약 (10초 후)
-                this._scheduleTopCameraDeactivation();
+                // 데드볼트 닫힘 → 정산 처리 스케줄링
+                this._scheduleSettlement(timestamp);
             }
 
             this.emit('deadbolt_changed', {
@@ -315,6 +335,103 @@ class IOBoardSSESubscriber extends EventEmitter {
                 timestamp
             });
         }
+    }
+
+    /**
+     * 데드볼트 열림 시 처리
+     * @param {string} timestamp - 타임스탬프
+     */
+    async _onDeadboltOpened(timestamp) {
+        try {
+            // PendingItemsStack 세션 시작
+            const stack = this._getPendingItemsStack();
+            const sessionId = await stack.startSession();
+
+            console.log(`[IOBoardSSE] Deadbolt opened: session started (${sessionId})`);
+
+            this.emit('session_started', {
+                session_id: sessionId,
+                timestamp
+            });
+
+        } catch (error) {
+            console.error('[IOBoardSSE] Failed to start session:', error.message);
+        }
+    }
+
+    /**
+     * 정산 처리 스케줄링 (데드볼트 닫힘)
+     * @param {string} timestamp - 타임스탬프
+     */
+    _scheduleSettlement(timestamp) {
+        // 기존 타이머 취소
+        if (this.settlementTimer) {
+            clearTimeout(this.settlementTimer);
+        }
+
+        // 대기 시간 (WeightAccumulator 타이머 완료 대기)
+        const settlementDelay = 15000;  // 15초 (10초 + 여유 5초)
+
+        this.settlementTimer = setTimeout(async () => {
+            await this._processDoorClose(timestamp);
+            this.settlementTimer = null;
+        }, settlementDelay);
+
+        console.log(`[IOBoardSSE] Settlement scheduled in ${settlementDelay}ms`);
+    }
+
+    /**
+     * 문 닫힘 정산 처리
+     * @param {string} timestamp - 타임스탬프
+     */
+    async _processDoorClose(timestamp) {
+        try {
+            // 1. WeightAccumulator 강제 처리 (대기 중인 이벤트 처리)
+            const accumulator = this._getWeightAccumulator();
+            const accumulatorResult = await accumulator.forceProcess();
+
+            // 2. PendingItemsStack 세션 종료 및 정산
+            const stack = this._getPendingItemsStack();
+            const sessionResult = await stack.closeSession();
+
+            if (sessionResult) {
+                console.log(
+                    `[IOBoardSSE] Settlement complete: ` +
+                    `pickups=${sessionResult.net_changes.pickup_events}, ` +
+                    `returns=${sessionResult.net_changes.return_events}`
+                );
+
+                this.emit('door_settlement', {
+                    session_id: sessionResult.session_id,
+                    net_changes: sessionResult.net_changes,
+                    duration_seconds: sessionResult.duration_seconds,
+                    timestamp
+                });
+            }
+
+        } catch (error) {
+            console.error('[IOBoardSSE] Settlement failed:', error.message);
+        }
+    }
+
+    /**
+     * PendingItemsStack 가져오기 (lazy load)
+     */
+    _getPendingItemsStack() {
+        if (!pendingItemsStack) {
+            pendingItemsStack = require('./PendingItemsStack');
+        }
+        return pendingItemsStack;
+    }
+
+    /**
+     * WeightChangeAccumulator 가져오기 (lazy load)
+     */
+    _getWeightAccumulator() {
+        if (!weightAccumulator) {
+            weightAccumulator = require('./WeightChangeAccumulator');
+        }
+        return weightAccumulator;
     }
 
     /**
@@ -404,10 +521,10 @@ class IOBoardSSESubscriber extends EventEmitter {
      */
     _detectWeightChanges(prev, curr) {
         const changes = [];
-        const zoneMapping = configManager.getZoneMapping();
+        const enabledZones = configManager.getEnabledZones();
 
-        for (let zoneId = 0; zoneId < 5; zoneId++) {
-            const channels = zoneMapping.zones[zoneId]?.loadcell_channels || [zoneId * 2, zoneId * 2 + 1];
+        for (const zoneId of enabledZones) {
+            const channels = configManager.getLoadcellChannelsForZone(zoneId);
             let zoneDelta = 0;
 
             for (const ch of channels) {
@@ -649,8 +766,8 @@ class IOBoardSSESubscriber extends EventEmitter {
 
             return {
                 session_path: result.session_path || null,
-                top_image: result.images?.cam_0 || null,
-                side_image: result.images?.[`cam_${zoneId + 1}`] || null
+                top_image: result.images?.cam0 || null,
+                side_image: result.images?.[`cam${zoneId + 1}`] || null
             };
         } catch (error) {
             console.error(`[IOBoardSSE] Snapshot capture failed:`, error.message);
@@ -666,6 +783,9 @@ class IOBoardSSESubscriber extends EventEmitter {
     async _requestJudgment(eventData) {
         try {
             const productJudgeClient = require('./ProductJudgeClient');
+            if (!productJudgeClient || !productJudgeClient.judgeWithWeightData) {
+                throw new Error('ProductJudgeClient not properly loaded');
+            }
             return await productJudgeClient.judgeWithWeightData(eventData);
         } catch (error) {
             console.error(`[IOBoardSSE] Judgment request failed:`, error.message);

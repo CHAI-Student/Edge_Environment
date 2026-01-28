@@ -14,62 +14,170 @@ __all__ = [
     "get_physical_device_index",
     "load_device_map",
     "DEVICE_PHYSICAL_MAP",
+    "load_zone_config",
+    "get_enabled_zones",
+    "get_max_zone_id",
+    "is_zone_enabled",
+    "ZONE_CONFIG",
 ]
 
 logger = logging.getLogger(__name__)
 
 
-# Zone to Camera Mapping (기본 정수 인덱스 기반)
+# Zone 설정 (zone_mapping.json에서 로드)
+ZONE_CONFIG: Dict[str, Dict] = {}
+
+# Zone to Camera Mapping (동적으로 로드됨)
 # Zone → Side Camera ID
 # Top Camera (ID 0) is shared across all zones
-ZONE_CAMERA_MAP: Dict[int, int] = {
-    0: 1,  # Zone 0 → Camera 1
-    1: 2,  # Zone 1 → Camera 2
-    2: 3,  # Zone 2 → Camera 3
-    3: 4,  # Zone 3 → Camera 4
-    4: 5,  # Zone 4 → Camera 5
-}
+ZONE_CAMERA_MAP: Dict[int, int] = {}
 
 TOP_CAMERA_ID = 0
-ZONE_CAMERA_IDS: List[int] = [1, 2, 3, 4, 5]
-ALL_CAMERA_IDS: List[int] = [0, 1, 2, 3, 4, 5]
+ZONE_CAMERA_IDS: List[int] = []
+ALL_CAMERA_IDS: List[int] = []
 
 
-# 카메라 고유 ID 기반 매핑 설정
+def load_zone_config(config_path: Optional[str] = None) -> Dict[str, Dict]:
+    """
+    Zone 매핑 설정 로드.
+
+    zone_mapping.json에서 zone 설정을 로드하고,
+    enabled된 zone만 ZONE_CAMERA_MAP에 등록합니다.
+
+    Args:
+        config_path: 설정 파일 경로 (없으면 기본 경로 사용)
+
+    Returns:
+        전체 zone 설정
+    """
+    global ZONE_CONFIG, ZONE_CAMERA_MAP, ZONE_CAMERA_IDS, ALL_CAMERA_IDS
+
+    if config_path is None:
+        # 기본 경로: project/config/zone_mapping.json
+        config_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "config",
+            "zone_mapping.json"
+        )
+
+    # 기본값 (fallback) - 5개 zone 전부 활성화
+    default_zones = {
+        "0": {"loadcell_channels": [0, 1], "side_camera_id": 1, "enabled": True},
+        "1": {"loadcell_channels": [2, 3], "side_camera_id": 2, "enabled": True},
+        "2": {"loadcell_channels": [4, 5], "side_camera_id": 3, "enabled": True},
+        "3": {"loadcell_channels": [6, 7], "side_camera_id": 4, "enabled": True},
+        "4": {"loadcell_channels": [8, 9], "side_camera_id": 5, "enabled": True},
+    }
+
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if "zones" in data:
+                ZONE_CONFIG = data["zones"]
+            else:
+                ZONE_CONFIG = default_zones
+
+            logger.info(f"Zone config loaded from {config_path}")
+
+        except Exception as e:
+            logger.warning(f"Failed to load zone config: {e}, using defaults")
+            ZONE_CONFIG = default_zones
+    else:
+        logger.info(f"Zone config not found at {config_path}, using defaults")
+        ZONE_CONFIG = default_zones
+
+    # 환경변수로 zone 개수 override 가능
+    # ENABLED_ZONE_COUNT=3 이면 zone 0, 1, 2만 활성화
+    env_zone_count = os.environ.get("ENABLED_ZONE_COUNT")
+    if env_zone_count:
+        try:
+            max_zones = int(env_zone_count)
+            for zone_id_str, zone_data in ZONE_CONFIG.items():
+                try:
+                    zone_id = int(zone_id_str)
+                    zone_data["enabled"] = zone_id < max_zones
+                except ValueError:
+                    pass
+            logger.info(f"ENABLED_ZONE_COUNT={max_zones}: overriding zone enabled states")
+        except ValueError:
+            logger.warning(f"Invalid ENABLED_ZONE_COUNT value: {env_zone_count}")
+
+    # enabled된 zone만 ZONE_CAMERA_MAP에 등록
+    ZONE_CAMERA_MAP.clear()
+    ZONE_CAMERA_IDS.clear()
+
+    for zone_id_str, zone_data in ZONE_CONFIG.items():
+        try:
+            zone_id = int(zone_id_str)
+            if zone_data.get("enabled", True):
+                side_camera_id = zone_data.get("side_camera_id", zone_id + 1)
+                ZONE_CAMERA_MAP[zone_id] = side_camera_id
+                ZONE_CAMERA_IDS.append(side_camera_id)
+        except ValueError:
+            continue
+
+    # 정렬
+    ZONE_CAMERA_IDS.sort()
+
+    # ALL_CAMERA_IDS 업데이트 (Top + enabled zones)
+    ALL_CAMERA_IDS.clear()
+    ALL_CAMERA_IDS.append(TOP_CAMERA_ID)
+    ALL_CAMERA_IDS.extend(ZONE_CAMERA_IDS)
+
+    logger.info(f"Enabled zones: {list(ZONE_CAMERA_MAP.keys())}")
+    logger.info(f"ZONE_CAMERA_MAP: {ZONE_CAMERA_MAP}")
+    logger.info(f"ALL_CAMERA_IDS: {ALL_CAMERA_IDS}")
+
+    return ZONE_CONFIG
+
+
+def get_enabled_zones() -> List[int]:
+    """활성화된 zone ID 목록 반환."""
+    return sorted(ZONE_CAMERA_MAP.keys())
+
+
+def get_max_zone_id() -> int:
+    """활성화된 zone 중 최대 ID 반환."""
+    if not ZONE_CAMERA_MAP:
+        return -1
+    return max(ZONE_CAMERA_MAP.keys())
+
+
+def is_zone_enabled(zone_id: int) -> bool:
+    """특정 zone이 활성화되어 있는지 확인."""
+    return zone_id in ZONE_CAMERA_MAP
+
+
+# 카메라 고유 ID 기반 매핑 설정 (동적으로 빌드됨)
 # identifier: USB 시리얼 또는 고유 ID
 # fallback_index: 고유 ID 매칭 실패 시 사용할 인덱스
-CAMERA_ID_MAPPING: Dict[str, Dict] = {
-    "top": {
-        "identifier": "",  # 고유 ID (설정 시 자동 매칭)
-        "fallback_index": 0,
-        "zone": "top",
-    },
-    "zone_0": {
-        "identifier": "",
-        "fallback_index": 1,
-        "zone": 0,
-    },
-    "zone_1": {
-        "identifier": "",
-        "fallback_index": 2,
-        "zone": 1,
-    },
-    "zone_2": {
-        "identifier": "",
-        "fallback_index": 3,
-        "zone": 2,
-    },
-    "zone_3": {
-        "identifier": "",
-        "fallback_index": 4,
-        "zone": 3,
-    },
-    "zone_4": {
-        "identifier": "",
-        "fallback_index": 5,
-        "zone": 4,
-    },
-}
+CAMERA_ID_MAPPING: Dict[str, Dict] = {}
+
+
+def _build_camera_id_mapping() -> Dict[str, Dict]:
+    """
+    활성화된 zone 기반으로 CAMERA_ID_MAPPING 빌드.
+    """
+    global CAMERA_ID_MAPPING
+
+    CAMERA_ID_MAPPING = {
+        "top": {
+            "identifier": "",
+            "fallback_index": 0,
+            "zone": "top",
+        },
+    }
+
+    for zone_id, camera_id in ZONE_CAMERA_MAP.items():
+        CAMERA_ID_MAPPING[f"zone_{zone_id}"] = {
+            "identifier": "",
+            "fallback_index": camera_id,
+            "zone": zone_id,
+        }
+
+    return CAMERA_ID_MAPPING
 
 
 def load_camera_mapping(config_path: Optional[str] = None) -> Dict[str, Dict]:
@@ -182,7 +290,7 @@ class Settings(BaseSettings):
     resolution_width: int = Field(default=640)
     resolution_height: int = Field(default=480)
     fps: int = Field(default=30)
-    buffer_size: int = Field(default=60)
+    buffer_size: int = Field(default=90, description="버퍼 크기 (3초 @ 30fps)")
 
     # JPEG quality for streaming
     jpeg_quality: int = Field(default=80)
@@ -203,6 +311,19 @@ class Settings(BaseSettings):
     # Nvidia mode settings (Jetson Orin Nano: video0, video2, video4...)
     nvidia_mode: bool = Field(default=True, description="Nvidia 장치 인덱싱 모드 (짝수 인덱스: 0,2,4,6,8,10)")
     device_map_path: str = Field(default="", description="카메라 디바이스 매핑 설정 파일 경로")
+
+    # IO Board SSE 구독 설정 (Event-Driven Architecture)
+    io_board_url: str = Field(default="http://localhost:8001", description="IO Board 서비스 URL")
+    nodejs_callback_url: str = Field(default="http://localhost:8889", description="Node.js 오케스트레이터 콜백 URL")
+
+    # 이벤트 기반 녹화 설정
+    pre_buffer_seconds: float = Field(default=0.5, description="이벤트 발생 전 버퍼 시간 (초)")
+    post_buffer_seconds: float = Field(default=2.5, description="이벤트 발생 후 녹화 시간 (초)")
+    save_images: bool = Field(default=True, description="스냅샷 이미지 저장 여부")
+    save_videos: bool = Field(default=True, description="영상 파일 저장 여부")
+
+    # 미디어 저장 경로
+    media_base_path: str = Field(default="data/", description="미디어 저장 기본 경로 (Edge_Environment/data/)")
 
 
 settings = Settings()
@@ -279,6 +400,12 @@ def get_physical_device_index(logical_id: int) -> int:
     return logical_id
 
 
-# 시작 시 매핑 설정 로드 시도
+# 시작 시 설정 로드 순서:
+# 1. Zone 설정 로드 (enabled zone 결정)
+# 2. 카메라 ID 매핑 빌드
+# 3. 카메라 매핑 로드
+# 4. 디바이스 맵 로드
+load_zone_config()
+_build_camera_id_mapping()
 load_camera_mapping()
 load_device_map()

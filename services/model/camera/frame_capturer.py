@@ -28,6 +28,7 @@ from ..config import (
     config,
     get_zone_cameras,
     TOP_CAMERA_ID,
+    get_enabled_zones,
     get_top_camera_path,
     get_side_camera_path,
     get_snapshot_folder,
@@ -347,9 +348,9 @@ class FolderFrameLoader:
             session_id: 세션 ID
 
         Returns:
-            CapturedFrames 리스트 (5개 Zone)
+            CapturedFrames 리스트 (활성화된 Zone)
         """
-        return [self.load_zone(session_id, zone_id) for zone_id in range(5)]
+        return [self.load_zone(session_id, zone_id) for zone_id in get_enabled_zones()]
 
     def check_folder_exists(self, session_id: str) -> bool:
         """
@@ -374,18 +375,19 @@ class FolderFrameLoader:
         Returns:
             {
                 "top": bool,
-                "zones": {0: bool, 1: bool, 2: bool, 3: bool, 4: bool}
+                "zones": {zone_id: bool for each enabled zone}
             }
         """
+        enabled_zones = get_enabled_zones()
         result = {
             "top": False,
-            "zones": {i: False for i in range(5)}
+            "zones": {zone_id: False for zone_id in enabled_zones}
         }
 
         top_path = get_top_camera_path(session_id)
         result["top"] = os.path.exists(top_path)
 
-        for zone_id in range(5):
+        for zone_id in enabled_zones:
             side_path = get_side_camera_path(session_id, zone_id)
             result["zones"][zone_id] = os.path.exists(side_path)
 
