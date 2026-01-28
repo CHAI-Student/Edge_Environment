@@ -14,6 +14,9 @@ const { ManualDeadbolt } = require("../Mqtt/ManualDeadbolt");
 const { callApiToControlDeadbolt } = require('../Mqtt/DeadboltApiService'); // [추가] 도어 제어 함수 임포트 가정
 const { EventSource } = require('eventsource');
 const { model } = require("mongoose");
+const { record } = require("zod");
+const { sendToPNT } = require("./PaymentStore");
+const { send } = require("process");
 
 
 function makeTimestampFolderName(d = new Date()) {
@@ -34,13 +37,79 @@ function ensureCaptureFolder({ localRoot } = {}) {
   return { folderName, folderPath };
 }
 
-async function requestTopCameraCapture({ folderPath, action }) {
+async function requestTopCameraCapture({ action }) {
   try {
-    const response = await axios.post(`${config.cameraApi}/top/${action}`, { save_path: folderPath });
-    return response.data;
+    let url;
+    if (action === 'ON') {
+      url = `${config.cameraApi}/api/zone/0/activate`; 
+      // 상단카메라 키는 함수여서 카메라 인덱스 0으로 고정
+    } else if (action === 'OFF') {
+      url = `${config.cameraApi}/api/zone/${zoneId}/deactivate`;
+    } else {
+      throw new Error("Invalid action. Use 'ON' or 'OFF'.");
+    }
+
+    // 2. 스냅샷 경로와 같이 요청 전송
+    const response = await axios.post(url);
+
+    if (response.status === 200) {
+      console.log(`Camera Zone 0 ${action} Success:`, response.data);
+      return true;
+    }
+
   } catch (error) {
-    console.error("Top Camera Error:", error.message);
-    return null;
+    if (error.response) {
+      console.error(`API Error (${action}):`, error.response.data);
+    } else {
+      console.error(`Request Error (${action}):`, error.message);
+    }
+    return false;
+  }
+}
+
+async function requestTopCameraON({ include_top, record_video, folderPath }) {
+  try {
+    const CameraSaveDirApi =  `${config.cameraApi}/api/recording/start`;
+    const response = await axios.post(CameraSaveDirApi, null, {
+      params: {
+        zone_id: 0,
+        include_top: include_top,
+        record_video: record_video,
+        base_path: folderPath
+      }
+    });
+
+  // 성공 시 응답 데이터 반환
+    if (response.status === 200) {
+        console.log("Recording Started with Path:", response.data);
+        return response.data;
+    }
+
+  } catch (error) {
+    // 에러 로깅 시 action 변수가 없으므로 제거하거나 함수명을 사용
+    const errorContext = "requestTopCameraON"; 
+    if (error.response) {
+      // 422 Validation Error 등이 발생할 수 있음 [cite: 466]
+      console.error(`API Error (${errorContext}):`, error.response.data);
+    } else {
+      console.error(`Request Error (${errorContext}):`, error.message);
+    }
+    return false;
+  }
+}
+
+async function requestCameraOFF() {
+  try {
+    const CameraStopApi =  `${config.cameraApi}/api/recording/stop`;
+    const response = await axios.post(CameraStopApi);
+
+  if (response.status === 200) {
+        // console.log("Recording Stopped. File Saved at:", response.data);
+        return response.data; // 저장된 파일 경로 정보 반환 
+    }
+  } catch (error) {
+    console.error("Stop Recording Error:", error.message);
+    return false;
   }
 }
 
@@ -57,13 +126,13 @@ async function init() {
         if (event.data) {
             try {
                 token = event.data.vankey_hash;
-                // const card_method = token.startsWith("SPAYKEY") ? "S" : "N"
-                const card_method = 'N'
+                // const CardMethod = token.startsWith("SPAYKEY") ? "S" : "N"
+                const CardMethod = 'N'
                 // S = 삼성페이, N = 일반카드
                 console.log('[CardToken] Token received:', token);
                 
                 // 토큰을 받으면 프로세스 시작 (비동기 호출)
-                startProcess(token, card_method); 
+                startProcess(token, CardMethod); 
             } catch (err) {
                 console.error('[CardToken] Error parsing token:', err);
             }
@@ -88,39 +157,40 @@ async function init() {
         console.log('rfid::::', event.data)
     });
 }
-// const DeadboltHandler = axios.post(`${config.ioboardApi}/deadbolt`); // 엔드포인트 확인 필요
-// function waitForDeadboltClose() {
-//     return new Promise((resolve) => {
-//         console.log("[Door] Waiting for CLOSE event & Log Path from sensor...");
 
-//         const statusHandler = (event) => {
-//             if (!event.data) return;
-//             try {
-//                 const data = JSON.parse(event.data);
-//                 const currentState = data.state || data; 
-//                 const logPath = data.log_path || data.logPath || null; // 로그 경로 추출
+const DeadboltHandler = axios.post(`${config.ioboardApi}/deadbolt`); // 엔드포인트 확인 필요
+function waitForDeadboltClose() {
+    return new Promise((resolve) => {
+        console.log("[Door] Waiting for CLOSE event & Log Path from sensor...");
 
-//                 if (currentState === "CLOSE") {
-//                     console.log(`[Door] Event Received: CLOSE. (LogPath: ${logPath})`);
+        const statusHandler = (event) => {
+            if (!event.data) return;
+            try {
+                const data = JSON.parse(event.data);
+                const currentState = data.state || data; 
+                const logPath = data.log_path || data.logPath || null; // 로그 경로 추출
+
+                if (currentState === "CLOSE") {
+                    console.log(`[Door] Event Received: CLOSE. (LogPath: ${logPath})`);
                     
-//                     DeadboltHandler.removeEventListener('status', statusHandler);
+                    DeadboltHandler.removeEventListener('status', statusHandler);
                     
-//                     // 상태뿐만 아니라 로그 경로도 함께 반환
-//                     resolve({ 
-//                         state: "CLOSE", 
-//                         logPath: logPath 
-//                     });
-//                 }
-//             } catch (err) {
-//                 console.error("[Door] Event parsing error:", err);
-//             }
-//         };
-//         DeadboltHandler.addEventListener('status', statusHandler);
-//     });
-// }
+                    // 상태뿐만 아니라 로그 경로도 함께 반환
+                    resolve({ 
+                        state: "CLOSE", 
+                        logPath: logPath 
+                    });
+                }
+            } catch (err) {
+                console.error("[Door] Event parsing error:", err);
+            }
+        };
+        DeadboltHandler.addEventListener('status', statusHandler);
+    });
+}
 
 // --- 2. 프로세스 시작 및 상태 체크 ---
-async function startProcess(token, card_method) {
+async function startProcess(token, CardMethod) {
     // const LoadcellStatus = LoadcellStatusAPI
     const CameraStatus = '09'
     const CardTerminalStatus = await CardTerminalStatusAPI()
@@ -131,7 +201,7 @@ async function startProcess(token, card_method) {
     if (CardTerminalStatus == '39' && DeadboltStatus == '19' && LoadcellStatus == '29' && CameraStatus == '09') {
         console.log('[PAYMENT] Health check passed. Starting Payments process...');
         try {
-            await Payments(token, card_method);
+            await Payments(token, CardMethod);
         } catch (error) {
             console.error("[PAYMENT] Process failed:", error);
         }
@@ -145,10 +215,10 @@ async function startProcess(token, card_method) {
  * @param {Object} paymentResult - 결제 승인(Approve) 후 받은 응답 데이터
  * @param {string} originalToken - SSE로 받았던 초기 토큰 (vankey_hash)
  * @param {string} amount - 취소할 금액
- * @param {string} card_method - 'S'(삼성페이) or 'N'(일반)
+ * @param {string} CardMethod - 'S'(삼성페이) or 'N'(일반)
  */
-async function cancelPayment(paymentResult, originalToken, amount, card_method) {
-    console.log(`[PAYMENT] Initiating Cancellation... Method: ${card_method}`);
+async function cancelPayment(paymentResult, originalToken, amount, CardMethod) {
+    console.log(`[PAYMENT] Initiating Cancellation... Method: ${CardMethod}`);
 
     try {
         let cancelPayload = {};
@@ -160,7 +230,7 @@ async function cancelPayment(paymentResult, originalToken, amount, card_method) 
             throw new Error("Cannot cancel: Missing authorization info from payment result.");
         }
 
-        if (card_method === "S") {
+        if (CardMethod === "S") {
             cancelEndpoint = `${config.cardTerminalApi}/payment/samsung-pay/cancel`;
             
             cancelPayload = {
@@ -170,7 +240,7 @@ async function cancelPayment(paymentResult, originalToken, amount, card_method) 
                 vankey: paymentResult.vankey
             };
 
-        } else if (card_method === "N") {
+        } else if (CardMethod === "N") {
             cancelEndpoint = `${config.cardTerminalApi}/payment/token/cancel`;
 
             cancelPayload = {
@@ -205,7 +275,7 @@ async function cancelPayment(paymentResult, originalToken, amount, card_method) 
 }
 
 // --- 3. 결제 및 제어 로직 ---
-async function Payments(token, card_method) {
+async function Payments(token, CardMethod) {
     const deviceIdx = config.deviceIdx;
     const divisionIdx = config.divisionIdx;
     
@@ -219,13 +289,21 @@ async function Payments(token, card_method) {
     // [4] 카메라 폴더 생성
     const LOCAL_ROOT = path.resolve(process.cwd()); 
     const { folderName, folderPath } = ensureCaptureFolder({ localRoot: LOCAL_ROOT });
-    
-    await requestTopCameraCapture({ folderPath: folderPath, action: 'on' });
 
     //여기서부터 내일 테스트
     // [5] 문 열기 (OPEN)
     const openResult = await callApiToControlDeadbolt("OPEN");
     if (openResult !== "OPEN") throw new Error(`Failed to open door. Status: ${openResult}`);
+    console.log("여기까지 진행됐다 쉬벌")
+
+    // await requestTopCameraCapture({ folderPath: folderPath, action: 'ON' });
+
+    const CameraSaveInfo = await requestTopCameraON({ 
+        zone_id: 0, 
+        include_top: true, 
+        record_video: true,   // [중요] 영상 녹화를 하려면 true여야 합니다 
+        folderPath: folderPath
+    });
 
     // [7] 로드셀 무게 정보 실시간 전달
     
@@ -238,7 +316,7 @@ async function Payments(token, card_method) {
         const closeEventData = await waitForDeadboltClose(); 
         if (closeEventData.state === "CLOSE") {
             receivedLogPath = closeEventData.logPath; // 경로 저장
-            await requestTopCameraCapture({ folderPath: folderPath, action: 'off' });
+            await requestCameraOFF();
         }
     } catch (error) {
         console.error("[Process Error] Door/Camera Sequence:", error);
@@ -254,30 +332,23 @@ async function Payments(token, card_method) {
             log_path: receivedLogPath,
         };
 
-        // 모델 서버 요청 (POST) , endpoint 확인 필요
-        const modelRes = await axios.post(`${config.modelApi}/inference`, inferencePayload);
+        // 모델 서버 요청 (POST) , endpoint 확인 필요, 응답 대기 시간은 60초로 설정
+        const modelRes = await axios.post(`${config.modelApi}/inference`, inferencePayload, { timeout: 60000 });
         const inferenceResult = modelRes.data;
         console.log("[Model] Inference Result:", inferenceResult);
 
-
-        const is_inference_success = modelRes.data.success
-
-        if (is_inference_success === 'success'){
-          const paymentPayload = {
-            amount: inferenceResult.totalPrice,
-            vankey_hash: token
-          }
+        if (modelRes.data.successs === 'success'){
           let paymentResponse = null;
-          if (card_method === "S") {
+          if (CardMethod === "S") {
             paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {
-                    amount: finalAmount, 
+                    amount: inferenceResult.totalPrice, 
                     authorization_type: "PURCHASE",
                     display_message: "SamsungPay Payment"
                 });
           }
-          else if (card_method === "N"){
+          else if (CardMethod === "N"){
             paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/token/approve`, {
-                    amount: finalAmount,
+                    amount: inferenceResult.totalPrice,
                     vankey_hash: token 
                 });
           }
@@ -287,8 +358,18 @@ async function Payments(token, card_method) {
           }
         }
         // 결제 결과 처리
+        let payTime = null
         if (paymentResponse && paymentResponse.status === 200) {
-            console.log("[PAYMENT] Success:", paymentResponse.data);
+            // console.log("[PAYMENT] Success:", paymentResponse.data);
+            payTime = makeTimestampFolderName();
+            sendToPNT(
+              paymentDate = payTime,
+              paymentData = paymentResponse,
+              inferenceData = inferenceResult,
+              folderPath = folderPath,
+              token = token
+            )
+
         } else {
             console.error("[PAYMENT] Failed:", paymentResponse);
         }
