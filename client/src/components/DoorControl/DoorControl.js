@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { api } from '../../services/api';
+import './DoorControlStyles.css';
 
 const DoorControl = ({ doorStatus }) => {
     const [loading, setLoading] = useState(false);
@@ -12,39 +13,52 @@ const DoorControl = ({ doorStatus }) => {
             if (action === 'toggle') await api.door.toggleDeadbolt();
         } catch (error) {
             console.error('Door action failed:', error);
-            alert('Door action failed');
         } finally {
             setLoading(false);
         }
     };
 
-    const getStatusClass = (status) => {
-        if (!status) return 'state';
-        return `state ${status.toUpperCase().includes('OPEN') ? 'open' : 'closed'}`;
-    };
+    const isLocked = doorStatus.deadbolt?.toUpperCase().includes('CLOSED');
+    const isDoorOpen = doorStatus.door?.toUpperCase().includes('OPEN');
 
     return (
-        <div className="card">
-            <div className="card-header">Door Control</div>
-            <div className="card-body">
-                <div className="door-status">
-                    <div className="door-indicator">
-                        <div className="label">Door</div>
-                        <div className={getStatusClass(doorStatus.door)}>
-                            {doorStatus.door || '--'}
-                        </div>
+        <div className="glass-panel door-container">
+            <div className="dc-header">
+                <span className="title">ACCESS CONTROL</span>
+            </div>
+
+            <div className="dc-content">
+                <div className="status-modules">
+                    {/* Door Sensor */}
+                    <div className={`status-module glass-card ${isDoorOpen ? 'warning' : 'secure'}`}>
+                        <span className="module-label">MAIN ENTRY</span>
+                        <span className="module-value font-mono">{isDoorOpen ? 'OPEN' : 'CLOSED'}</span>
+                        <div className={`status-light ${isDoorOpen ? 'red' : 'green'}`}></div>
                     </div>
-                    <div className="door-indicator">
-                        <div className="label">Deadbolt</div>
-                        <div className={getStatusClass(doorStatus.deadbolt)}>
-                            {doorStatus.deadbolt || '--'}
-                        </div>
+
+                    {/* Deadbolt Status */}
+                    <div className={`status-module glass-card ${isLocked ? 'secure' : 'warning'}`}>
+                        <span className="module-label">DEADBOLT</span>
+                        <span className="module-value font-mono">{isLocked ? 'LOCKED' : 'UNLOCKED'}</span>
+                        <div className={`status-light ${isLocked ? 'green' : 'red'}`}></div>
                     </div>
                 </div>
-                <div className="door-controls">
-                    <button onClick={() => handleAction('unlock')} disabled={loading}>Unlock</button>
-                    <button onClick={() => handleAction('lock')} className="secondary" disabled={loading}>Lock</button>
-                    <button onClick={() => handleAction('toggle')} className="secondary" disabled={loading}>Toggle</button>
+
+                <div className="control-actions">
+                    <button
+                        className={`action-btn ${isLocked ? 'unlock-btn' : 'lock-btn'}`}
+                        onClick={() => handleAction(isLocked ? 'unlock' : 'lock')}
+                        disabled={loading}
+                    >
+                        {loading ? '...' : (isLocked ? 'UNLOCK' : 'LOCK')}
+                    </button>
+                    <button
+                        className="action-btn toggle-btn"
+                        onClick={() => handleAction('toggle')}
+                        disabled={loading}
+                    >
+                        TOGGLE
+                    </button>
                 </div>
             </div>
         </div>

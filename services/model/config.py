@@ -225,6 +225,12 @@ class ModelServiceConfig:
     side_weight: float = 0.5  # Side 카메라 가중치
     common_class_bonus: float = 0.2  # 공통 클래스 보너스
 
+    # Motion Tracking 설정 (손-상품 움직임 상관관계)
+    use_motion_tracking: bool = True  # 움직임 추적 사용 여부
+    max_motion_bonus: float = 0.3  # 최대 움직임 보너스
+    min_motion_correlation: float = 0.5  # 보너스 부여 최소 상관관계
+    motion_lookback_frames: int = 3  # 이동 벡터 계산 프레임 수
+
     # 로깅
     log_level: str = field(
         default_factory=lambda: os.getenv("LOG_LEVEL", "INFO")

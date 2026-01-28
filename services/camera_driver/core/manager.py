@@ -554,18 +554,20 @@ class CameraManager:
 
     def init_media_recorder(
         self,
-        base_path: str = "./recordings",
+        base_path: Optional[str] = None,
         fps: Optional[int] = None,
     ) -> None:
         """
         미디어 레코더 초기화.
 
         Args:
-            base_path: 녹화 저장 기본 경로
+            base_path: 녹화 저장 기본 경로 (None이면 settings.media_base_path 사용)
             fps: 영상 FPS
         """
+        # settings.media_base_path 사용 (기본값: "data/")
+        actual_base_path = base_path or settings.media_base_path or "data/"
         config = RecordingConfig(
-            base_path=base_path,
+            base_path=actual_base_path,
             fps=fps or self.fps,
             resolution=self.resolution,
             save_resolution=(settings.save_width, settings.save_height),

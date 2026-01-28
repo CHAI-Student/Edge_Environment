@@ -404,8 +404,9 @@ async def capture_zone_snapshot(zone_id: int, request: ZoneSnapshotRequest) -> d
 
     # 세션 경로 계산
     # 기본 경로: Edge_Environment/data/{session_id}/images/camX
-    project_root = Path(__file__).parent.parent.parent.parent
-    session_path = str(project_root / request.session_id / "images")
+    # settings.media_base_path 사용 (기본값: "data/")
+    base_path = Path(settings.media_base_path) if settings.media_base_path else Path("data/")
+    session_path = str(base_path / request.session_id / "images")
 
     # 응답 형식 (Node.js 클라이언트 호환)
     images = {}

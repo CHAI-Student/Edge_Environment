@@ -596,6 +596,7 @@ async def _run_vision_from_media_paths(
     이미지 경로에서 Vision 추론 수행.
 
     모든 카메라(cam0~cam5)를 자동 탐색하고 개별 결과를 반환합니다.
+    연속 프레임이 있으면 Motion Correlation 분석을 수행하여 보너스를 부여합니다.
 
     Args:
         media_paths: 이미지/영상 경로
@@ -607,24 +608,29 @@ async def _run_vision_from_media_paths(
         - images_processed: 처리된 이미지 경로 목록
         - camera_results: 카메라별 결과 {cam0: {...}, cam1: {...}, ...}
     """
-    from ..vision import YOLOWrapper, Top5Extractor, MultiViewEnsemble
+    from ..vision import (
+        YOLOWrapper, Top5Extractor, MultiViewEnsemble,
+        MotionCorrelationFilter, reset_motion_filter
+    )
 
     vision_candidates = []
     images_processed = []
     camera_results = {}  # cam0, cam1, ... 개별 결과
 
-    # 이미지 파일 경로 수집: (cam_id, cam_type, img_path) 형식
-    image_paths = []
+    # 이미지 파일 경로 수집: (cam_id, cam_type, img_paths) 형식
+    # img_paths는 연속 프레임 리스트 (motion tracking용)
+    camera_image_map = {}  # {cam_id: {"cam_type": str, "images": [path1, path2, ...]}}
 
     # 명시적 top_image/side_image가 있으면 우선 사용
     if media_paths.top_image and os.path.exists(media_paths.top_image):
-        image_paths.append((0, "top", media_paths.top_image))
+        camera_image_map[0] = {"cam_type": "top", "images": [media_paths.top_image]}
 
     if media_paths.side_image and os.path.exists(media_paths.side_image):
-        image_paths.append((zone_id + 1, "side", media_paths.side_image))
+        side_cam_id = zone_id + 1
+        camera_image_map[side_cam_id] = {"cam_type": "side", "images": [media_paths.side_image]}
 
     # image_folder가 있으면 모든 cam0~cam5 자동 탐색
-    if media_paths.image_folder and not image_paths:
+    if media_paths.image_folder and not camera_image_map:
         folder = media_paths.image_folder
         if os.path.isdir(folder):
             # 모든 카메라 폴더 탐색 (cam0 ~ cam5)
@@ -634,16 +640,28 @@ async def _run_vision_from_media_paths(
                 for cam_name in cam_names:
                     cam_dir = os.path.join(folder, cam_name)
                     if os.path.isdir(cam_dir):
-                        # 이미지 파일 탐색
-                        for img_file in ["snapshot.jpg", "frame.jpg", "capture.jpg", "frame_0001.jpg"]:
-                            img_path = os.path.join(cam_dir, img_file)
-                            if os.path.exists(img_path):
-                                cam_type = "top" if cam_id == 0 else "side"
-                                image_paths.append((cam_id, cam_type, img_path))
-                                break
+                        cam_type = "top" if cam_id == 0 else "side"
+
+                        # 연속 프레임 탐색 (frame_0001.jpg, frame_0002.jpg, ...)
+                        frame_files = sorted([
+                            f for f in os.listdir(cam_dir)
+                            if f.startswith("frame_") and f.endswith(".jpg")
+                        ])
+
+                        if frame_files:
+                            # 연속 프레임 발견 → Motion Tracking 가능
+                            frame_paths = [os.path.join(cam_dir, f) for f in frame_files]
+                            camera_image_map[cam_id] = {"cam_type": cam_type, "images": frame_paths}
+                        else:
+                            # 단일 스냅샷 탐색
+                            for img_file in ["snapshot.jpg", "frame.jpg", "capture.jpg"]:
+                                img_path = os.path.join(cam_dir, img_file)
+                                if os.path.exists(img_path):
+                                    camera_image_map[cam_id] = {"cam_type": cam_type, "images": [img_path]}
+                                    break
                         break  # 한 형식에서 찾았으면 다른 형식 탐색 불필요
 
-    if not image_paths:
+    if not camera_image_map:
         logger.warning(
             f"No valid images found in media_paths: folder={media_paths.image_folder}, "
             f"top={media_paths.top_image}, side={media_paths.side_image}"
@@ -657,13 +675,69 @@ async def _run_vision_from_media_paths(
 
         yolo = YOLOWrapper(model_path=config.yolo_model_path)
         top5_extractor = Top5Extractor()  # 내부적으로 HandProximityFilter 사용
-        ensemble = MultiViewEnsemble()
+        ensemble = MultiViewEnsemble(use_motion_tracking=config.use_motion_tracking)
+
+        # Motion Tracking 필터 초기화
+        motion_filter = MotionCorrelationFilter(
+            max_motion_bonus=config.max_motion_bonus,
+            min_correlation=config.min_motion_correlation,
+            lookback_frames=config.motion_lookback_frames,
+        )
 
         top_candidates = []
         all_side_candidates = []
+        motion_bonus_map = {}
 
-        for cam_id, cam_type, img_path in image_paths:
+        # 연속 프레임이 있는지 확인
+        has_multiple_frames = any(len(info["images"]) > 1 for info in camera_image_map.values())
+
+        if has_multiple_frames:
+            # ═══════════════════════════════════════════════════════════════
+            # 연속 프레임 처리: Motion Tracking 수행
+            # ═══════════════════════════════════════════════════════════════
+            logger.info("Multiple frames detected, enabling motion tracking")
+
+            # 모든 카메라의 최대 프레임 수
+            max_frames = max(len(info["images"]) for info in camera_image_map.values())
+
+            # 프레임별로 순차 처리
+            for frame_idx in range(max_frames):
+                all_frame_detections = []
+
+                for cam_id, info in camera_image_map.items():
+                    if frame_idx >= len(info["images"]):
+                        continue
+
+                    img_path = info["images"][frame_idx]
+                    image = cv2.imread(img_path)
+                    if image is None:
+                        continue
+
+                    # YOLO 추론
+                    detections = yolo.detect(image)
+                    all_frame_detections.extend(detections)
+
+                    # 마지막 프레임이면 처리된 이미지 목록에 추가
+                    if frame_idx == max_frames - 1:
+                        images_processed.append(img_path)
+
+                # Motion Filter 업데이트 (프레임별 호출로 히스토리 축적)
+                if all_frame_detections:
+                    motion_bonus_map = motion_filter.get_motion_bonus_map(all_frame_detections)
+
+            logger.info(
+                f"Motion tracking completed: {max_frames} frames, "
+                f"{len(motion_bonus_map)} products with motion data"
+            )
+
+        # ═══════════════════════════════════════════════════════════════
+        # 마지막 프레임 (또는 단일 스냅샷) 처리: 카메라별 결과 수집
+        # ═══════════════════════════════════════════════════════════════
+        for cam_id, info in camera_image_map.items():
             cam_key = f"cam{cam_id}"
+            cam_type = info["cam_type"]
+            img_path = info["images"][-1]  # 마지막 프레임
+
             try:
                 # 이미지 로드
                 image = cv2.imread(img_path)
@@ -673,13 +747,15 @@ async def _run_vision_from_media_paths(
                         "detected": False,
                         "confidence": 0.0,
                         "candidates": [],
+                        "motion_bonus": 0.0,
                         "error": "failed_to_load",
                     }
                     continue
 
                 # YOLO 추론
                 detections = yolo.detect(image)
-                images_processed.append(img_path)
+                if img_path not in images_processed:
+                    images_processed.append(img_path)
 
                 logger.info(f"YOLO detection result for {img_path}: {len(detections)} objects")
                 for det in detections[:5]:  # 상위 5개만 로그
@@ -691,25 +767,35 @@ async def _run_vision_from_media_paths(
                         "detected": False,
                         "confidence": 0.0,
                         "candidates": [],
+                        "motion_bonus": 0.0,
                     }
                     continue
+
+                # 단일 스냅샷인데 motion tracking 안 했으면 여기서 업데이트
+                if not has_multiple_frames and config.use_motion_tracking:
+                    motion_bonus_map = motion_filter.get_motion_bonus_map(detections)
 
                 # Top-5 추출 (내부에서 손 근접 필터링 수행)
                 top5_result = top5_extractor.extract(detections)
 
-                # 카메라별 결과 저장
-                candidates_list = [
-                    {
-                        "class_name": c.class_name,
-                        "class_id": c.class_id,
-                        "confidence": round(c.confidence, 3),
-                    }
-                    for c in top5_result.candidates
-                ]
-                max_conf = max((c.confidence for c in top5_result.candidates), default=0.0)
+                # 카메라별 결과 저장 (motion_bonus 포함)
+                candidates_list = []
+                for c in top5_result.candidates:
+                    m_bonus = motion_bonus_map.get(c.cls, 0.0)
+                    candidates_list.append({
+                        "class_name": c.name,
+                        "class_id": c.cls,
+                        "confidence": round(c.conf, 3),
+                        "motion_bonus": round(m_bonus, 3),
+                    })
+
+                max_conf = max((c.conf for c in top5_result.candidates), default=0.0)
+                max_motion = max((motion_bonus_map.get(c.cls, 0.0) for c in top5_result.candidates), default=0.0)
+
                 camera_results[cam_key] = {
                     "detected": len(top5_result.candidates) > 0,
                     "confidence": round(max_conf, 3),
+                    "motion_bonus": round(max_motion, 3),
                     "candidates": candidates_list,
                 }
 
@@ -730,24 +816,34 @@ async def _run_vision_from_media_paths(
                     "detected": False,
                     "confidence": 0.0,
                     "candidates": [],
+                    "motion_bonus": 0.0,
                     "error": str(e),
                 }
                 continue
 
-        # Multi-View Ensemble (Top + 모든 Side 카메라 합산)
+        # ═══════════════════════════════════════════════════════════════
+        # Multi-View Ensemble (Motion Bonus 포함)
+        # ═══════════════════════════════════════════════════════════════
         if top_candidates or all_side_candidates:
-            vision_candidates = ensemble.ensemble(top_candidates, all_side_candidates)
+            vision_candidates = ensemble.ensemble(
+                top_candidates,
+                all_side_candidates,
+                motion_bonus_map=motion_bonus_map,
+            )
+
+            motion_applied = sum(1 for v in vision_candidates if motion_bonus_map.get(v.class_id, 0) > 0)
             logger.info(
                 f"Ensemble result: {len(vision_candidates)} candidates "
-                f"(top={len(top_candidates)}, sides={len(all_side_candidates)})"
+                f"(top={len(top_candidates)}, sides={len(all_side_candidates)}, "
+                f"motion_bonus_applied={motion_applied})"
             )
 
     except ImportError as e:
         logger.warning(f"Vision dependencies not available: {e}")
-        images_processed = [path for _, _, path in image_paths]
+        images_processed = [info["images"][-1] for info in camera_image_map.values()]
     except Exception as e:
         logger.error(f"Vision pipeline error: {e}", exc_info=True)
-        images_processed = [path for _, _, path in image_paths]
+        images_processed = [info["images"][-1] for info in camera_image_map.values()]
 
     return vision_candidates, images_processed, camera_results
 

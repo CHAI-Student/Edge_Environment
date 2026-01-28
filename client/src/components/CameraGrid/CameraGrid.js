@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '../../services/api';
+import './CameraGridStyles.css';
 
 const CameraGrid = () => {
     const [cameras, setCameras] = useState(Array(6).fill({ status: 'unknown', preview: null }));
-    const cameraNames = ['Top Camera', 'Zone 0 Side', 'Zone 1 Side', 'Zone 2 Side', 'Zone 3 Side', 'Zone 4 Side'];
+    const cameraNames = ['TOP VIEW', 'ZONE 0', 'ZONE 1', 'ZONE 2', 'ZONE 3', 'ZONE 4'];
 
     const updateCamera = (index, updates) => {
         setCameras(prev => {
@@ -36,9 +37,8 @@ const CameraGrid = () => {
     }, []);
 
     const handleCapture = async (index) => {
-        updateCamera(index, { preview: null, loading: true }); // Clear/Loading state
+        updateCamera(index, { preview: null, loading: true });
         try {
-            // Try getting base64 frame first
             const data = await api.camera.getFrame(index);
             if (data.frame) {
                 updateCamera(index, {
@@ -50,8 +50,6 @@ const CameraGrid = () => {
                 throw new Error("No frame data");
             }
         } catch (error) {
-            console.warn(`Base64 capture failed for cam ${index}, trying raw URL fallback`, error);
-            // Fallback to raw URL
             const url = api.camera.getPreviewUrl(index);
             updateCamera(index, {
                 preview: url,
@@ -69,42 +67,48 @@ const CameraGrid = () => {
 
 
     return (
-        <div className="card">
-            <div className="card-header">Cameras</div>
-            <div className="card-body">
-                <div className="camera-grid">
-                    {cameras.map((cam, i) => (
-                        <div key={i} className="camera-item">
-                            <div className="camera-header">
-                                <span className="camera-name">{cameraNames[i]}</span>
-                                <button
-                                    onClick={() => handleCapture(i)}
-                                    style={{ padding: '2px 6px', fontSize: '10px', flex: 'none', marginRight: '5px' }}
-                                >
-                                    Shot
-                                </button>
-                                <span className={`status-dot ${cam.status}`}></span>
-                            </div>
-                            <div className="camera-preview">
-                                {cam.loading ? (
-                                    <div style={{ color: 'var(--warning)' }}>Capturing...</div>
-                                ) : cam.preview ? (
-                                    <img
-                                        src={cam.preview}
-                                        alt={`Camera ${i}`}
-                                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                        onError={(e) => {
-                                            e.target.style.display = 'none';
-                                            e.target.parentElement.innerText = 'Preview Error';
-                                        }}
-                                    />
-                                ) : (
-                                    'No preview'
-                                )}
-                            </div>
+        <div className="glass-panel camera-container">
+            <div className="cam-header">
+                <span className="title">VISION FEEDS</span>
+                <span className="subtitle">{cameras.filter(c => c.status === 'healthy').length}/6 ONLINE</span>
+            </div>
+            <div className="cam-grid">
+                {cameras.map((cam, i) => (
+                    <div key={i} className="cam-feed glass-card">
+                        <div className="cam-overlay-header">
+                            <span className="cam-id">CAM.{i}</span>
+                            <span className={`cam-status ${cam.status}`}></span>
                         </div>
-                    ))}
-                </div>
+
+                        <div className="cam-viewport">
+                            {cam.loading ? (
+                                <div className="cam-loading">
+                                    <div className="loading-spinner"></div>
+                                    <span>CONNECTING...</span>
+                                </div>
+                            ) : cam.preview ? (
+                                <img
+                                    src={cam.preview}
+                                    alt={`Camera ${i}`}
+                                    className="cam-image"
+                                    onError={(e) => {
+                                        e.target.style.display = 'none';
+                                        e.target.parentElement.classList.add('error');
+                                    }}
+                                />
+                            ) : (
+                                <div className="cam-offline">NO SIGNAL</div>
+                            )}
+                        </div>
+
+                        <div className="cam-controls">
+                            <span className="cam-label">{cameraNames[i]}</span>
+                            <button className="snap-btn" onClick={() => handleCapture(i)}>
+                                SNAP
+                            </button>
+                        </div>
+                    </div>
+                ))}
             </div>
         </div>
     );

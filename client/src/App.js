@@ -18,7 +18,7 @@ function App() {
   const [isConfigOpen, setIsConfigOpen] = useState(false);
 
   const handleResetBaseline = async () => {
-    if (window.confirm('Reset weight baseline?')) {
+    if (window.confirm('RESET BASELINE CALIBRATION?')) {
       await api.weight.resetBaseline();
     }
   };
@@ -33,26 +33,47 @@ function App() {
       <LoadcellGrid loadcells={sse.loadcellData} />
       <DoorControl doorStatus={sse.doorStatus} />
 
-      <div className="card">
-        <div className="card-header">Controls</div>
-        <div className="card-body">
-          <div className="controls-row">
-            <button onClick={handleResetBaseline}>Reset Baseline</button>
-            <button onClick={() => dashboard.refresh()} className="secondary">Refresh</button>
-            <button onClick={handleInitCameras} className="secondary">Init Cameras</button>
+      <div className="glass-panel" style={{ padding: '16px', borderRadius: '12px' }}>
+        <div style={{
+          borderBottom: '1px solid rgba(255,255,255,0.05)',
+          paddingBottom: '8px',
+          marginBottom: '12px',
+          fontSize: '12px',
+          fontWeight: '700',
+          color: 'var(--text-secondary)',
+          letterSpacing: '2px'
+        }}>
+          SYSTEM CONTROLS
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button onClick={handleResetBaseline} className="glass-btn" style={{ flex: 1 }}>
+            RESET CALIBRATION
+          </button>
+          <button onClick={() => dashboard.refresh()} className="glass-btn" style={{ flex: 1 }}>
+            REFRESH DATA
+          </button>
+          <button onClick={handleInitCameras} className="glass-btn" style={{ flex: 1 }}>
+            INIT CAMERAS
+          </button>
+        </div>
+
+        <div style={{ marginTop: '8px' }}>
+          <button onClick={() => setIsConfigOpen(true)} className="glass-btn" style={{ width: '100%' }}>
+            CONFIGURATION
+          </button>
+        </div>
+
+        <div style={{ marginTop: '16px', fontSize: '9px', color: 'var(--text-secondary)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+            <span>NVIDIA MODE</span>
+            <span className="font-mono text-primary">{dashboard.config.nvidiaMode ? 'ACTIVE' : 'DISABLED'}</span>
           </div>
-          <div className="controls-row" style={{ marginTop: '8px' }}>
-            <button onClick={() => setIsConfigOpen(true)} className="secondary">Config</button>
-          </div>
-          <div className="config-list" style={{ marginTop: '15px' }}>
-            <div className="config-item">
-              <span className="key">Nvidia Mode</span>
-              <span className="value">{dashboard.config.nvidiaMode ? 'Enabled' : '-'}</span>
-            </div>
-            <div className="config-item">
-              <span className="key">SSE Status</span>
-              <span className="value">{sse.status.connected ? 'Connected' : 'Disconnected'}</span>
-            </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>EVENT STREAM</span>
+            <span className={`font-mono ${sse.status.connected ? 'text-success' : 'text-error'}`}>
+              {sse.status.connected ? 'CONNECTED' : 'DISCONNECTED'}
+            </span>
           </div>
         </div>
       </div>
@@ -61,9 +82,15 @@ function App() {
 
   const rightPanel = (
     <>
-      <CameraGrid />
-      <ModelTest modelInfo={dashboard.modelInfo} />
-      <EventLog realTimeLogs={sse.logs} />
+      <div style={{ flex: '0 0 auto' }}>
+        <CameraGrid />
+      </div>
+      <div style={{ flex: '0 0 auto' }}>
+        <ModelTest modelInfo={dashboard.modelInfo} />
+      </div>
+      <div style={{ flex: '1 1 auto', minHeight: 0 }}>
+        <EventLog realTimeLogs={sse.logs} />
+      </div>
     </>
   );
 

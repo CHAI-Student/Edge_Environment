@@ -1,0 +1,68 @@
+.loadcell-container {
+    padding: 16px;
+    border-radius: 12px;
+}
+
+.lc-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 8px;
+}
+
+.lc-header .title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    letter-spacing: 2px;
+}
+
+.lc-header .subtitle {
+    font-size: 9px;
+    color: var(--accent-cyan);
+    letter-spacing: 1px;
+}
+
+.loadcells-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+}
+
+.lc-item {
+    padding: 8px;
+    border-radius: 6px;
+    text-align: center;
+    position: relative;
+}
+
+.lc-channel {
+    font-size: 8px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.lc-value {
+    font-size: 13px;
+    color: var(--text-primary);
+    font-weight: bold;
+    z-index: 2;
+    position: relative;
+}
+
+.lc-bar-container {
+    height: 2px;
+    background: rgba(255, 255, 255, 0.1);
+    margin-top: 6px;
+    border-radius: 1px;
+    overflow: hidden;
+}
+
+.lc-bar {
+    height: 100%;
+    background: var(--accent-cyan);
+    box-shadow: 0 0 5px var(--accent-cyan-glow);
+    transition: width 0.2s ease;
+}

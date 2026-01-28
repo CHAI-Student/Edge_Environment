@@ -1,0 +1,150 @@
+.event-container {
+    padding: 16px;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 300px;
+}
+
+.section-title {
+    font-size: 10px;
+    color: var(--text-secondary);
+    font-weight: 700;
+    margin-bottom: 8px;
+    letter-spacing: 1px;
+}
+
+.rt-log-viewer {
+    height: 150px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 6px;
+    padding: 8px;
+    margin-bottom: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.rt-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    font-size: 10px;
+}
+
+.rt-time {
+    color: var(--text-secondary);
+    width: 50px;
+}
+
+.rt-type-badge {
+    padding: 2px 4px;
+    border-radius: 2px;
+    font-size: 8px;
+    font-weight: bold;
+    text-transform: uppercase;
+    width: 60px;
+    text-align: center;
+}
+
+.rt-type-badge.weight {
+    background: rgba(34, 211, 238, 0.2);
+    color: var(--accent-cyan);
+}
+
+.rt-type-badge.judgment {
+    background: rgba(232, 121, 249, 0.2);
+    color: var(--accent-magenta);
+}
+
+.rt-type-badge.door {
+    background: rgba(250, 204, 21, 0.2);
+    color: var(--warning);
+}
+
+.rt-content {
+    color: var(--text-primary);
+    flex: 1;
+}
+
+.pos {
+    color: var(--success);
+}
+
+.neg {
+    color: var(--error);
+}
+
+.history-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.tabs-row {
+    display: flex;
+    margin-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tab-btn {
+    padding: 6px 12px;
+    font-size: 9px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
+}
+
+.tab-btn.active {
+    color: var(--accent-cyan);
+    border-bottom-color: var(--accent-cyan);
+}
+
+.history-table-container {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.glass-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10px;
+}
+
+.glass-table th {
+    text-align: left;
+    color: var(--text-secondary);
+    padding: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+    /* Needs solid bg to cover scroll */
+}
+
+.glass-table td {
+    padding: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+
+.glass-table tr:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.empty-state,
+.loading-state {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-style: italic;
+}

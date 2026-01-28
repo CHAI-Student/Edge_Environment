@@ -1,14 +1,35 @@
 :root {
-  --bg-primary: #1a1a2e;
-  --bg-secondary: #16213e;
-  --bg-card: #0f3460;
-  --bg-card-hover: #1a4a80;
-  --text-primary: #eaeaea;
-  --text-secondary: #a0a0a0;
-  --accent: #e94560;
-  --accent-hover: #c73e54;
-  --success: #4ade80;
-  --warning: #fbbf24;
-  --error: #ef4444;
-  --border: #2a3f5f;
+    /* Backgrounds */
+    --bg-primary: #0f172a;
+    /* Deep Space */
+    --bg-secondary: #1e293b;
+    --bg-glass: rgba(30, 41, 59, 0.7);
+    --bg-glass-heavy: rgba(15, 23, 42, 0.85);
+
+    /* Text */
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --text-highlight: #38bdf8;
+    /* Cyan */
+
+    /* Accents */
+    --accent-cyan: #22d3ee;
+    --accent-cyan-glow: rgba(34, 211, 238, 0.5);
+    --accent-magenta: #e879f9;
+    --accent-magenta-glow: rgba(232, 121, 249, 0.5);
+
+    /* Status */
+    --success: #4ade80;
+    --success-glow: rgba(74, 222, 128, 0.5);
+    --warning: #facc15;
+    --error: #ef4444;
+    --error-glow: rgba(239, 68, 68, 0.5);
+
+    /* Borders & Shadows */
+    --border-glass: rgba(255, 255, 255, 0.1);
+    --shadow-neon: 0 0 10px rgba(34, 211, 238, 0.2);
+
+    /* Layout */
+    --header-height: 70px;
+    --sidebar-width: 250px;
 }

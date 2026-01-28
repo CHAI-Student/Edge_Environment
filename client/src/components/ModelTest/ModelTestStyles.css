@@ -1,0 +1,215 @@
+.model-container {
+    padding: 16px;
+    border-radius: 12px;
+}
+
+.mt-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 8px;
+}
+
+.mt-header .title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    letter-spacing: 2px;
+}
+
+.mt-header .subtitle {
+    font-size: 9px;
+    color: var(--accent-magenta);
+}
+
+.control-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.input-group {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.input-group label {
+    font-size: 9px;
+    color: var(--text-secondary);
+    letter-spacing: 1px;
+}
+
+.glass-input {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    padding: 8px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    outline: none;
+}
+
+.glass-input:focus {
+    border-color: var(--accent-cyan);
+    box-shadow: 0 0 5px var(--accent-cyan-glow);
+}
+
+.action-group {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+}
+
+.glass-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    transition: all 0.2s;
+    height: 35px;
+    /* Match input height approx */
+}
+
+.glass-btn.primary {
+    background: rgba(34, 211, 238, 0.1);
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+}
+
+.glass-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.glass-btn.primary:hover {
+    background: var(--accent-cyan);
+    color: #000;
+    box-shadow: 0 0 10px var(--accent-cyan-glow);
+}
+
+.glass-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: transparent;
+}
+
+/* Stepper */
+.workflow-stepper {
+    display: flex;
+    justify-content: space-between;
+    position: relative;
+    margin: 20px 0;
+    padding: 0 10px;
+}
+
+.progress-line {
+    position: absolute;
+    top: 5px;
+    left: 10px;
+    height: 2px;
+    background: var(--accent-magenta);
+    box-shadow: 0 0 5px var(--accent-magenta-glow);
+    z-index: 0;
+    transition: width 0.3s ease;
+}
+
+.step-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    z-index: 1;
+    width: 40px;
+}
+
+.step-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg-secondary);
+    border: 2px solid var(--text-secondary);
+    transition: all 0.3s;
+}
+
+.step-item.active .step-dot {
+    border-color: var(--accent-magenta);
+    background: var(--bg-secondary);
+    box-shadow: 0 0 8px var(--accent-magenta-glow);
+}
+
+.step-item.completed .step-dot {
+    background: var(--accent-magenta);
+    border-color: var(--accent-magenta);
+}
+
+.step-label {
+    font-size: 8px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+}
+
+.step-item.active .step-label {
+    color: var(--accent-magenta);
+}
+
+/* Logs & Results */
+.mini-log {
+    font-size: 10px;
+    color: var(--text-secondary);
+    background: rgba(0, 0, 0, 0.3);
+    padding: 8px;
+    border-radius: 4px;
+    margin-bottom: 12px;
+}
+
+.result-panel {
+    padding: 12px;
+    border-radius: 6px;
+}
+
+.res-header {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 4px;
+}
+
+.res-grid {
+    display: flex;
+    justify-content: space-between;
+}
+
+.res-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.res-row span:first-child {
+    font-size: 8px;
+    color: var(--text-secondary);
+}
+
+.highlight {
+    color: var(--text-primary);
+    font-weight: bold;
+    font-size: 12px;
+}
+
+.conf.high {
+    color: var(--success);
+}
+
+.conf.low {
+    color: var(--warning);
+}
