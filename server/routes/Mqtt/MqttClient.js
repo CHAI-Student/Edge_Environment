@@ -69,15 +69,15 @@ function waitForConnect(c, timeoutMs = 8000) {
   });
 }
 
-async function subscribe(topics, qos = 0) {
+async function subscribe(topics, qos = 1) {
   const c = getClient();
   const list = Array.isArray(topics) ? topics : [topics];
 
   await waitForConnect(c); // 연결 보장
 
   return new Promise((resolve, reject) => {
-    // QoS는 요구사항에 맞게 조절 (0/1/2)
-    c.subscribe(list, { qos: 1 }, (err, granted) => {
+    // QoS 1: At least once delivery (메시지 손실 방지)
+    c.subscribe(list, { qos }, (err, granted) => {
       if (err) return reject(err);
       console.log("[MQTT] subscribed:", granted);
       resolve(granted);

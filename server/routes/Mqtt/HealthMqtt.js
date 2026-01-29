@@ -71,7 +71,7 @@ async function LoadcellStatusAPI() {
   let LoadcellState = '29'
   try {
     console.log(`[IO-BOARD/LOADCELL] Sending Request to ${config.ioboardApi}`);
-    const LoadcellRes = await axios.get(`${config.ioboardApi}/loadcell`, { timeout: 5000 });
+    const LoadcellRes = await axios.get(`${config.ioboardApi}/loadcells`, { timeout: 5000 });
     console.log(LoadcellRes.data)
     if (LoadcellRes.data.loadcells) {
       console.log('[LOADCELL] Loadcell connect successful')
@@ -137,8 +137,8 @@ async function CameraStatusAPI() {
   //camera status check
   let CameraState = '09'
   try {
-    console.log(`[CAMERA] Sending Request to ${config.cameraApi}`);
-    const CameraRes = await axios.get(`${config.cameraApi}/health`, { timeout: 5000 });
+    console.log(`[CAMERA] Sending Request to ${config.cameraApi}/api/health`);
+    const CameraRes = await axios.get(`${config.cameraApi}/api/health`, { timeout: 5000 });
     console.log(CameraRes.data)
     if (CameraRes.data) {
       CameraState = '09'
