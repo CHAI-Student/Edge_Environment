@@ -94,5 +94,21 @@ module.exports = {
       max_restarts: 10,
       restart_delay: 2000,
     },
+
+    // Python mqtt_client 서비스 (포트 8006) - MQTT IF04 프로토콜
+    {
+      name: "mqtt-client",
+      cwd: "./services/mqtt_client",
+      script: "python",
+      args: "-m uvicorn main:app --host 0.0.0.0 --port 8006",
+      interpreter: "none",
+      env: {
+        PYTHONUNBUFFERED: "1",
+      },
+      watch: false,
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 2000,
+    },
   ],
 };

@@ -4,10 +4,16 @@
   "description": "Edge Environment setting for CHAI project - main server(js)",
   "main": "index.js",
   "scripts": {
-    "start": "node server/index.js",
-    "backend": "nodemon server/index.js",
-    "frontend": "npm run start --prefix client",
-    "dev": "concurrently \"npm run backend\" \"npm run start --prefix client\"",
+    "start": "pm2 start ecosystem.config.js",
+    "stop": "pm2 stop all",
+    "restart": "pm2 restart all",
+    "logs": "pm2 logs",
+    "status": "pm2 status",
+    "delete": "pm2 delete all",
+    "start:server": "node server/index.js",
+    "start:server:dev": "nodemon server/index.js",
+    "start:frontend": "npm run start --prefix client",
+    "dev": "concurrently \"npm run start:server:dev\" \"npm run start:frontend\"",
     "test": "node server/test/MqttReboot.js"
   },
   "repository": {
