@@ -1,11 +1,14 @@
 require("dotenv").config();
 const axios = require("axios");
 const config = require("../../config/key");
-const { callCardTerminalStatusApi, callIOStatusApi } = require("../Mqtt/HealthMqtt");
-const { callApiToControlDoor } = require('../Mqtt/DoorApiService')
+const express = require("express");
+const router = express.Router();
+const { CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI } = require('../Mqtt/HealthMqtt')
 const { ProductList } = require("./ProductList");
 const fs = require("fs");
 const path = require("path");
+const { callApiToControlDeadbolt } = require('../Mqtt/DeadboltApiService'); // [추가] 도어 제어 함수 임포트 가정
+const { EventSource } = require('eventsource');
 
 function FolderName(d = new Date()) {
   const yyyy = d.getFullYear();
@@ -23,85 +26,275 @@ function MakeCameraFolder({ localRoot } = {}) {
 
   const folderName = FolderName();
   const folderPath = path.join(localRoot, folderName);
-
   fs.mkdirSync(folderPath, { recursive: true });
-
   return { folderName, folderPath };
 }
 
-async function requestCamera({cameraUrl, folderPath,
-}) {
-  if (!cameraUrl) throw new Error("cameraServerBaseUrl is required");
-  if (!folderPath) throw new Error("folderPath is required");
+// // 2. 장비 상태 체크
+// // const apiCardTerminalStatus = callCardTerminalStatusApi();
+// // const apiDeadboltStatus = callIOStatusApi();
+// const CardTerminalStatus = "39" // 현재는 값을 못불러오니, 이렇게 지정
+// const DeadboltStatus = "19" // 현재는 값을 못불러오니, 이렇게 지정
+// const LoadcellStatus = "29" // 현재는 값을 못불러오니, 이렇게 지정
+// const CameraStatus = "09" // 현재는 값을 못불러오니, 이렇게 지정
 
-  const controller = new AbortController();
-}
+// if (CardTerminalStatus == '39' && DeadboltStatus == '19' && LoadcellStatus == '29' && CameraStatus == '09') {
+//     console.log('[PAYMENT] health check passed, starting Payments process')
+//     Payments();
+// } else {
+//     console.log('[PAYMENT] health status is bad, it cannot run')
+// }
 
+async function init() {
+    // --- 1. 이벤트 리스너 설정 ---
+    const TokenHandler = new EventSource(`${config.cardTerminalApi}/sse`);
+    console.log("[Card Terminal] Listening for card tokens...");
 
-async function Payments() {
-    const deviceIdx = config.deviceIdx;
-    const divisionIdx = config.divisionIdx;
-    const jwtToken = config.jwtToken;
-
-    // 토큰 생성 확인 전달 (sensor → node)
-
-    // 냉장고 상태 체크 + 상품정보(IF11) 뷸러오기
-    const apiCardTerminalStatus = await callCardTerminalStatusApi();
-    const apiDeadboltStatus = await callIOStatusApi();
-    if (apiCardTerminalStatus == '39' && apiDeadboltStatus == '19') {
-        console.log('[HEALTH-CHECK] status is ok')
-        const productData = await ProductList({
-            division_idx: divisionIdx,
-            device_idx: deviceIdx
-        })
-        console.log("[ProductList] response:");
-        console.dir(productData, { depth: null });
-        return productData;
-    } else {
-        console.log('[HEALTH-CHECK] the status is bad, it cannot run')
-    }
-
-    // 상단 카메라 request (node → sensor) + 폴더경로 지정
-    const LOCAL_ROOT = path.resolve(process.cwd()); 
-    // 1) 폴더 생성
-    const { folderName, folderPath } = MakeCameraFolder({ localRoot: LOCAL_ROOT });
-    console.log("[CameraFolder]", { folderName, folderPath });
-    // 카메라 실행
-    // 2) 상단 카메라 서버로 저장 경로 전달 + 촬영 요청
-    const cameraUrl = config.cameraUrl
-
-    const camRes = await requestCamera({
-        cameraUrl,
-        folderPath,
+    TokenHandler.addEventListener('tx_token_generate', (event) => {
+        // e {"status": "Y", "vankey_hash": "0027057596824048aafeea42", "card_info": {"SERIAL_NUMBER": "", "ACQUIRER_ID": "003", "ACQUIRER_NAME": "\ud558\ub098\uce74\ub4dc", "ISSUER_ID": "003", "ISSUER_NAME": "\ud1a0\uc2a4\ubc45\ud06c\uce74\ub4dc", "MERCHANT_ID": "00915100663"}, "response_code": 0, "message": ""}
+        console.log('e', event.data)
+        if (event.data) {
+            try {
+                token = event.data.vankey_hash;
+                // const card_method = token.startsWith("SPAYKEY") ? "S" : "N"
+                const card_method = 'N'
+                // S = 삼성페이, N = 일반카드
+                console.log('[CardToken] Token received:', token);
+                
+                // 토큰을 받으면 프로세스 시작 (비동기 호출)
+                startProcess(token, card_method); 
+            } catch (err) {
+                console.error('[CardToken] Error parsing token:', err);
+            }
+        } else {
+            console.log('[CardToken] No token data received');
+        }
     });
 
-    console.log("[Camera] response:");
-    console.dir(camRes, { depth: null });
-
-    // 데드볼트 request (node → sensor)
-    const apiResultState = await callApiToControlDoor(targetState);
-    if (apiResultState === "OPEN" || apiResultState === "CLOSE") {
-        finalState = apiResultState;
-        resultMsg = finalState === "OPEN" ? "Door is opened" : "Door is closed";
-    } else {
-        throw new Error(`Unexpected API response: ${apiResultState}`);
+    /**
+     {
+        "amount": "000005000",
+        "authorization_type": "PURCHASE",
+        "display_message": "삼성페이 결제"
     }
-    // 상품 정보(상품명, 무게, 재고) + 스냅샷 경로 (node → model)
+     */
+    TokenHandler.addEventListener('samsung_pay_init', (event) => {
+        console.log('samsungpay::::', event.data); // {}
+    });
 
-    // 로드셀 무게 변화 감지 시
-    // → 폴더 생성 + 측면 카메라 on (sensor python → node → camera python)	
-    // loadcell event Y → N으로 바뀌면 cam python server req X → 10초 뒤에 카메라 off
+    // rfid:::: {"data": "1763193013"}
+    TokenHandler.addEventListener('rfid_init', (event) => {
+        console.log('rfid::::', event.data)
+    });
+}
+// const DeadboltHandler = axios.post(`${config.ioboardApi}/deadbolt`); // 엔드포인트 확인 필요
+// function waitForDeadboltClose() {
+//     return new Promise((resolve) => {
+//         console.log("[Door] Waiting for CLOSE event & Log Path from sensor...");
 
-    // 데드볼트 상태 (close) (sensor → node)
+//         const statusHandler = (event) => {
+//             if (!event.data) return;
+//             try {
+//                 const data = JSON.parse(event.data);
+//                 const currentState = data.state || data; 
+//                 const logPath = data.log_path || data.logPath || null; // 로그 경로 추출
 
-    // 추론 후 결제 정보(총 가격, 상품명, 개수) 전달 (model → node) → 판단시 완전/불완전 상태 파악 필요
+//                 if (currentState === "CLOSE") {
+//                     console.log(`[Door] Event Received: CLOSE. (LogPath: ${logPath})`);
+                    
+//                     DeadboltHandler.removeEventListener('status', statusHandler);
+                    
+//                     // 상태뿐만 아니라 로그 경로도 함께 반환
+//                     resolve({ 
+//                         state: "CLOSE", 
+//                         logPath: logPath 
+//                     });
+//                 }
+//             } catch (err) {
+//                 console.error("[Door] Event parsing error:", err);
+//             }
+//         };
+//         DeadboltHandler.addEventListener('status', statusHandler);
+//     });
+// }
 
-    // 단말기로 가격 + 토큰 전달(node → sensor)
- 
-    // 결제 승인 결과 확인(sensor → node)
+// --- 2. 프로세스 시작 및 상태 체크 ---
+async function startProcess(token, card_method) {
+    // const LoadcellStatus = LoadcellStatusAPI
+    const CameraStatus = '09'
+    const CardTerminalStatus = await CardTerminalStatusAPI()
+    // const DeadboltStatus = DeadboltStatusAPI
+    const DeadboltStatus = '19'
+    const LoadcellStatus = '29'
 
-    // 결제 정보 → PNT
+    if (CardTerminalStatus == '39' && DeadboltStatus == '19' && LoadcellStatus == '29' && CameraStatus == '09') {
+        console.log('[PAYMENT] Health check passed. Starting Payments process...');
+        try {
+            await Payments(token, card_method);
+        } catch (error) {
+            console.error("[PAYMENT] Process failed:", error);
+        }
+    } else {
+        console.error('[PAYMENT] Health status is bad. Cannot run.');
+    }
+}
+
+/**
+ * 결제 취소 요청 함수
+ * @param {Object} paymentResult - 결제 승인(Approve) 후 받은 응답 데이터
+ * @param {string} originalToken - SSE로 받았던 초기 토큰 (vankey_hash)
+ * @param {string} amount - 취소할 금액
+ * @param {string} card_method - 'S'(삼성페이) or 'N'(일반)
+ */
+async function cancelPayment(paymentResult, originalToken, amount, card_method) {
+    console.log(`[PAYMENT] Initiating Cancellation... Method: ${card_method}`);
+
+    try {
+        let cancelPayload = {};
+        let cancelEndpoint = "";
+        const authDate = paymentResult.authorization_date;
+        const authNum = paymentResult.authorization_number;
+
+        if (!authDate || !authNum) {
+            throw new Error("Cannot cancel: Missing authorization info from payment result.");
+        }
+
+        if (card_method === "S") {
+            cancelEndpoint = `${config.cardTerminalApi}/payment/samsung-pay/cancel`;
+            
+            cancelPayload = {
+                amount: amount,
+                original_authorization_date: authDate,
+                original_authorization_number: authNum,
+                vankey: paymentResult.vankey
+            };
+
+        } else if (card_method === "N") {
+            cancelEndpoint = `${config.cardTerminalApi}/payment/token/cancel`;
+
+            cancelPayload = {
+                amount: amount,
+                original_authorization_date: authDate,
+                original_authorization_number: authNum,
+                vankey_hash: originalToken
+            };
+        } else {
+            throw new Error("Unknown Payment Method");
+        }
+
+        console.log(`[PAYMENT] Sending Cancel Request to ${cancelEndpoint}`, cancelPayload);
+
+        const response = await axios.post(cancelEndpoint, cancelPayload);
+
+        if (response.data && response.data.status === "ok") { // 또는 성공 코드 확인
+            console.log("[PAYMENT] Cancellation Successful:", response.data);
+            return true;
+        } else {
+            console.error("[PAYMENT] Cancellation Failed:", response.data);
+            return false;
+        }
+
+    } catch (error) {
+        console.error("[PAYMENT] Cancel API Error:", error.message);
+        if (error.response) {
+            console.error("Detail:", error.response.data);
+        }
+        return false;
+    }
+}
+
+// --- 3. 결제 및 제어 로직 ---
+async function Payments(token, card_method) {
+    const deviceIdx = config.deviceIdx;
+    const divisionIdx = config.divisionIdx;
     
-} 
+    // [3] 상품정보 조회
+    const productData = await ProductList({
+        division_idx: divisionIdx,
+        device_idx: deviceIdx
+    });
+    console.log("[ProductList] Data Loading Complete:", productData);
 
-module.exports = { Payments };
+    // [4] 카메라 폴더 생성
+    const LOCAL_ROOT = path.resolve(process.cwd()); 
+    const { folderName, folderPath } = ensureCaptureFolder({ localRoot: LOCAL_ROOT });
+    
+    await requestTopCameraCapture({ folderPath: folderPath, action: 'on' });
+
+    //여기서부터 내일 테스트
+    // [5] 문 열기 (OPEN)
+    const openResult = await callApiToControlDeadbolt("OPEN");
+    if (openResult !== "OPEN") throw new Error(`Failed to open door. Status: ${openResult}`);
+
+    // [7] 로드셀 무게 정보 실시간 전달
+    
+    // [8] 로드셀 무게 변화 감지
+
+    // [9] 데드볼트 상태 (close) (sensor → node) + (상단 카메라 off + folder snapshot) 저장 (node → camera python)
+    let receivedLogPath = null;
+    try {
+        // 1. 문이 닫히고 로그 경로가 올 때까지 대기
+        const closeEventData = await waitForDeadboltClose(); 
+        if (closeEventData.state === "CLOSE") {
+            receivedLogPath = closeEventData.logPath; // 경로 저장
+            await requestTopCameraCapture({ folderPath: folderPath, action: 'off' });
+        }
+    } catch (error) {
+        console.error("[Process Error] Door/Camera Sequence:", error);
+        return; // 에러 시 중단
+    }
+
+    try {
+        console.log("[Model] Sending data for inference...");
+        
+        const inferencePayload = {
+            product_info: productData,
+            image_path: folderPath,
+            log_path: receivedLogPath,
+        };
+
+        // 모델 서버 요청 (POST) , endpoint 확인 필요
+        const modelRes = await axios.post(`${config.modelApi}/inference`, inferencePayload);
+        const inferenceResult = modelRes.data;
+        console.log("[Model] Inference Result:", inferenceResult);
+
+
+        const is_inference_success = modelRes.data.success
+
+        if (is_inference_success === 'success'){
+          const paymentPayload = {
+            amount: inferenceResult.totalPrice,
+            vankey_hash: token
+          }
+          let paymentResponse = null;
+          if (card_method === "S") {
+            paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {
+                    amount: finalAmount, 
+                    authorization_type: "PURCHASE",
+                    display_message: "SamsungPay Payment"
+                });
+          }
+          else if (card_method === "N"){
+            paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/token/approve`, {
+                    amount: finalAmount,
+                    vankey_hash: token 
+                });
+          }
+          else{
+            console.log("Undefined Card Method Detected.")
+            return;
+          }
+        }
+        // 결제 결과 처리
+        if (paymentResponse && paymentResponse.status === 200) {
+            console.log("[PAYMENT] Success:", paymentResponse.data);
+        } else {
+            console.error("[PAYMENT] Failed:", paymentResponse);
+        }
+
+    } catch (error) {
+        console.error("[Model] Inference Request Failed:", error.message);
+    }
+}
+
+module.exports = { Payments, router, init };

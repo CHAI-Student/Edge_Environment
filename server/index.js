@@ -94,7 +94,7 @@ app.get('/health', (req, res) => {
 
 // Auth 라우트
 const authModule = require("./routes/auth");
-app.use("/api/auth", authModule.router);
+// app.use("/api/auth", authModule.router);
 
 // 개발 환경 자동 로그인
 (async () => {
@@ -102,6 +102,17 @@ app.use("/api/auth", authModule.router);
         const token = await authModule.devAutoLogin();
     } catch (e) {
         console.error("[APP] dev auto login failed:", e?.message || e);
+    }
+})();
+
+// Payment 라우트 초기화 (yoona branch)
+const paymentRouter = require("./routes/RestAPI/Payments");
+(async () => {
+    try {
+        await paymentRouter.init();
+        console.log('[APP] Payment router initialized');
+    } catch (e) {
+        console.error("[APP] Payment init failed:", e?.message || e);
     }
 })();
 
