@@ -1,5 +1,6 @@
 from enum import Enum as PyEnum
-from typing import Optional, TypedDict
+from typing import Optional
+from typing_extensions import TypedDict
 
 from construct import Byte, Bytes, Mapping
 

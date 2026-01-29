@@ -27,7 +27,7 @@ from typing import List, Optional, Tuple, Dict
 import time
 import logging
 
-from ..engine.event_tracker import WeightEvent, EventDirection
+from engine.event_tracker import WeightEvent, EventDirection
 
 logger = logging.getLogger(__name__)
 

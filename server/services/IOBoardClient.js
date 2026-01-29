@@ -1,7 +1,7 @@
 /**
  * IOBoardClient - Python io_board 서비스 HTTP 클라이언트
  *
- * IO Board FastAPI 서버(port 8001)와 통신하여
+ * IO Board FastAPI 서버(port 8000)와 통신하여
  * 데드볼트 제어, 로드셀 조회 등을 수행합니다.
  */
 
@@ -10,7 +10,7 @@ const config = require('../config/key');
 
 class IOBoardClient {
     constructor() {
-        this.baseUrl = config.ioBoardUrl || 'http://localhost:8001';
+        this.baseUrl = config.ioBoardUrl || 'http://localhost:8000';
         this.timeout = 5000; // 5초 타임아웃
     }
 

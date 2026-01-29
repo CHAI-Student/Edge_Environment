@@ -54,12 +54,10 @@ def load_zone_config(config_path: Optional[str] = None) -> Dict[str, Dict]:
 
     if config_path is None:
         # 기본 경로: project/config/zone_mapping.json
-        # src/core/config.py -> services/camera_driver -> Edge_Environment
-        config_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-            "config",
-            "zone_mapping.json"
-        )
+        # src/core/config.py (5 levels up) -> Edge_Environment
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+        print(project_root)
+        config_path = os.path.join(project_root, "config", "zone_mapping.json")
 
     # 기본값 (fallback) - 5개 zone 전부 활성화
     default_zones = {
@@ -328,7 +326,7 @@ class Settings(BaseSettings):
     device_map_path: str = Field(default="", description="카메라 디바이스 매핑 설정 파일 경로")
 
     # IO Board SSE 구독 설정 (Event-Driven Architecture)
-    io_board_url: str = Field(default="http://localhost:8001", description="IO Board 서비스 URL")
+    io_board_url: str = Field(default="http://localhost:8000", description="IO Board 서비스 URL")
     nodejs_callback_url: str = Field(default="http://localhost:8889", description="Node.js 오케스트레이터 콜백 URL")
 
     # 이벤트 기반 녹화 설정
@@ -361,11 +359,10 @@ def load_device_map(config_path: Optional[str] = None) -> Dict[int, int]:
 
     if config_path is None:
         # 기본 경로: project/config/camera_device_map.json
-        # src/core/config.py -> services/camera_driver -> Edge_Environment
+        # src/core/config.py (5 levels up) -> Edge_Environment
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
         config_path = settings.device_map_path or os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-            "config",
-            "camera_device_map.json"
+            project_root, "config", "camera_device_map.json"
         )
 
     if os.path.exists(config_path):
@@ -377,14 +374,16 @@ def load_device_map(config_path: Optional[str] = None) -> Dict[int, int]:
             if "nvidia_mode" in data:
                 settings.nvidia_mode = data["nvidia_mode"]
 
-            # device_map 로드
+            # device_map 로드 (기존 dict를 업데이트하여 참조 유지)
             if "device_map" in data:
-                DEVICE_PHYSICAL_MAP = {
+                DEVICE_PHYSICAL_MAP.clear()
+                DEVICE_PHYSICAL_MAP.update({
                     int(k): v.get("physical_index", int(k))
                     for k, v in data["device_map"].items()
-                }
+                })
 
             logger.info(f"Device map loaded from {config_path}: nvidia_mode={settings.nvidia_mode}")
+            logger.info(f"DEVICE_PHYSICAL_MAP: {DEVICE_PHYSICAL_MAP}")
 
         except Exception as e:
             logger.warning(f"Failed to load device map: {e}")

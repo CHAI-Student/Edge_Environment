@@ -2,25 +2,41 @@ import React, { useMemo, useState } from 'react';
 import { api } from '../../services/api';
 import './ZoneGridStyles.css';
 
-const ZoneGrid = ({ loadcells }) => {
+const ZoneGrid = ({ loadcells, zoneConfig }) => {
     const [activeZone, setActiveZone] = useState(null);
 
     const zones = useMemo(() => {
         const zoneData = [];
-        for (let i = 0; i < 5; i++) {
-            const val1 = parseFloat(loadcells[i * 2]) || 0;
-            const val2 = parseFloat(loadcells[i * 2 + 1]) || 0;
-            const weight = val1 + val2;
+
+        // zone_mapping.json 설정 사용
+        const zonesConfig = zoneConfig?.zones || {};
+
+        // 설정된 zone들을 순회 (enabled된 것만)
+        const zoneIds = Object.keys(zonesConfig)
+            .map(id => parseInt(id))
+            .filter(id => zonesConfig[id.toString()]?.enabled !== false)
+            .sort((a, b) => a - b);
+
+        for (const zoneId of zoneIds) {
+            const zone = zonesConfig[zoneId.toString()];
+            const channels = zone?.loadcell_channels || [zoneId * 2, zoneId * 2 + 1];
+
+            // 해당 채널들의 무게 합산
+            const weight = channels.reduce((sum, ch) => {
+                return sum + (parseFloat(loadcells[ch]) || 0);
+            }, 0);
+
             zoneData.push({
-                id: i,
+                id: zoneId,
+                name: zone?.name || `Zone ${zoneId}`,
                 weight: weight,
-                channels: [i * 2, i * 2 + 1],
-                // Calculate intensity for potential heatmap effect
-                intensity: Math.min(Math.abs(weight) / 1000, 1) // Cap at 1kg for visualization
+                channels: channels,
+                intensity: Math.min(Math.abs(weight) / 1000, 1)
             });
         }
+
         return zoneData;
-    }, [loadcells]);
+    }, [loadcells, zoneConfig]);
 
     const handleZoneClick = async (zoneId) => {
         setActiveZone(zoneId);

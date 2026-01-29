@@ -15,8 +15,8 @@ import logging
 from .yolo_wrapper import YOLODetection
 from .top5_extractor import Top5Extractor
 from .motion_correlation_filter import MotionCorrelationFilter, get_motion_filter
-from ..engine.models import EnsembleResult
-from ..config import config
+from engine.models import EnsembleResult
+from config import config
 
 logger = logging.getLogger(__name__)
 

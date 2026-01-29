@@ -12,7 +12,7 @@ from typing import Optional
 import logging
 import httpx
 
-from ..engine.models import JudgmentResult
+from engine.models import JudgmentResult
 
 logger = logging.getLogger(__name__)
 

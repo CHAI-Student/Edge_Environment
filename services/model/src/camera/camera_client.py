@@ -24,7 +24,7 @@ import io
 import httpx
 import numpy as np
 
-from ..config import config
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -402,7 +402,7 @@ class CameraClient:
             (top_frame, side_frame, errors) 튜플
             errors: {camera_id: error_code}
         """
-        from ..config import ZONE_CAMERA_MAP, TOP_CAMERA_ID
+        from config import ZONE_CAMERA_MAP, TOP_CAMERA_ID
 
         errors = {}
 

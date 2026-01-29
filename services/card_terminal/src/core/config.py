@@ -36,7 +36,7 @@ class APIModel(BaseModel):
         description="API server host",
     )
     port: int = Field(
-        default=5000,
+        default=8001,
         description="API server port",
     )
     log_level: str = Field(

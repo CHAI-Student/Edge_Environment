@@ -13,7 +13,7 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 
-from ..config import is_zone_enabled, get_enabled_zones
+from config import is_zone_enabled, get_enabled_zones
 
 
 # ===== Enums =====

@@ -14,7 +14,7 @@ const axios = require('axios');
 const config = require('../config/key');
 
 const CAMERA_URL = config.cameraDriverUrl || 'http://localhost:8003';
-const IO_BOARD_URL = config.ioBoardUrl || 'http://localhost:8001';
+const IO_BOARD_URL = config.ioBoardUrl || 'http://localhost:8000';
 const MODEL_URL = config.modelUrl || 'http://localhost:8002';
 
 class ScheduledLogger {

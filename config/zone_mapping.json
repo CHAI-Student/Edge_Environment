@@ -25,7 +25,7 @@
       "name": "Zone 3",
       "loadcell_channels": [6, 7],
       "side_camera_id": 4,
-      "enabled": true
+      "enabled": false
     },
     "4": {
       "name": "Zone 4",

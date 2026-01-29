@@ -11,7 +11,7 @@ const config = require('../config/key');
 const ioBoardSSE = require('../services/IOBoardSSESubscriber');
 const cameraClient = require('../services/CameraDriverClient');
 
-const IO_BOARD_URL = config.ioBoardUrl || 'http://localhost:8001';
+const IO_BOARD_URL = config.ioBoardUrl || 'http://localhost:8000';
 
 /**
  * 문/데드볼트 상태 조회
@@ -60,7 +60,7 @@ router.post('/deadbolt/unlock', async (req, res) => {
         // 1. IO Board에 데드볼트 열기 명령
         const response = await axios.post(
             `${IO_BOARD_URL}/deadbolt`,
-            { state: 'OPEN' },
+            { action: 'OPEN' },
             { timeout: 5000 }
         );
 
@@ -123,7 +123,7 @@ router.post('/deadbolt/lock', async (req, res) => {
         // 1. IO Board에 데드볼트 닫기 명령
         const response = await axios.post(
             `${IO_BOARD_URL}/deadbolt`,
-            { state: 'CLOSE' },
+            { action: 'CLOSE' },
             { timeout: 5000 }
         );
 
@@ -169,7 +169,7 @@ router.post('/deadbolt/toggle', async (req, res) => {
 
         const response = await axios.post(
             `${IO_BOARD_URL}/deadbolt`,
-            { state: newState },
+            { action: newState },
             { timeout: 5000 }
         );
 

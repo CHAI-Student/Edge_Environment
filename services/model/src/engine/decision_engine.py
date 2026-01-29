@@ -26,24 +26,24 @@ from .models import (
     JudgmentResult,
     JudgmentStatus,
 )
-from ..config import config
+from config import config
 
 # Lazy import to avoid circular dependency
 if TYPE_CHECKING:
-    from ..database.product_db import ProductDatabase
+    from database.product_db import ProductDatabase
 
 logger = logging.getLogger(__name__)
 
 
 def _get_product_database():
     """Lazy import ProductDatabase to avoid circular import."""
-    from ..database.product_db import ProductDatabase
+    from database.product_db import ProductDatabase
     return ProductDatabase
 
 
 def _get_count_calculator():
     """Lazy import WeightBasedCountCalculator to avoid circular import."""
-    from ..weight.count_calculator import WeightBasedCountCalculator
+    from weight.count_calculator import WeightBasedCountCalculator
     return WeightBasedCountCalculator
 
 

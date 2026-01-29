@@ -22,7 +22,7 @@ Node.js 중심의 마이크로서비스 아키텍처. **Event-Driven Architectur
      ▼              ▼              ▼              ▼
 ┌─────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐
 │IO Board │  │  Camera   │  │   Model   │  │   MQTT    │  │  React    │
-│ (8001)  │  │  (8003)   │  │  (8002)   │  │  (8006)   │  │  (3000)   │
+│ (8000)  │  │  (8003)   │  │  (8002)   │  │  (8006)   │  │  (3000)   │
 │  SSE →  │  │← snapshot │  │← 판단만   │  │ IF01-04   │  │ Dashboard │
 └─────────┘  └───────────┘  └───────────┘  └───────────┘  └───────────┘
 ```
@@ -43,13 +43,13 @@ Node.js 중심의 마이크로서비스 아키텍처. **Event-Driven Architectur
 
 | 서비스 | 포트 | 설명 |
 |--------|------|------|
-| IO Board | 8001 | 로드셀(10ch) + 데드볼트 SSE |
+| IO Board | 8000 | 로드셀(10ch) + 데드볼트 SSE |
+| Card Terminal API | 8001 | 결제 터미널 REST API |
 | Model | 8002 | YOLO 추론 + 상품 판단 (stateless) |
 | Camera Driver | 8003 | 6대 카메라 스냅샷/녹화 (Nvidia 지원) |
 | MQTT Client | 8006 | CHAI IF01-04 프로토콜 |
 | Node.js | 8889 | 오케스트레이터 + API |
 | React Client | 3000 | 웹 대시보드 UI |
-| Card Terminal API | 5000 | 결제 터미널 REST API |
 | Card Terminal CAT | 5001 | CAT 디바이스 TCP 서버 |
 
 ## 빠른 시작

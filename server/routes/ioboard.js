@@ -1,7 +1,7 @@
 /**
  * IO Board Routes
  *
- * Python IO Board 서비스(port 8001) 프록시 라우트
+ * Python IO Board 서비스(port 8000) 프록시 라우트
  */
 
 const express = require('express');

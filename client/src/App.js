@@ -30,7 +30,7 @@ function App() {
 
   const leftPanel = (
     <>
-      <ZoneGrid loadcells={sse.loadcellData} />
+      <ZoneGrid loadcells={sse.loadcellData} zoneConfig={dashboard.config.zoneMapping} />
       <LoadcellGrid loadcells={sse.loadcellData} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px' }}>
         <DoorControl doorStatus={sse.doorStatus} />

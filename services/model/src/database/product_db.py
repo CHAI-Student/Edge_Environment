@@ -41,7 +41,7 @@ try:
 except ImportError:
     HAS_YAML = False
 
-from ..engine.models import ProductInfo
+from engine.models import ProductInfo
 
 logger = logging.getLogger(__name__)
 

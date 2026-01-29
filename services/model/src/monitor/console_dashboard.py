@@ -18,8 +18,8 @@ import time
 import os
 import logging
 
-from ..engine.models import JudgmentResult, JudgmentStatus, EnsembleResult
-from ..config import ZONE_CHANNEL_MAP, get_enabled_zones
+from engine.models import JudgmentResult, JudgmentStatus, EnsembleResult
+from config import ZONE_CHANNEL_MAP, get_enabled_zones
 
 logger = logging.getLogger(__name__)
 

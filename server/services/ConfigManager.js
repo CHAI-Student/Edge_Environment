@@ -193,6 +193,28 @@ class ConfigManager {
     }
 
     /**
+     * 로드셀 채널 배열로 Zone ID 찾기
+     * 여러 채널이 변경된 경우, 첫 번째 매칭되는 Zone 반환
+     * @param {number[]} channels - 로드셀 채널 배열
+     * @returns {number|null} Zone ID 또는 null
+     */
+    getZoneFromChannels(channels) {
+        if (!Array.isArray(channels) || channels.length === 0) {
+            return null;
+        }
+
+        // 첫 번째 채널로 zone 찾기
+        for (const channel of channels) {
+            const zoneId = this.getZoneIdByLoadcellChannel(channel);
+            if (zoneId !== null) {
+                return zoneId;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * 활성화된 Zone ID 목록 조회
      * @returns {number[]} 활성화된 zone ID 배열
      */

@@ -184,7 +184,7 @@ app.get('/api/dashboard/status', async (req, res) => {
             status: 'ok',
             timestamp: new Date().toISOString(),
             services: {
-                io_board: { healthy: ioBoardHealthy, port: 8001 },
+                io_board: { healthy: ioBoardHealthy, port: 8000 },
                 camera_driver: { healthy: cameraHealthy, port: 8003 },
                 model: { healthy: modelHealthy, port: 8002 },
                 node_server: { healthy: true, port: process.env.PORT || 8889 },

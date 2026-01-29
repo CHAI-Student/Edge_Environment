@@ -1,4 +1,5 @@
-from typing import TypedDict, Optional
+from typing import Optional
+from typing_extensions import TypedDict
 
 from .const import CardInfoData, StatusCode, ResponseCode
 

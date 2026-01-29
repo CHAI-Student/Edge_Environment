@@ -56,7 +56,7 @@ module.exports = {
       restart_delay: 2000,
     },
 
-    // Python io_board 서비스 (포트 8001) - CRK-IO-BOARD
+    // Python io_board 서비스 (포트 8000) - CRK-IO-BOARD
     {
       name: "io-board",
       cwd: "./services/io_board",
@@ -67,7 +67,7 @@ module.exports = {
         PYTHONUNBUFFERED: "1",
         // API 설정
         IO_BOARD__API__HOST: "0.0.0.0",
-        IO_BOARD__API__PORT: "8001",
+        IO_BOARD__API__PORT: "8000",
         IO_BOARD__API__LOG_LEVEL: "info",
         // 시리얼 설정 (Windows: COM3, Linux/Jetson: /dev/ttyUSB0)
         // IO_BOARD__SERIAL__PORT: "COM3",
@@ -82,7 +82,7 @@ module.exports = {
       restart_delay: 2000,
     },
 
-    // Python card_terminal 서비스 (포트 5000/5001) - 결제 터미널
+    // Python card_terminal 서비스 (포트 8001/5001) - 결제 터미널
     {
       name: "card-terminal",
       cwd: "./services/card_terminal",
@@ -93,7 +93,7 @@ module.exports = {
         PYTHONUNBUFFERED: "1",
         // API 설정
         CARD_TERMINAL__API__HOST: "0.0.0.0",
-        CARD_TERMINAL__API__PORT: "5000",
+        CARD_TERMINAL__API__PORT: "8001",
         CARD_TERMINAL__API__LOG_LEVEL: "info",
         // CAT 디바이스 설정
         CARD_TERMINAL__CAT__HOST: "0.0.0.0",
@@ -122,7 +122,7 @@ module.exports = {
         MODEL__API__PORT: "8002",
         MODEL__API__LOG_LEVEL: "info",
         // Vision 설정
-        MODEL__VISION__YOLO_MODEL_PATH: "../../../siyeon_best.pt",
+        MODEL__VISION__YOLO_MODEL_PATH: "/home/chai/Edge_Environment/models/siyeon_best.engine",
         // Node.js 연동
         MODEL__NODEJS_URL: "http://localhost:8889",
       },
@@ -150,7 +150,7 @@ module.exports = {
         CAMERA__RESOLUTION_HEIGHT: "480",
         CAMERA__FPS: "30",
         // 서비스 연동
-        CAMERA__IO_BOARD_URL: "http://localhost:8001",
+        CAMERA__IO_BOARD_URL: "http://localhost:8000",
         CAMERA__NODEJS_CALLBACK_URL: "http://localhost:8889",
       },
       watch: false,

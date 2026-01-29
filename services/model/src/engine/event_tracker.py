@@ -16,7 +16,7 @@ from typing import Dict, List, Optional
 import time
 import logging
 
-from ..config import get_enabled_zones
+from config import get_enabled_zones
 
 logger = logging.getLogger(__name__)
 

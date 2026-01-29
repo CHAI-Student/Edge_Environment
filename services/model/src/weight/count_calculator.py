@@ -18,8 +18,8 @@ Weight-Based Count Calculator.
 from typing import List, Optional
 import logging
 
-from ..engine.models import EnsembleResult, CountEstimate
-from ..database.product_db import ProductDatabase
+from engine.models import EnsembleResult, CountEstimate
+from database.product_db import ProductDatabase
 
 logger = logging.getLogger(__name__)
 

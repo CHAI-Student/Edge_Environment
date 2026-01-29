@@ -23,12 +23,12 @@ module.exports = {
     // 서비스 API 설정 (통합)
     // ============================================
     // 기본 서비스 URL (환경변수 기반)
-    ioBoardUrl: process.env.IO_BOARD_URL || 'http://localhost:8001',
+    ioBoardUrl: process.env.IO_BOARD_URL || 'http://localhost:8000',
     cameraDriverUrl: process.env.CAMERA_DRIVER_URL || 'http://localhost:8003',
     productJudgeUrl: process.env.PRODUCT_JUDGE_URL || 'http://localhost:8002',
     modelUrl: process.env.MODEL_URL || 'http://localhost:8002',
     mqttClientUrl: process.env.MQTT_CLIENT_URL || 'http://localhost:8006',
-    cardTerminalUrl: process.env.CARD_TERMINAL_URL || 'http://localhost:5000',
+    cardTerminalUrl: process.env.CARD_TERMINAL_URL || 'http://localhost:8001',
 
     // 레거시 호환용 별칭 (HealthMqtt, Payments 등에서 사용)
     get ioboardApi() { return this.ioBoardUrl; },

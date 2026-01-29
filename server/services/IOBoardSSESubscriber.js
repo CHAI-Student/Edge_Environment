@@ -1,7 +1,7 @@
 /**
  * IOBoardSSESubscriber - IO Board SSE 스트림 구독자
  *
- * IO Board 서비스(8001)의 SSE 스트림을 구독하여
+ * IO Board 서비스(8000)의 SSE 스트림을 구독하여
  * 로드셀 변화 이벤트를 감지합니다.
  *
  * [Event-Driven Architecture 변경]
@@ -29,7 +29,7 @@ let weightAccumulator = null;
 class IOBoardSSESubscriber extends EventEmitter {
     constructor() {
         super();
-        this.ioBoardUrl = config.ioBoardUrl || 'http://localhost:8001';
+        this.ioBoardUrl = config.ioBoardUrl || 'http://localhost:8000';
         this.eventSource = null;
         this.connected = false;
         this.reconnecting = false; // 재연결 중 플래그 (race condition 방지)
@@ -274,11 +274,44 @@ class IOBoardSSESubscriber extends EventEmitter {
 
     /**
      * 로드셀 변화 이벤트 처리 (IO Board에서 직접 발생)
-     * @param {Object} data - {zone_id, channel, delta, current, previous, timestamp}
+     * @param {Object} data - {changed_indices, old_values, new_values, deltas, timestamp, ...}
      */
     _handleLoadcellChange(data) {
         console.log('[IOBoardSSE] Loadcell change event:', data);
-        this._processWeightChange(data, data.timestamp || new Date().toISOString());
+
+        // IO Board의 실제 이벤트 형식 처리
+        // {changed_indices: [0], old_values: [12], new_values: [-12], deltas: [24], ...}
+        const changedIndices = data.changed_indices || [];
+        const oldValues = data.old_values || [];
+        const newValues = data.new_values || [];
+        const deltas = data.deltas || [];
+        const timestamp = data.timestamp || new Date().toISOString();
+
+        if (changedIndices.length === 0) {
+            return;
+        }
+
+        // changed_indices에서 zone_id 계산
+        const zoneId = configManager.getZoneFromChannels(changedIndices);
+
+        if (zoneId === null || zoneId === undefined) {
+            console.log(`[IOBoardSSE] Could not determine zone from channels: ${changedIndices}`);
+            return;
+        }
+
+        // 총 delta 계산
+        const totalDelta = deltas.reduce((sum, d) => sum + d, 0);
+
+        // 변화 정보 구성
+        const change = {
+            zone_id: zoneId,
+            channels: changedIndices,
+            delta: totalDelta,
+            current: newValues,
+            previous: oldValues
+        };
+
+        this._processWeightChange(change, timestamp);
     }
 
     /**

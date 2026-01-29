@@ -26,12 +26,12 @@ from .console_dashboard import ConsoleDashboard
 # NOTE: sse_client module removed - Model is now stateless
 # from ..sse_client import IOBoardSubscriber, LoadcellChangeEvent, LoadcellUpdateEvent
 # from ..sse_client.zone_detector import ZoneDetector
-from ..camera import FrameCapturer
-from ..vision import YOLOWrapper, HandProximityFilter, Top5Extractor, MultiViewEnsemble
-from ..engine import ProductDecisionEngine, EventTracker
-from ..database.product_db import ProductDatabase
-from ..api.node_client import NodeJSClient
-from ..config import config, ZONE_CHANNEL_MAP, ZONE_CAMERA_MAP, TOP_CAMERA_ID
+from camera import FrameCapturer
+from vision import YOLOWrapper, HandProximityFilter, Top5Extractor, MultiViewEnsemble
+from engine import ProductDecisionEngine, EventTracker
+from database.product_db import ProductDatabase
+from api.node_client import NodeJSClient
+from config import config, ZONE_CHANNEL_MAP, ZONE_CAMERA_MAP, TOP_CAMERA_ID
 
 logger = logging.getLogger(__name__)
 

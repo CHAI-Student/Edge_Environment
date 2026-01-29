@@ -24,7 +24,7 @@ except ImportError:
     HAS_CV2 = False
 
 from .camera_client import CameraClient
-from ..config import (
+from config import (
     config,
     get_zone_cameras,
     TOP_CAMERA_ID,

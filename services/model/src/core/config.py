@@ -233,7 +233,7 @@ class VisionModel(BaseModel):
     """Vision configuration settings."""
 
     yolo_model_path: str = Field(
-        default="models/siyeon_best.pt",
+        default="/home/chai/Edge_Environment/models/siyeon_best.engine",
         description="YOLO model path (.pt or .engine)",
     )
     hand_class_id: int = Field(

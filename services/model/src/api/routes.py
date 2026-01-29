@@ -23,17 +23,17 @@ import asyncio
 import uuid
 from pathlib import Path
 
-from ..config import config, get_enabled_zones, get_zone_count, is_zone_enabled
-from ..database.product_db import ProductDatabase
-from ..engine import ProductDecisionEngine, EnsembleResult, JudgmentStatus
-from ..engine.event_tracker import EventTracker, EventDirection
-from ..engine.advanced import (
+from config import config, get_enabled_zones, get_zone_count, is_zone_enabled
+from database.product_db import ProductDatabase
+from engine import ProductDecisionEngine, EnsembleResult, JudgmentStatus
+from engine.event_tracker import EventTracker, EventDirection
+from engine.advanced import (
     ReturnDetector,
     CrossZoneDetector,
     BaselineManager,
     RapidPickupHandler,
 )
-from ..weight import MultiZoneWeightMonitor, RecordingProcessor, convert_to_weight_data
+from weight import MultiZoneWeightMonitor, RecordingProcessor, convert_to_weight_data
 
 from .models import (
     # Multi-Zone
@@ -270,7 +270,7 @@ async def get_zones_config():
     Returns:
         Zone 설정 정보
     """
-    from ..config import ZONE_CHANNEL_MAP, ZONE_CAMERA_MAP, ZONE_CONFIG, TOP_CAMERA_ID
+    from config import ZONE_CHANNEL_MAP, ZONE_CAMERA_MAP, ZONE_CONFIG, TOP_CAMERA_ID
 
     return {
         "enabled_zones": get_enabled_zones(),
@@ -661,7 +661,7 @@ async def _run_vision_from_media_paths(
         - images_processed: 처리된 이미지 경로 목록
         - camera_results: 카메라별 결과 {cam0: {...}, cam1: {...}, ...}
     """
-    from ..vision import (
+    from vision import (
         YOLOWrapper, Top5Extractor, MultiViewEnsemble,
         MotionCorrelationFilter, reset_motion_filter
     )
@@ -1938,7 +1938,7 @@ def _calculate_delta_weight(
     Returns:
         무게 변화량 (현재 - 기준, 음수 = 감소)
     """
-    from ..config import ZONE_CHANNEL_MAP
+    from config import ZONE_CHANNEL_MAP
 
     channels = ZONE_CHANNEL_MAP.get(zone_id, [])
 
@@ -2377,7 +2377,7 @@ async def reset_statistics():
 #       현재는 기본 흐름과 상태 관리만 제공합니다.
 # =============================================================================
 
-from ..door_payment import (
+from door_payment import (
     DoorPaymentController,
     CardInfo,
     ProductItem as DoorProductItem,

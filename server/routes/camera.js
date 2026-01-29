@@ -10,8 +10,6 @@ const cameraClient = require('../services/CameraDriverClient');
 const configManager = require('../services/ConfigManager');
 const productJudgeClient = require('../services/ProductJudgeClient');
 
-const productJudgeClient = require('../services/ProductJudgeClient');
-
 /**
  * 카메라 초기화
  * POST /api/camera/init

@@ -20,7 +20,9 @@ export const useDashboardData = (sseStatus) => {
                 setServices(statusData.services || {});
                 setConfig({
                     nvidiaMode: statusData.config?.camera_device_map?.nvidia_mode,
-                    ioBoardSSE: statusData.io_board_sse
+                    ioBoardSSE: statusData.io_board_sse,
+                    zoneMapping: statusData.config?.zone_mapping,
+                    cameraDeviceMap: statusData.config?.camera_device_map
                 });
             }
 

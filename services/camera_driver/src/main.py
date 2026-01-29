@@ -37,8 +37,19 @@ def _init_event_driven_components(logger):
     from core import IOBoardSSESubscriber, EventRecordingManager
     from api.routes import get_manager, init_sse_components
 
-    # Get camera manager
+    # Get camera manager and auto-initialize cameras
     manager = get_manager()
+
+    # Auto-initialize all cameras on startup
+    logger.info("Auto-initializing cameras...")
+    status = manager.initialize_all()
+    connected = sum(status.values())
+    total = len(status)
+    logger.info(f"Cameras initialized: {connected}/{total} connected")
+
+    # Start streaming
+    manager.start_streaming()
+    logger.info("Camera streaming started")
 
     # Create SSE subscriber
     _sse_subscriber = IOBoardSSESubscriber(
