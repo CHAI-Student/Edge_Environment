@@ -70,7 +70,7 @@ async function requestTopCameraCapture({ action }) {
 
 async function requestTopCameraON({ include_top, record_video, folderPath }) {
   try {
-    const CameraSaveDirApi =  `${config.cameraApi}/api/recording/start`;
+    const CameraSaveDirApi =  `${config.cameraApi}/recording/start`;
     const response = await axios.post(CameraSaveDirApi, null, {
       params: {
         zone_id: 0,
@@ -99,7 +99,7 @@ async function requestTopCameraON({ include_top, record_video, folderPath }) {
 
 async function requestCameraOFF() {
   try {
-    const CameraStopApi =  `${config.cameraApi}/api/recording/stop`;
+    const CameraStopApi =  `${config.cameraApi}/recording/stop`;
     const response = await axios.post(CameraStopApi);
 
   if (response.status === 200) {
@@ -352,7 +352,7 @@ async function Payments(token, CardMethod) {
         };
 
         // 모델 서버 요청 (POST)
-        const modelRes = await axios.post(`${config.modelApi}/api/judge/multi-zone`, inferencePayload);
+        const modelRes = await axios.post(`${config.modelApi}/judge/multi-zone`, inferencePayload);
         const inferenceResult = modelRes.data;
         console.log("[Model] Inference Result:", inferenceResult);
 
@@ -383,7 +383,8 @@ async function Payments(token, CardMethod) {
         let payTime = null
         if (paymentResponse && paymentResponse.status === 200) {
             // console.log("[PAYMENT] Success:", paymentResponse.data);
-            payTime = makeTimestampFolderName();
+            const currentDate = new Date();
+            payTime = makeTimestampFolderName(currentDate);
             sendToPNT(
               paymentDate = payTime,
               paymentData = paymentResponse,
