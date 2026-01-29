@@ -10,6 +10,25 @@ const cameraClient = require('../services/CameraDriverClient');
 const configManager = require('../services/ConfigManager');
 const productJudgeClient = require('../services/ProductJudgeClient');
 
+const productJudgeClient = require('../services/ProductJudgeClient');
+
+/**
+ * 카메라 초기화
+ * POST /api/camera/init
+ */
+router.post('/init', async (req, res) => {
+    try {
+        const result = await cameraClient.init();
+        res.json(result);
+    } catch (error) {
+        console.error('[Camera Route] Init error:', error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 /**
  * Zone 카메라 활성화
  * POST /api/camera/zone/:zoneId/activate
@@ -146,14 +165,7 @@ router.get('/zone/:zoneId/capture', async (req, res) => {
 router.get('/:cameraId/frame', async (req, res) => {
     try {
         const cameraId = parseInt(req.params.cameraId);
-        const enabledCameraIds = configManager.getEnabledCameraIds();
-
-        if (isNaN(cameraId) || !enabledCameraIds.includes(cameraId)) {
-            return res.status(400).json({
-                success: false,
-                error: `Invalid camera ID. Enabled cameras: ${enabledCameraIds.join(', ')}`
-            });
-        }
+        // const enabledCameraIds = configManager.getEnabledCameraIds(); // 유효성 검사는 Client/Driver에 위임 가능
 
         const result = await cameraClient.getFrame(cameraId);
         res.json({
@@ -166,6 +178,42 @@ router.get('/:cameraId/frame', async (req, res) => {
             success: false,
             error: error.message
         });
+    }
+});
+
+/**
+ * 카메라 MJPEG 스트림 파이프
+ * GET /api/camera/stream/:cameraId
+ */
+router.get('/stream/:cameraId', async (req, res) => {
+    try {
+        const cameraId = req.params.cameraId;
+        const axios = require('axios');
+        const config = require('../config/key');
+        const cameraDriverUrl = config.cameraDriverUrl || 'http://localhost:8003';
+
+        // Camera Driver Stream URL: http://localhost:8003/stream/0
+        const streamUrl = `${cameraDriverUrl}/stream/${cameraId}`;
+
+        const response = await axios({
+            method: 'get',
+            url: streamUrl,
+            responseType: 'stream'
+        });
+
+        res.setHeader('Content-Type', response.headers['content-type']);
+        response.data.pipe(res);
+
+    } catch (error) {
+        console.error('[Camera Route] Stream proxy error:', error.message);
+        // 스트림 연결 실패 시 이미 응답을 보냈는지 확인이 어려우므로
+        // 헤더 전송 전이라면 에러 응답
+        if (!res.headersSent) {
+            res.status(500).json({
+                success: false,
+                error: 'Failed to proxy camera stream'
+            });
+        }
     }
 });
 

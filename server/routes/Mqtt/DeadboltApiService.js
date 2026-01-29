@@ -1,51 +1,44 @@
-/**
- * Deadbolt API Service
- * Python 백엔드 API와 통신하여 데드볼트 상태를 제어합니다.
- */
+// 파일명: DoorApiService.js
+const axios = require("axios");
+const config = require("../../config/key");
 
-const axios = require('axios');
-const config = require('../../config/key');
-
-// API 설정
-const API_HOST = config.deadboltApi || config.ioboardApi || 'http://localhost:8001';
-const API_ENDPOINT = '/deadbolt';
+const API_HOST = config.deadboltApi; // 기본값 설정
+const API_ENDPOINT = "/deadbolt"; // 상세 경로
 
 /**
- * Deadbolt 상태 제어 API 호출
- * @param {string} targetState - "OPEN" 또는 "CLOSE"
- * @returns {Promise<object>} - API 응답
+ * API 서버에 도어 제어 요청을 보냅니다.
+ * Python 서버의 스펙: POST /deadbolt, Body: { "state": "OPEN" | "CLOSE" }
+ * @param {string} targetState - "OPEN" or "CLOSE"
+ * @returns {Promise<string>} - 서버가 반환한 최종 상태 ("OPEN" or "CLOSE")
  */
 async function callApiToControlDeadbolt(targetState) {
-    const DEADBOLT_API_URL = `${API_HOST}${API_ENDPOINT}`;
+  const DEADBOLT_API_URL = `${API_HOST}${API_ENDPOINT}`;
+  try {
+    console.log(`[API] Sending Request to ${DEADBOLT_API_URL} (action: ${targetState})...`);
 
-    console.log(`[DeadboltApiService] Calling API: ${DEADBOLT_API_URL} with state: ${targetState}`);
+    // POST 요청 전송
+    const response = await axios.post(DEADBOLT_API_URL, {
+      action: targetState
+    }, {
+      timeout: 5000 // 5초 타임아웃
+    });
 
-    try {
-        const response = await axios.post(DEADBOLT_API_URL, {
-            action: targetState
-        }, {
-            timeout: 5000 // 5초 타임아웃
-        });
+    // API 응답 확인
+    const finalState = response.data.state;
+    console.log(`[API] Response Received. Final State: ${finalState}`);
 
-        const finalState = response.data?.state || response.data?.status;
-        console.log(`[DeadboltApiService] API response - Final state: ${finalState}`);
+    return finalState;
 
-        return response.data;
-    } catch (error) {
-        if (error.response) {
-            // 서버가 응답을 반환했지만 에러 상태코드
-            console.error(`[DeadboltApiService] Server error: ${error.response.status}`);
-            throw new Error(`Server responded with status ${error.response.status}`);
-        } else if (error.request) {
-            // 요청은 보냈지만 응답이 없음
-            console.error('[DeadboltApiService] No response from server');
-            throw new Error('No response from deadbolt control API');
-        } else {
-            // 요청 설정 중 에러
-            console.error(`[DeadboltApiService] Error: ${error.message}`);
-            throw error;
-        }
+  } catch (error) {
+    // 에러 발생 시 상세 내용 처리
+    if (error.response) {
+      throw new Error(`Server Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
+    } else if (error.request) {
+      throw new Error("No response from server (Network Error)");
+    } else {
+      throw new Error(error.message);
     }
+  }
 }
 
 module.exports = { callApiToControlDeadbolt };

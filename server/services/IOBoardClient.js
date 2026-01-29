@@ -183,6 +183,134 @@ class IOBoardClient {
             return false;
         }
     }
+
+    // ========================================
+    // Recording API (로드셀 데이터 녹화)
+    // ========================================
+
+    /**
+     * 로드셀 녹화 시작
+     *
+     * 무게 변화 감지 시작 시점에 호출하여 로드셀 데이터를 수집합니다.
+     * 수집된 데이터는 Model 서비스에서 baseline/current 자동 계산에 사용됩니다.
+     *
+     * @returns {Promise<{status: string, message: string}>}
+     */
+    async startRecording() {
+        try {
+            const response = await axios.post(
+                `${this.baseUrl}/recording/start`,
+                {},
+                { timeout: this.timeout }
+            );
+            console.log('[IOBoardClient] Recording started');
+            return response.data;
+        } catch (error) {
+            console.error('[IOBoardClient] startRecording error:', error.message);
+            throw new Error(`IO Board start recording failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * 로드셀 녹화 중지
+     *
+     * 무게 변화가 안정화된 후 호출하여 녹화를 중지합니다.
+     *
+     * @returns {Promise<{status: string, message: string}>}
+     */
+    async stopRecording() {
+        try {
+            const response = await axios.post(
+                `${this.baseUrl}/recording/stop`,
+                {},
+                { timeout: this.timeout }
+            );
+            console.log('[IOBoardClient] Recording stopped');
+            return response.data;
+        } catch (error) {
+            console.error('[IOBoardClient] stopRecording error:', error.message);
+            throw new Error(`IO Board stop recording failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * 녹화된 로드셀 데이터 조회
+     *
+     * 녹화 중지 후 호출하여 수집된 데이터를 가져옵니다.
+     * 반환 형식은 Model 서비스의 recording 형식과 호환됩니다.
+     *
+     * @returns {Promise<{logs: Array<{loadcells: string[], timestamp: string}>}>}
+     *
+     * @example
+     * const data = await ioBoardClient.getRecordingData();
+     * // data.logs = [
+     * //   { loadcells: ["+01000", "+01100", ...], timestamp: "2026-01-29T14:30:00Z" },
+     * //   { loadcells: ["+00500", "+00600", ...], timestamp: "2026-01-29T14:30:01Z" },
+     * //   ...
+     * // ]
+     */
+    async getRecordingData() {
+        try {
+            const response = await axios.get(
+                `${this.baseUrl}/recording/data`,
+                { timeout: this.timeout }
+            );
+            console.log(`[IOBoardClient] Recording data retrieved: ${response.data.logs?.length || 0} samples`);
+            return response.data;
+        } catch (error) {
+            console.error('[IOBoardClient] getRecordingData error:', error.message);
+            throw new Error(`IO Board get recording data failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * 녹화 상태 확인
+     *
+     * @returns {Promise<{is_recording: boolean, sample_count: number}>}
+     */
+    async getRecordingStatus() {
+        try {
+            const response = await axios.get(
+                `${this.baseUrl}/recording/status`,
+                { timeout: this.timeout }
+            );
+            return response.data;
+        } catch (error) {
+            // recording/status 엔드포인트가 없을 수 있음 (이전 버전)
+            console.warn('[IOBoardClient] getRecordingStatus not available:', error.message);
+            return { is_recording: false, sample_count: 0 };
+        }
+    }
+
+    /**
+     * 녹화 시작 → 중지 → 데이터 조회 통합 API
+     *
+     * 지정된 시간 동안 녹화를 수행하고 데이터를 반환합니다.
+     *
+     * @param {number} durationMs - 녹화 시간 (밀리초, 기본 3000ms)
+     * @returns {Promise<{logs: Array}>}
+     */
+    async recordForDuration(durationMs = 3000) {
+        try {
+            // 1. 녹화 시작
+            await this.startRecording();
+
+            // 2. 지정 시간 대기
+            await new Promise(resolve => setTimeout(resolve, durationMs));
+
+            // 3. 녹화 중지
+            await this.stopRecording();
+
+            // 4. 데이터 조회
+            const data = await this.getRecordingData();
+
+            console.log(`[IOBoardClient] Recorded for ${durationMs}ms: ${data.logs?.length || 0} samples`);
+            return data;
+        } catch (error) {
+            console.error('[IOBoardClient] recordForDuration error:', error.message);
+            throw new Error(`IO Board record for duration failed: ${error.message}`);
+        }
+    }
 }
 
 module.exports = new IOBoardClient();

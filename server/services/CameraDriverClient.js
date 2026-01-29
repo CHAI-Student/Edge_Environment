@@ -72,6 +72,24 @@ class CameraDriverClient {
     }
 
     /**
+     * 카메라 초기화
+     * @returns {Promise<Object>}
+     */
+    async init() {
+        try {
+            const response = await axios.post(
+                `${this.baseUrl}/api/init`,
+                {},
+                { timeout: 30000 } // 초기화는 시간이 걸릴 수 있음
+            );
+            return response.data;
+        } catch (error) {
+            console.error('[CameraDriverClient] init error:', error.message);
+            throw new Error(`Camera init failed: ${error.message}`);
+        }
+    }
+
+    /**
      * Zone 프레임 캡처 (스냅샷) - Base64 반환
      * @param {number} zoneId - Zone ID (0-4)
      * @param {boolean} includeTop - Top 카메라 포함 여부

@@ -1,19 +1,36 @@
 # Windows 테스트 환경 가이드
 
+> **최종 업데이트**: 2026-01-29
+
 ## 개요
 
-이 문서는 Jetson Nano 배포 전 Windows 환경에서 테스트하는 방법을 설명합니다.
+이 문서는 Jetson Orin Nano 배포 전 Windows 환경에서 테스트하는 방법을 설명합니다.
 
 ## 테스트 전략
 
-### Docker vs 직접 실행
+### 직접 실행 vs PM2
 
 | 방식 | 장점 | 단점 | 권장 상황 |
 |------|------|------|----------|
-| **직접 실행** | 카메라 접근 용이, 디버깅 편리 | 환경 차이 | Windows 개발/테스트 |
-| **Docker** | 환경 일관성 | USB 카메라 접근 어려움, ARM/x86 차이 | Jetson 배포 |
+| **PM2 통합** | 서비스 관리 편리, 자동 재시작 | PM2 설치 필요 | Windows/Jetson 모두 |
+| **직접 실행** | 디버깅 편리, 환경 변수 유연 | 터미널 여러 개 필요 | 개발/디버깅 |
 
-**권장**: Windows에서는 직접 실행 + 폴더 모드 사용
+**권장**: PM2 통합 실행 + 필요 시 개별 서비스 디버깅
+
+### PM2 통합 실행 (권장)
+
+```bash
+# 전체 서비스 시작
+npm start
+
+# 또는 개별 실행
+pm2 start ecosystem.config.js --only model
+pm2 start ecosystem.config.js --only "io-board,camera-driver"
+
+# 상태 확인
+pm2 status
+pm2 logs
+```
 
 ---
 
@@ -51,11 +68,14 @@ uv sync
 # 테스트 도구 포함
 uv sync --extra test
 
-# AI/Vision 포함 (Jetson용, Windows에서는 선택)
+# AI/Vision 포함 (GPU 사용 시)
 uv sync --extra ai
 
-# 개발 도구 전체
-uv sync --extra dev
+# MQTT 포함
+uv sync --extra mqtt
+
+# 전체 개발 환경
+uv sync --extra ai --extra mqtt --extra dev
 ```
 
 ### 1.4 uv 주요 명령어
@@ -88,36 +108,34 @@ python --version
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 
-# 의존성 설치
-pip install -r services/model/requirements.txt
-pip install -r services/camera_driver/requirements.txt
-pip install -r services/io_board/requirements.txt
+# pyproject.toml 기반 설치
+pip install -e ".[ai,mqtt,dev]"
 ```
 
 ---
 
 ## 3. 테스트 모드 설명
 
-### 2.1 API 모드 (카메라 연결 필요)
+### 3.1 API 모드 (카메라 연결 필요)
 
 실제 USB 카메라가 연결된 상태에서 테스트:
 
 ```bash
 # Camera Driver 시작 (포트 8003)
 cd Edge_Environment/services/camera_driver
-uvicorn main:app --host 0.0.0.0 --port 8003 --reload
+python main.py
 
 # Model 서비스 시작 (포트 8002)
 cd Edge_Environment/services/model
-uvicorn main:app --host 0.0.0.0 --port 8002 --reload
+python main.py
 ```
 
-### 2.2 폴더 모드 (카메라 없이 테스트)
+### 3.2 폴더 모드 (카메라 없이 테스트)
 
 미리 저장된 이미지로 테스트:
 
 ```python
-# services/model/camera/camera_client.py
+# services/model/src/camera/camera_client.py
 from .frame_capturer import FolderFrameLoader
 
 # 폴더 구조
@@ -134,7 +152,7 @@ frame = loader.get_frame(camera_id=0)
 
 ## 4. 녹화 테스트
 
-### 3.1 녹화 API 사용
+### 4.1 녹화 API 사용
 
 ```bash
 # 녹화 시작 (Zone 0, 영상 포함)
@@ -143,11 +161,11 @@ curl -X POST "http://localhost:8003/api/recording/start?zone_id=0&record_video=t
 # 응답 예시:
 # {
 #   "success": true,
-#   "session_id": "20251106_141029",
+#   "session_id": "20260129_141029",
 #   "paths": {
-#     "base_path": "./recordings/20251106_141029",
-#     "images_path": "./recordings/20251106_141029/images",
-#     "videos_path": "./recordings/20251106_141029/videos"
+#     "base_path": "./recordings/20260129_141029",
+#     "images_path": "./recordings/20260129_141029/images",
+#     "videos_path": "./recordings/20260129_141029/videos"
 #   }
 # }
 
@@ -158,11 +176,11 @@ curl -X POST "http://localhost:8003/api/recording/snapshot?zone_id=0"
 curl -X POST "http://localhost:8003/api/recording/stop"
 ```
 
-### 3.2 저장 폴더 구조
+### 4.2 저장 폴더 구조
 
 ```
 recordings/
-└── 20251106_141029/           # 세션 ID (타임스탬프)
+└── 20260129_141029/           # 세션 ID (타임스탬프)
     ├── images/
     │   ├── cam_0/             # Top camera
     │   │   ├── frame_0001.jpg
@@ -176,7 +194,7 @@ recordings/
         └── cam_5.mp4
 ```
 
-### 3.3 카메라 번호 체계
+### 4.3 카메라 번호 체계
 
 | Camera ID | 역할 | 설명 |
 |-----------|------|------|
@@ -191,57 +209,116 @@ recordings/
 
 ## 5. 서비스별 테스트
 
-### 4.1 IO Board 서비스 (포트 8001)
+### 5.1 IO Board 서비스 (포트 8001)
 
-**하드웨어 없이 테스트:**
+**하드웨어 없이 테스트 불가** - 시리얼 연결 필요
 
 ```bash
+# Windows에서 COM 포트로 실행
 cd Edge_Environment/services/io_board
-python -m main --test  # 테스트 모드 (시뮬레이션)
+set IO_BOARD__SERIAL__PORT=COM3
+python main.py
+
+# 헬스 체크
+curl http://localhost:8001/health
+
+# 로드셀 무게 조회
+curl http://localhost:8001/loadcells
+
+# 도어/데드볼트 상태
+curl http://localhost:8001/status
 ```
 
-### 4.2 Model 서비스 (포트 8002)
+### 5.2 Model 서비스 (포트 8002)
 
 ```bash
 cd Edge_Environment/services/model
-uvicorn main:app --host 0.0.0.0 --port 8002
+python main.py
 
 # 헬스 체크
 curl http://localhost:8002/api/health
 
+# Zone 설정 조회
+curl http://localhost:8002/api/zones/config
+
 # 상품 목록 조회
 curl http://localhost:8002/api/products
+
+# 상품 판단 테스트 (Vision-only)
+curl -X POST http://localhost:8002/api/judge \
+  -H "Content-Type: application/json" \
+  -d '{"zone_id": 0, "vision_only": true, "media_paths": {"image_folder": "./test_images"}}'
 ```
 
-### 4.3 Camera Driver (포트 8003)
+### 5.3 Camera Driver (포트 8003)
 
 ```bash
 cd Edge_Environment/services/camera_driver
-uvicorn main:app --host 0.0.0.0 --port 8003
+python main.py
 
 # 상태 조회
 curl http://localhost:8003/api/status
 
-# 프레임 캡처 (카메라 연결 필요)
-curl http://localhost:8003/api/frame/0 --output frame.jpg
+# 디바이스 스캔
+curl http://localhost:8003/api/devices/scan
+
+# Zone 활성화
+curl -X POST http://localhost:8003/api/zone/0/activate
+
+# 스냅샷 (카메라 연결 필요)
+curl -X POST http://localhost:8003/api/zone/0/snapshot \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "test123", "include_top": true}'
+```
+
+### 5.4 Card Terminal (포트 5000)
+
+```bash
+cd Edge_Environment/services/card_terminal
+python main.py
+
+# 헬스 체크
+curl http://localhost:5000/status
+
+# SSE 이벤트 스트림
+curl -N http://localhost:5000/sse
+```
+
+### 5.5 Node.js 서버 (포트 8889)
+
+```bash
+cd Edge_Environment
+npm run start:server   # 서버만 실행
+npm run dev            # 서버 + React 동시 실행
+
+# 헬스 체크
+curl http://localhost:8889/health
+
+# 통합 상태 조회
+curl http://localhost:8889/api/dashboard/status
 ```
 
 ---
 
 ## 6. 통합 테스트
 
-### 5.1 전체 플로우 테스트
+### 6.1 전체 플로우 테스트
 
 ```bash
-# 1. 서비스 시작 (각각 다른 터미널)
-uvicorn main:app --port 8001  # io_board
-uvicorn main:app --port 8002  # model
-uvicorn main:app --port 8003  # camera_driver
+# PM2로 전체 서비스 시작
+npm start
 
-# 2. 헬스 체크
-curl http://localhost:8001/health
-curl http://localhost:8002/api/health
-curl http://localhost:8003/api/health
+# 또는 각각 다른 터미널에서 개별 실행
+# 터미널 1: python services/io_board/main.py
+# 터미널 2: python services/model/main.py
+# 터미널 3: python services/camera_driver/main.py
+# 터미널 4: node server/index.js
+
+# 헬스 체크
+curl http://localhost:8001/health      # io_board
+curl http://localhost:8002/api/health  # model
+curl http://localhost:8003/api/health  # camera_driver
+curl http://localhost:8889/health      # node.js
 ```
 
 ### 6.2 Pytest 실행
@@ -250,16 +327,16 @@ curl http://localhost:8003/api/health
 cd C:\Users\user\Desktop\VOICE\2026\crk\win_pc_test_sw2io_board\Edge_Environment
 
 # uv 사용 (권장) - 가상환경 자동 감지
-uv run pytest services/model/tests/ -v
-uv run pytest services/camera_driver/tests/ -v
+uv run pytest services/model/src/tests/ -v
+uv run pytest services/camera_driver/src/tests/ -v
 
 # 또는 가상환경 활성화 후 직접 실행
 .venv\Scripts\Activate.ps1
-pytest services/model/tests/ -v
-pytest services/camera_driver/tests/ -v
+pytest services/model/src/tests/ -v
+pytest services/camera_driver/src/tests/ -v
 
 # 특정 테스트
-uv run pytest services/model/tests/test_error_recovery.py -v
+uv run pytest services/model/src/tests/test_error_recovery.py -v
 
 # 커버리지
 uv run pytest --cov=services --cov-report=html
@@ -267,56 +344,7 @@ uv run pytest --cov=services --cov-report=html
 
 ---
 
-## 7. Docker 배포 (Jetson용)
-
-### 6.1 Dockerfile 예시
-
-```dockerfile
-# Jetson Nano용 (ARM64)
-FROM nvcr.io/nvidia/l4t-pytorch:r32.7.1-pth1.10-py3
-
-WORKDIR /app
-COPY . .
-RUN pip install -r requirements.txt
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002"]
-```
-
-### 6.2 docker-compose.yml
-
-```yaml
-version: '3.8'
-services:
-  model:
-    build: ./services/model
-    ports:
-      - "8002:8002"
-    environment:
-      - CAMERA_MODE=api
-      - IO_BOARD_URL=http://io_board:8001
-    depends_on:
-      - io_board
-      - camera_driver
-
-  camera_driver:
-    build: ./services/camera_driver
-    ports:
-      - "8003:8003"
-    devices:
-      - /dev/video0:/dev/video0  # Linux only
-    privileged: true
-
-  io_board:
-    build: ./services/io_board
-    ports:
-      - "8001:8001"
-    devices:
-      - /dev/ttyUSB0:/dev/ttyUSB0
-```
-
----
-
-## 8. 문제 해결
+## 7. 문제 해결
 
 ### 7.1 카메라 연결 안됨
 
@@ -344,15 +372,79 @@ netstat -ano | findstr :8002
 taskkill /PID <PID> /F
 ```
 
+### 7.4 PM2 설치
+
+```bash
+# Node.js 설치 후
+npm install -g pm2
+
+# Windows에서 PM2 자동 시작 (관리자 권한)
+npm install -g pm2-windows-startup
+pm2-startup install
+pm2 save
+```
+
 ---
 
-## 9. 테스트 체크리스트
+## 8. 테스트 체크리스트
 
-- [ ] Python 환경 설정 완료
+- [ ] Python 환경 설정 완료 (uv sync 또는 pip install)
+- [ ] Node.js 및 PM2 설치 완료
 - [ ] 의존성 설치 완료
-- [ ] IO Board 서비스 테스트 모드 실행
+- [ ] IO Board 서비스 테스트 (시리얼 연결 시)
 - [ ] Model 서비스 실행 및 헬스 체크
 - [ ] Camera Driver 실행 (폴더 모드 또는 실제 카메라)
-- [ ] 녹화 API 테스트
+- [ ] Card Terminal 헬스 체크
+- [ ] Node.js 서버 헬스 체크
 - [ ] Pytest 테스트 통과
 - [ ] 통합 테스트 완료
+
+---
+
+## API 엔드포인트 요약
+
+### IO Board (8001)
+```
+GET  /health      # 헬스 체크
+GET  /loadcells   # 로드셀 무게
+GET  /status      # door + deadbolt 상태
+POST /deadbolt    # 데드볼트 제어
+POST /init        # 초기화
+POST /calibrate   # 센서 보정
+GET  /sse         # SSE 스트림
+```
+
+### Model (8002)
+```
+GET  /api/health         # 헬스 체크
+GET  /api/products       # 상품 목록
+GET  /api/zones/config   # Zone 설정
+POST /api/judge          # 상품 판단
+```
+
+### Camera Driver (8003)
+```
+GET  /api/health              # 헬스 체크
+GET  /api/status              # 카메라 상태
+GET  /api/devices/scan        # 디바이스 스캔
+POST /api/zone/{id}/activate  # Zone 활성화
+POST /api/zone/{id}/snapshot  # 스냅샷 캡처
+POST /api/recording/start     # 녹화 시작
+POST /api/recording/stop      # 녹화 중지
+```
+
+### Card Terminal (5000)
+```
+GET  /status                       # 헬스 체크
+GET  /sse                          # SSE 이벤트 스트림
+POST /payment/token/approve        # 토큰 결제 승인
+POST /payment/samsung-pay/approve  # 삼성페이 승인
+```
+
+### Node.js (8889)
+```
+GET  /health                  # 헬스 체크
+GET  /api/dashboard/status    # 통합 상태
+GET  /sse/events              # 통합 SSE 스트림
+POST /api/model/judge         # 판단 프록시
+```

@@ -1,7 +1,4 @@
 const API_BASE = window.location.origin; // Or configure via env var if needed
-// For development, you might want to point to specific ports if proxy isn't set up
-const IO_BOARD_URL = 'http://localhost:8001';
-const CAMERA_DRIVER_URL = 'http://localhost:8003';
 
 // Helper for handling responses
 const handleResponse = async (response) => {
@@ -30,11 +27,22 @@ export const api = {
         toggleDeadbolt: () => fetch(`${API_BASE}/api/door/deadbolt/toggle`, { method: 'POST' }).then(handleResponse),
     },
     camera: {
-        init: () => fetch(`${CAMERA_DRIVER_URL}/api/init`, { method: 'POST' }).then(handleResponse),
+        init: () => fetch(`${API_BASE}/api/camera/init`, { method: 'POST' }).then(handleResponse),
         activateZone: (zoneId) => fetch(`${API_BASE}/api/camera/zone/${zoneId}/activate`, { method: 'POST' }).then(handleResponse),
-        getFrame: (cameraId) => fetch(`${CAMERA_DRIVER_URL}/api/camera/${cameraId}/frame`).then(handleResponse),
-        // Helper to construct image URLs
-        getPreviewUrl: (cameraId) => `${CAMERA_DRIVER_URL}/frame/${cameraId}?t=${Date.now()}`,
+        deactivateZone: (zoneId) => fetch(`${API_BASE}/api/camera/zone/${zoneId}/deactivate`, { method: 'POST' }).then(handleResponse),
+        capture: (zoneId, includeTop = true) => fetch(`${API_BASE}/api/camera/zone/${zoneId}/capture?include_top=${includeTop}`).then(handleResponse),
+        snapshotAndJudge: (data) => fetch(`${API_BASE}/api/camera/test/snapshot-and-judge`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        }).then(handleResponse),
+        recordAndJudge: (data) => fetch(`${API_BASE}/api/camera/test/record-and-judge`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        }).then(handleResponse),
+        getFrame: (cameraId) => fetch(`${API_BASE}/api/camera/${cameraId}/frame`).then(handleResponse),
+        getPreviewUrl: (cameraId) => `${API_BASE}/api/camera/stream/${cameraId}?t=${Date.now()}`,
     },
     weight: {
         resetBaseline: () => fetch(`${API_BASE}/api/weight/baseline/reset`, { method: 'POST' }).then(handleResponse),
@@ -48,20 +56,24 @@ export const api = {
     config: {
         getZoneMapping: () => fetch(`${API_BASE}/api/config/zone-mapping`).then(handleResponse),
         getCameraDeviceMap: () => fetch(`${API_BASE}/api/config/camera-device-map`).then(handleResponse),
-        saveConfig: (config) => fetch(`${API_BASE}/api/config/save`, { // Hypothetical endpoint based on usage
-            method: 'POST',
+        updateZoneMapping: (mapping) => fetch(`${API_BASE}/api/config/zone-mapping`, {
+            method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config)
+            body: JSON.stringify(mapping)
         }).then(handleResponse),
+        updateCameraDeviceMap: (mapping) => fetch(`${API_BASE}/api/config/camera-device-map`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(mapping)
+        }).then(handleResponse),
+        reload: () => fetch(`${API_BASE}/api/config/reload`, { method: 'POST' }).then(handleResponse),
     },
     ioBoard: {
-        getLoadcells: () => fetch(`${IO_BOARD_URL}/loadcells`).then(handleResponse),
-        getStatus: () => fetch(`${IO_BOARD_URL}/status`).then(handleResponse),
+        getLoadcells: () => fetch(`${API_BASE}/api/io-board/loadcells`).then(handleResponse),
+        getStatus: () => fetch(`${API_BASE}/api/io-board/status`).then(handleResponse),
     }
 };
 
 export const CONSTANTS = {
-    API_BASE,
-    IO_BOARD_URL,
-    CAMERA_DRIVER_URL
+    API_BASE
 };

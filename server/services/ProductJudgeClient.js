@@ -453,6 +453,128 @@ class ProductJudgeClient {
             return false;
         }
     }
+
+    // ========================================
+    // Recording 기반 판단 API
+    // ========================================
+
+    /**
+     * Recording 데이터로 상품 판단
+     *
+     * IO Board의 recording 데이터를 직접 전달하면,
+     * Model 서비스가 자동으로 baseline/current를 계산하고
+     * delta weight를 산출하여 판단합니다.
+     *
+     * @param {Object} params
+     * @param {number} params.zone_id - Zone ID (0-4)
+     * @param {Array<{loadcells: string[], timestamp: string}>} params.recording - Recording 데이터
+     * @param {Object} [params.media_paths] - 이미지 경로 (선택)
+     * @param {string} [params.media_paths.image_folder] - 스냅샷 폴더
+     * @param {string} [params.media_paths.top_image] - Top 카메라 이미지
+     * @param {string} [params.media_paths.side_image] - Side 카메라 이미지
+     * @param {number} [params.timestamp] - 이벤트 발생 시각 (Unix timestamp)
+     * @param {string} [params.inference_id] - 추론 ID (취소용)
+     * @param {AbortSignal} [abortSignal] - 취소 시그널
+     * @returns {Promise<JudgeResponse>}
+     *
+     * @example
+     * // IO Board에서 recording 데이터 가져오기
+     * const recordingData = await ioBoardClient.getRecordingData();
+     *
+     * // Model 서비스에 판단 요청
+     * const result = await productJudgeClient.judgeWithRecording({
+     *   zone_id: 0,
+     *   recording: recordingData.logs,
+     *   media_paths: { image_folder: 'data/20260129_143000/images' }
+     * });
+     */
+    async judgeWithRecording(params, abortSignal = null) {
+        try {
+            const requestConfig = { timeout: this.timeout };
+
+            // AbortSignal 지원
+            if (abortSignal) {
+                requestConfig.signal = abortSignal;
+            }
+
+            // media_paths 구성
+            let mediaPaths = null;
+            if (params.media_paths) {
+                mediaPaths = {
+                    image_folder: params.media_paths.image_folder || null,
+                    active_zones: params.media_paths.active_zones || null,
+                    top_image: params.media_paths.top_image || null,
+                    side_image: params.media_paths.side_image || null,
+                };
+            }
+
+            const requestBody = {
+                zone_id: params.zone_id,
+                recording: params.recording,  // Recording 형식 사용
+                media_paths: mediaPaths,
+                timestamp: params.timestamp || Date.now() / 1000,
+                inference_id: params.inference_id || null,
+            };
+
+            console.log(`[ProductJudgeClient] judgeWithRecording: zone=${params.zone_id}, samples=${params.recording?.length || 0}`);
+
+            const response = await axios.post(
+                `${this.baseUrl}/api/judge`,
+                requestBody,
+                requestConfig
+            );
+
+            console.log(`[ProductJudgeClient] judgeWithRecording completed: zone=${params.zone_id}, status=${response.data.status}`);
+            return response.data;
+        } catch (error) {
+            // AbortError 처리
+            if (axios.isCancel(error) || error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+                const abortError = new Error('Request aborted');
+                abortError.name = 'AbortError';
+                throw abortError;
+            }
+            console.error('[ProductJudgeClient] judgeWithRecording error:', error.message);
+            throw new Error(`Judge with recording failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Recording 데이터 + 카메라 스냅샷으로 상품 판단 (통합 API)
+     *
+     * IO Board recording 데이터와 Camera Driver 스냅샷을 함께 사용하여
+     * 가장 정확한 상품 판단을 수행합니다.
+     *
+     * @param {Object} params
+     * @param {number} params.zone_id - Zone ID (0-4)
+     * @param {Array<{loadcells: string[], timestamp: string}>} params.recording - Recording 데이터
+     * @param {string} params.snapshot_folder - 스냅샷 저장 폴더
+     * @param {boolean} [params.include_top=true] - Top 카메라 포함 여부
+     * @param {string} [params.inference_id] - 추론 ID
+     * @param {AbortSignal} [abortSignal] - 취소 시그널
+     * @returns {Promise<JudgeResponse>}
+     */
+    async judgeWithRecordingAndSnapshot(params, abortSignal = null) {
+        // Zone에 해당하는 Side 카메라 ID (Zone 0 → CAM 1, Zone 1 → CAM 2, ...)
+        const sideCameraId = params.zone_id + 1;
+
+        const mediaPaths = {
+            image_folder: params.snapshot_folder,
+            active_zones: [params.zone_id],
+        };
+
+        // 기본 이미지 경로 구성 (Camera Driver 규칙)
+        if (params.include_top !== false) {
+            mediaPaths.top_image = `${params.snapshot_folder}/cam_0/snapshot.jpg`;
+        }
+        mediaPaths.side_image = `${params.snapshot_folder}/cam_${sideCameraId}/snapshot.jpg`;
+
+        return this.judgeWithRecording({
+            zone_id: params.zone_id,
+            recording: params.recording,
+            media_paths: mediaPaths,
+            inference_id: params.inference_id,
+        }, abortSignal);
+    }
 }
 
 module.exports = new ProductJudgeClient();

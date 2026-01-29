@@ -3,11 +3,13 @@
 ## 브랜치 정보
 - **브랜치명**: minkyu
 - **목적**: Model 서비스 개발 및 테스트
-- **최종 업데이트**: 2026-01-26
+- **최종 업데이트**: 2026-01-29
 - **Pull Request 시 제외 예정**: 이 README 파일, INTEGRATION_GUIDE.md
 
-> **중요 변경 (2026-01-26)**: Model 서비스가 **Stateless**로 전환되었습니다.
-> Node.js가 SSE 구독 및 카메라 스냅샷을 담당합니다.
+> **아키텍처 (2026-01-29)**:
+> - Model 서비스: **Stateless** (판단 전용)
+> - Node.js: Event-Driven Architecture (SSE 구독 + 세션 관리)
+> - Vision: Motion Tracking + Multi-View Ensemble 지원
 
 ---
 
@@ -36,75 +38,84 @@
 Edge_Environment/
 ├── services/
 │   ├── io_board/          # IO Board 통합 (포트 8001)
-│   ├── model/             # AI 상품 판단 서비스 (포트 8002) ★ 신규
+│   ├── model/             # AI 상품 판단 서비스 (포트 8002)
 │   ├── camera_driver/     # 6대 카메라 관리 (포트 8003)
 │   ├── mqtt_client/       # MQTT CHAI IF01-04 (포트 8006)
 │   └── card_terminal/     # 결제 터미널 (포트 5000)
+├── server/                # Node.js 오케스트레이터 (포트 8889)
+│   ├── services/          # 핵심 서비스 모듈
+│   └── routes/            # API 라우트
+├── client/                # React 대시보드 (포트 3000)
 └── README_MINKYU.md       # 이 파일 (브랜치 전용)
 ```
 
-> **삭제됨**: deadbolt_driver (8004), loadcell_driver (8005) → io_board에 통합
+> **PM2 통합**: `npm start`로 모든 서비스 동시 실행
 
 ---
 
 ## Model 서비스 상세 (Stateless 아키텍처)
 
 > **삭제된 폴더/파일**:
-> - `sse_client/` (SSE 구독 → Node.js로 이전)
-> - `api/node_client.py` (결과 푸시 → 동기 응답으로 변경)
+> - `src/sse_client/` (SSE 구독 → Node.js로 이전)
+> - `src/api/node_client.py` (결과 푸시 → 동기 응답으로 변경)
 
 ### 디렉토리 구조
 ```
 services/model/
 ├── main.py                      # FastAPI 진입점 (Stateless)
-├── config.py                    # Zone-Channel-Camera 매핑
-├── requirements.txt
-│
-├── api/                         # REST API
-│   ├── routes.py                # /api/judge (weight_data + media_paths)
-│   └── models.py                # Pydantic 스키마
-│
-├── camera/                      # 이미지 로드 (Node.js가 전달한 경로에서)
-│   ├── camera_client.py         # camera_driver HTTP 클라이언트 (폴백용)
-│   └── frame_capturer.py        # FolderFrameLoader
-│
-├── vision/                      # YOLO 추론 파이프라인
-│   ├── yolo_wrapper.py          # .pt 또는 .engine 지원
-│   ├── hand_filter.py
-│   ├── top5_extractor.py
-│   └── multi_view_ensemble.py
-│
-├── weight/                      # 무게 기반 개수 계산
-│   ├── count_calculator.py
-│   └── multi_zone_monitor.py
-│
-├── engine/                      # 판단 엔진
-│   ├── models.py
-│   ├── decision_engine.py
-│   ├── event_tracker.py
-│   └── advanced/                # 고급 시나리오
-│       ├── baseline_tracker.py
-│       ├── return_detector.py
-│       ├── cross_zone_detector.py
-│       └── rapid_pickup_handler.py
-│
-├── database/                    # 상품 DB
-│   └── product_db.py            # IF11 형식 지원
-│
-├── door_payment/                # ★ 도어 결제 모듈 (신규)
-│   ├── transaction_controller.py
-│   └── payment_client.py
-│
-├── monitor/                     # --test 모드 대시보드
-│   ├── console_dashboard.py
-│   └── test_mode.py
-│
-└── tests/                       # 단위 테스트
-    ├── conftest.py
-    └── test_*.py
+└── src/                         # ★ 소스 코드 폴더
+    ├── config.py                # Zone-Channel-Camera 매핑 + Vision 설정
+    │
+    ├── api/                     # REST API
+    │   ├── routes.py            # /api/judge, /api/products, /api/door/*
+    │   └── models.py            # Pydantic 스키마 (WeightData, MediaPaths)
+    │
+    ├── camera/                  # 이미지 로드 (Node.js가 전달한 경로에서)
+    │   ├── camera_client.py     # camera_driver HTTP 클라이언트 (폴백용)
+    │   └── frame_capturer.py    # FolderFrameLoader
+    │
+    ├── vision/                  # YOLO 추론 파이프라인
+    │   ├── yolo_wrapper.py      # .pt 또는 .engine 지원
+    │   ├── hand_filter.py       # 손 근접 필터
+    │   ├── top5_extractor.py    # Top-K 추출
+    │   ├── multi_view_ensemble.py   # Top+Side 앙상블
+    │   ├── multi_hand_detector.py   # 다중 손 감지
+    │   └── motion_correlation_filter.py  # ★ Motion Tracking
+    │
+    ├── weight/                  # 무게 기반 개수 계산
+    │   ├── count_calculator.py
+    │   └── multi_zone_monitor.py
+    │
+    ├── engine/                  # 판단 엔진
+    │   ├── models.py
+    │   ├── decision_engine.py
+    │   ├── event_tracker.py
+    │   └── advanced/            # 고급 시나리오
+    │       ├── baseline_manager.py  # 베이스라인 드리프트 보정
+    │       ├── return_detector.py   # 반환 감지
+    │       ├── cross_zone_detector.py  # Zone 간 이동
+    │       └── rapid_pickup_handler.py # 연속 픽업
+    │
+    ├── database/                # 상품 DB
+    │   └── product_db.py        # IF11 형식 지원
+    │
+    ├── door_payment/            # 도어 결제 모듈
+    │   ├── __init__.py          # DoorPaymentController export
+    │   ├── controller.py
+    │   └── payment_client.py
+    │
+    ├── monitor/                 # --test 모드 대시보드
+    │   ├── console_dashboard.py
+    │   └── test_mode.py
+    │
+    ├── error_recovery/          # 에러 복구 모듈
+    │
+    └── tests/                   # 단위 테스트
+        ├── conftest.py
+        └── test_*.py
 ```
 
-### 주요 설정 (config.py)
+### 주요 설정 (src/config.py)
 ```python
 # 변경된 파라미터 (2026-01-21)
 top_k: int = 1              # Top-1만 추출 (최고 confidence 클래스)
@@ -117,7 +128,7 @@ tolerance_percent: float = 0.10  # 허용 오차 10%
 Vision 판단 실패(NO_DETECTION, UNCERTAIN) 시 무게만으로 가장 가까운 상품을 추정합니다.
 
 ```python
-# decision_engine.py
+# src/engine/decision_engine.py
 def judge_by_weight_only(delta_weight: float) -> JudgmentResult:
     """
     무게만으로 가장 가까운 상품 추정 (Vision 실패 시 폴백).
@@ -132,34 +143,70 @@ def judge_by_weight_only(delta_weight: float) -> JudgmentResult:
 
 ## 실행 방법
 
-### 일반 모드 (FastAPI 서버)
+### PM2 통합 실행 (권장)
 ```bash
-cd Edge_Environment/services/model
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8002 --reload
+cd Edge_Environment
+npm start                                    # 전체 서비스 시작
+pm2 start ecosystem.config.js --only model   # Model 서비스만 시작
 ```
 
-### 테스트 모드 (콘솔 대시보드)
+### 개별 서비스 실행 (개발용)
 ```bash
 cd Edge_Environment/services/model
-python -m main --test
+python main.py                               # FastAPI 서버 시작 (포트 8002)
+
+# 환경 변수 지정
+LOG_LEVEL=DEBUG python main.py              # 디버그 모드
 ```
 
 ### 단위 테스트
 ```bash
 cd Edge_Environment/services/model
-python -m pytest tests/ -v
+python -m pytest src/tests/ -v
 ```
 
 ---
 
 ## API 엔드포인트
 
+### 핵심 API
 | Method | Endpoint | 설명 |
 |--------|----------|------|
-| POST | /api/judge | 상품 판단 요청 |
 | GET | /api/health | 헬스 체크 |
+| GET | /api/zones/config | Zone 설정 조회 |
+| POST | /api/judge | 상품 판단 요청 (메인) |
+| POST | /api/judge/cancel | 추론 취소 |
+| GET | /api/judge/active | 활성 추론 목록 |
+| POST | /api/judge/multi-zone | 다중 Zone 판단 |
+| POST | /api/judge/with-history | 히스토리 기반 판단 |
+
+### 상품 관리 API
+| Method | Endpoint | 설명 |
+|--------|----------|------|
 | GET | /api/products | 상품 목록 |
+| GET | /api/products/{id} | 상품 상세 |
+| POST | /api/products/register | 상품 등록 |
+| PUT | /api/products/{id} | 상품 수정 |
+| DELETE | /api/products/{id} | 상품 삭제 |
+| POST | /api/products/sync | IF11 형식 동기화 |
+| GET | /api/products/export | 전체 내보내기 |
+| GET | /api/products/search | 이름 검색 |
+| GET | /api/products/barcode/{bc} | 바코드 조회 |
+| POST | /api/products/{id}/images | 이미지 업로드 |
+
+### 통계 API
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET | /api/stats/recognition-rate | 인식률 통계 |
+| POST | /api/stats/reset | 통계 초기화 |
+
+### Door Payment API
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| POST | /api/door/transaction | 도어 결제 시작 |
+| GET | /api/door/status | 도어 상태 |
+| POST | /api/door/cancel | 거래 취소 |
+| POST | /api/door/emergency-lock | 비상 잠금 |
 
 ### /api/judge 요청 예시 (권장 형식)
 ```json
@@ -210,15 +257,29 @@ python -m pytest tests/ -v
 
 ## 변경 이력
 
+### 2026-01-29 ★ 최신
+- **Motion Tracking 추가**: `src/vision/motion_correlation_filter.py`
+  - 연속 프레임 분석으로 손 움직임 추적
+  - motion_bonus_map으로 신뢰도 보정
+- **Event-Driven Architecture**: Node.js 세션 관리 강화
+  - `WeightChangeAccumulator`: 무게 변화 누적 처리
+  - `PendingItemsStack`: 세션별 픽업/반환 관리
+- **추론 취소 기능**: `/api/judge/cancel`, `/api/judge/active`
+- **카메라별 결과 반환**: `camera_results` 필드 추가
+
+### 2026-01-28
+- **통합 npm 실행**: `npm start`로 React 클라이언트 포함 전체 서비스 실행
+- **PM2 ecosystem 업데이트**: React client (port 3000) 추가
+
 ### 2026-01-26 ★ 아키텍처 변경
 - **Model 서비스 Stateless 전환**
-  - `sse_client/` 폴더 삭제 (SSE 구독 → Node.js로 이전)
-  - `api/node_client.py` 삭제 (결과 푸시 → 동기 응답)
+  - `src/sse_client/` 폴더 삭제 (SSE 구독 → Node.js로 이전)
+  - `src/api/node_client.py` 삭제 (결과 푸시 → 동기 응답)
 - **새로운 API 형식**: `weight_data` + `media_paths`
 - **Node.js 포트 변경**: 8888 → 8889
-- **Door Payment 모듈 추가**: `door_payment/`
-- **Advanced 엔진 모듈 추가**: `engine/advanced/`
-  - `baseline_tracker.py` - 베이스라인 드리프트 감지
+- **Door Payment 모듈 추가**: `src/door_payment/`
+- **Advanced 엔진 모듈 추가**: `src/engine/advanced/`
+  - `baseline_manager.py` - 베이스라인 드리프트 보정
   - `return_detector.py` - 반환 감지
   - `cross_zone_detector.py` - Zone 간 이동
   - `rapid_pickup_handler.py` - 연속 픽업
@@ -226,7 +287,7 @@ python -m pytest tests/ -v
 ### 2026-01-22 (2차)
 - **IF11 상품 리스트 지원**: Node.js → Model 상품 동기화 (`/api/products/sync`)
 - **에러 코드 체계**: E2xxx (IO Board), E3xxx (Camera), E4xxx (Vision), E5xxx (Network), E6xxx (Payment)
-- **카메라 디바이스 스캐너**: `device_scanner.py` (고유 ID 기반 재매핑)
+- **카메라 디바이스 스캐너**: `src/core/device_scanner.py` (고유 ID 기반 재매핑)
 
 ### 2026-01-22 (1차)
 - **모델 교체**: `1224_v8n_img480_best_aug_segment.pt` → `siyeon_best.pt`
@@ -235,9 +296,9 @@ python -m pytest tests/ -v
 - **평균 Confidence 26% 향상**: 0.357 → 0.450
 
 ### 2026-01-21
-- **config.py**: top_k=5 → top_k=1 (최고 confidence만 추출)
-- **config.py**: 앙상블 가중치 4:6 → 5:5 (동일 가중치)
-- **decision_engine.py**: `judge_by_weight_only()` 폴백 메서드 추가
+- **src/config.py**: top_k=5 → top_k=1 (최고 confidence만 추출)
+- **src/config.py**: 앙상블 가중치 4:6 → 5:5 (동일 가중치)
+- **src/engine/decision_engine.py**: `judge_by_weight_only()` 폴백 메서드 추가
 
 ### 이전 커밋
 - Model 서비스 기본 구조 생성
@@ -311,8 +372,8 @@ pm2 delete all
 
 | 테스트 | 설명 | 파일 |
 |--------|------|------|
-| **오프라인 테스트** | pt 파일 + 데이터셋 (로드셀 정확 가정) | `tests/test_offline_dataset.py` |
-| **하드웨어 테스트** | 실제 IO Board + 카메라 연동 | `tests/test_hardware_integration.py` |
+| **오프라인 테스트** | pt 파일 + 데이터셋 (로드셀 정확 가정) | `src/tests/test_offline_dataset.py` |
+| **하드웨어 테스트** | 실제 IO Board + 카메라 연동 | `src/tests/test_hardware_integration.py` |
 
 ### 1. 오프라인 테스트 (Vision 파이프라인)
 
@@ -320,22 +381,22 @@ pm2 delete all
 cd Edge_Environment/services/model
 
 # 전체 데이터셋 테스트
-python -m tests.test_offline_dataset
+python -m src.tests.test_offline_dataset
 
 # 특정 세션만
-python -m tests.test_offline_dataset --session 20260116_180419
+python -m src.tests.test_offline_dataset --session 20260116_180419
 
 # 특정 프레임만
-python -m tests.test_offline_dataset --session 20260116_180419 --frame 10
+python -m src.tests.test_offline_dataset --session 20260116_180419 --frame 10
 
 # 시각화 결과 저장
-python -m tests.test_offline_dataset --visualize --output-dir ./viz_results
+python -m src.tests.test_offline_dataset --visualize --output-dir ./viz_results
 
 # JSON 결과 저장
-python -m tests.test_offline_dataset --output results.json
+python -m src.tests.test_offline_dataset --output results.json
 
 # 커스텀 모델/데이터셋
-python -m tests.test_offline_dataset \
+python -m src.tests.test_offline_dataset \
   --model "C:\path\to\model.pt" \
   --dataset "C:\path\to\test_dataset"
 ```
@@ -364,28 +425,28 @@ test_dataset/
 cd Edge_Environment/services/model
 
 # 서비스 연결 확인
-python -m tests.test_hardware_integration --check-connection
+python -m src.tests.test_hardware_integration --check-connection
 
 # SSE 이벤트 모니터링 (10초)
-python -m tests.test_hardware_integration --monitor-sse --duration 10
+python -m src.tests.test_hardware_integration --monitor-sse --duration 10
 
 # Zone 캡처 테스트
-python -m tests.test_hardware_integration --capture-zone 1
+python -m src.tests.test_hardware_integration --capture-zone 1
 
 # 전체 Zone 스캔
-python -m tests.test_hardware_integration --scan-all-zones
+python -m src.tests.test_hardware_integration --scan-all-zones
 
 # 수동 판단 테스트
-python -m tests.test_hardware_integration --manual-judge --zone 1 --delta -365
+python -m src.tests.test_hardware_integration --manual-judge --zone 1 --delta -365
 
 # 실시간 모니터링 + 자동 판단 (60초)
-python -m tests.test_hardware_integration --realtime-monitor --duration 60
+python -m src.tests.test_hardware_integration --realtime-monitor --duration 60
 
 # 정확도 테스트 (10회 반복)
-python -m tests.test_hardware_integration --accuracy-test --zone 1 --repeat 10
+python -m src.tests.test_hardware_integration --accuracy-test --zone 1 --repeat 10
 
 # 특정 상품 정확도 테스트
-python -m tests.test_hardware_integration \
+python -m src.tests.test_hardware_integration \
   --accuracy-test \
   --zone 1 \
   --repeat 10 \

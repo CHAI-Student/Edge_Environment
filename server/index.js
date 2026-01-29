@@ -162,6 +162,11 @@ app.use('/sse', eventsModule.router);
 app.use('/api', eventsModule.router);
 console.log('[APP] Events routes loaded');
 
+// IO Board 라우트 (Proxy)
+const ioBoardModule = require("./routes/ioboard");
+app.use('/api/io-board', ioBoardModule);
+console.log('[APP] IO Board routes loaded');
+
 // Dashboard 상태 API
 app.get('/api/dashboard/status', async (req, res) => {
     try {
@@ -204,6 +209,21 @@ const pendingItemsStack = require("./services/PendingItemsStack");
 // WeightChangeAccumulator에 PendingItemsStack 연결
 weightAccumulator.setPendingItemsStack(pendingItemsStack);
 console.log('[APP] Weight accumulator connected to pending items stack');
+
+// IO Board SSE 에러 및 재연결 이벤트 리스너 등록
+ioBoardSSE.on('error', (error) => {
+    console.error('[APP] IOBoardSSE error:', error.message);
+});
+
+ioBoardSSE.on('max_reconnect_reached', () => {
+    console.error('[APP] CRITICAL: IO Board SSE connection lost permanently after max retries');
+    console.error('[APP] System may not receive weight/door events. Manual restart required.');
+    // TODO: 알림 시스템 연동 (이메일, Slack 등)
+});
+
+ioBoardSSE.on('reconnecting', (attempt, maxAttempts) => {
+    console.warn(`[APP] IOBoardSSE reconnecting (${attempt}/${maxAttempts})...`);
+});
 
 // IO Board SSE 구독 시작 (모듈 초기화 후)
 ioBoardSSE.start();

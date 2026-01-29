@@ -1,9 +1,9 @@
 # Edge Environment 통합 가이드
 
-> **작성일**: 2026-01-26 (최종 업데이트)
+> **작성일**: 2026-01-29 (최종 업데이트)
 > **작성자**: minkyu 브랜치
 > **대상**: Node.js 총괄 담당자 및 개발팀
-> **아키텍처 변경**: Model 서비스 stateless 전환 완료
+> **아키텍처**: Event-Driven + Model Stateless
 
 ---
 
@@ -22,14 +22,17 @@
 
 ## 1. 시스템 개요
 
-### 1.1 전체 아키텍처 (2026-01-26 업데이트)
+### 1.1 전체 아키텍처 (2026-01-29 업데이트)
 
-> **중요 변경**: Model 서비스가 **stateless**로 전환되었습니다. Node.js가 SSE 구독 및 카메라 스냅샷을 담당합니다.
+> **핵심 변경**:
+> - Model 서비스: **Stateless** (판단 전용, SSE 구독 없음)
+> - Node.js: **Event-Driven Architecture** (세션 관리 + 무게 누적)
+> - Vision: **Motion Tracking** + **Multi-View Ensemble**
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    AI Smart Vending Machine System                       │
-│                    (Node.js 중심 오케스트레이션)                          │
+│                    (Event-Driven Architecture)                           │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐               │
@@ -42,32 +45,42 @@
 │   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐               │
 │   │  io_board   │     │camera_driver│     │card_terminal│               │
 │   │   :8001     │     │   :8003     │     │   :5000     │               │
+│   │   (SSE)     │     │(Snapshot/Rec)│    │  (Payment)  │               │
 │   └──────┬──────┘     └──────┬──────┘     └──────┬──────┘               │
-│          │                   │                   │                       │
 │          │                   │                   │                       │
 │   ┌──────┴───────────────────┴───────────────────┴──────────────────┐   │
 │   │              Node.js Orchestrator :8889 ★                        │   │
 │   │                                                                  │   │
-│   │   1. IO Board SSE 구독 (loadcell.change 감지)                    │   │
-│   │   2. Camera Driver 스냅샷 요청                                   │   │
-│   │   3. Model 서비스에 판단 요청 (weight_data + media_paths)        │   │
-│   │   4. 결제 처리 + MQTT 연동                                       │   │
-│   │   5. Frontend 대시보드 제공                                      │   │
+│   │   ┌─────────────────────────────────────────────────────────┐   │   │
+│   │   │ IOBoardSSESubscriber                                     │   │   │
+│   │   │   - loadcell.change / door.update 이벤트 수신            │   │   │
+│   │   │   - 데드볼트 열림/닫힘 감지 → 세션 관리                   │   │   │
+│   │   └─────────────────────────────────────────────────────────┘   │   │
+│   │   ┌─────────────────┐   ┌─────────────────┐                     │   │
+│   │   │WeightChange     │   │PendingItemsStack│                     │   │
+│   │   │Accumulator      │ ↔ │ (세션별 관리)   │                     │   │
+│   │   └─────────────────┘   └─────────────────┘                     │   │
+│   │                                                                  │   │
 │   └────────────────────────┬────────────────────────────────────────┘   │
 │                            │                                             │
-│                            │ HTTP POST /api/judge                        │
-│                            │ (weight_data + media_paths)                 │
+│                            │ POST /api/judge                             │
+│                            │ {weight_data, media_paths}                  │
 │                            ▼                                             │
 │   ┌─────────────────────────────────────────────────────────────────┐   │
 │   │              model :8002 (STATELESS)                             │   │
 │   │                                                                  │   │
-│   │   - Vision 추론 (YOLO)                                          │   │
-│   │   - Weight 검증                                                  │   │
-│   │   - 판단 결과 반환 (SSE 구독 없음!)                              │   │
+│   │   - Vision: YOLO + Motion Tracking + Multi-View Ensemble        │   │
+│   │   - Weight: 무게 검증 + 개수 계산                               │   │
+│   │   - 판단 결과 반환 (camera_results 포함)                        │   │
 │   └─────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
+│   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐               │
+│   │ mqtt_client │     │   MongoDB   │     │    MinIO    │               │
+│   │   :8006     │     │  (logs/db)  │     │  (images)   │               │
+│   └─────────────┘     └─────────────┘     └─────────────┘               │
+│                                                                          │
 │   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │              mqtt_client :8006 (MQTT CHAI IF01-04)               │   │
+│   │              React Client :3000 (Dashboard)                      │   │
 │   └─────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -77,10 +90,11 @@
 
 | 서비스 | 포트 | 언어 | 역할 |
 |--------|------|------|------|
-| **orchestrator** | 8889 | Node.js | SSE 구독 + 스냅샷 요청 + 판단 흐름 제어 ★ |
+| **orchestrator** | 8889 | Node.js | SSE 구독 + 세션 관리 + 판단 흐름 제어 ★ |
+| **client** | 3000 | React | 웹 대시보드 UI |
 | **io_board** | 8001 | Python | 로드셀 10채널 + 데드볼트 SSE 스트림 |
 | **model** | 8002 | Python | AI 상품 판단 (Stateless, Vision + Weight) |
-| **camera_driver** | 8003 | Python | 6대 카메라 관리 + 스냅샷 저장 |
+| **camera_driver** | 8003 | Python | 6대 카메라 관리 + 스냅샷/녹화 |
 | **card_terminal** | 5000 | Python | 결제 터미널 |
 | **mqtt_client** | 8006 | Python | MQTT 브로커 연동 (IF01-04) |
 
@@ -93,89 +107,113 @@
 ```
 Edge_Environment/
 ├── server/                         # Node.js Orchestrator
-│   ├── index.js                    # Express 진입점 (포트 8888)
+│   ├── index.js                    # Express 진입점 (포트 8889)
 │   ├── config/
 │   │   ├── key.js                  # 환경 설정 라우터
-│   │   ├── dev.js                  # 개발 환경 (MQTT, API 등)
+│   │   ├── dev.js                  # 개발 환경
 │   │   └── prod.js                 # 프로덕션 환경
 │   ├── routes/
 │   │   ├── auth.js                 # JWT 인증
 │   │   ├── mqtt.js                 # MQTT 라우팅
-│   │   └── RestAPI/                # REST API 모듈
-│   └── services/
-│       ├── IOBoardClient.js        # io_board HTTP 클라이언트
-│       └── ProductJudgeClient.js   # model 서비스 HTTP 클라이언트
+│   │   ├── camera.js               # 카메라 제어 라우트
+│   │   ├── cameraCallback.js       # Event-Driven 콜백
+│   │   ├── door.js                 # 도어 제어 라우트
+│   │   ├── model.js                # Model 프록시 라우트
+│   │   ├── events.js               # SSE 이벤트 라우트
+│   │   ├── logs.js                 # 로그 라우트
+│   │   ├── Mqtt/                   # MQTT 모듈
+│   │   ├── RestAPI/                # REST API 모듈
+│   │   └── AIServer/               # AI 서버 모듈
+│   ├── services/
+│   │   ├── IOBoardSSESubscriber.js # SSE 구독 + 세션 관리 ★
+│   │   ├── IOBoardClient.js        # io_board HTTP 클라이언트
+│   │   ├── CameraDriverClient.js   # camera_driver HTTP 클라이언트
+│   │   ├── ProductJudgeClient.js   # model 서비스 HTTP 클라이언트
+│   │   ├── ConfigManager.js        # Zone 설정 관리
+│   │   ├── WeightChangeAccumulator.js  # 무게 변화 누적 ★
+│   │   ├── PendingItemsStack.js    # 세션별 픽업/반환 관리 ★
+│   │   └── ScheduledLogger.js      # 스케줄 로깅
+│   └── model/                      # DB 모델
 │
 ├── services/                       # Python 마이크로서비스
 │   ├── io_board/                   # 로드셀 + 데드볼트 (8001)
-│   ├── model/                      # AI 상품 판단 (8002) ★
+│   ├── model/                      # AI 상품 판단 (8002)
 │   ├── camera_driver/              # 카메라 관리 (8003)
 │   ├── mqtt_client/                # MQTT 클라이언트 (8006)
 │   └── card_terminal/              # 결제 터미널 (5000)
 │
-├── client/                         # React Frontend
+├── client/                         # React Frontend (포트 3000)
+│   ├── src/
+│   └── public/
+│
 ├── ecosystem.config.js             # PM2 설정
 ├── package.json                    # Node.js 의존성
+├── pyproject.toml                  # Python 의존성 (uv)
 └── .env                            # 환경 변수
 ```
 
 ### 2.2 Model 서비스 상세 구조 (Stateless 아키텍처)
 
-> **변경사항**: `sse_client/` 폴더가 삭제되었습니다. Model 서비스는 더 이상 SSE를 구독하지 않습니다.
-> Node.js가 SSE 구독 및 카메라 스냅샷을 담당하고, Model은 판단만 수행합니다.
+> **핵심 특징**:
+> - Stateless: SSE 구독 없음, 요청-응답 방식만 지원
+> - Motion Tracking: 연속 프레임 분석으로 손 움직임 추적
+> - 추론 취소: `/api/judge/cancel` 엔드포인트로 진행 중인 추론 취소 가능
 
 ```
 services/model/
 ├── main.py                         # FastAPI 진입점 (Stateless)
-├── config.py                       # 설정 (Zone 매핑, 파라미터)
-├── requirements.txt                # Python 의존성
-│
-├── api/                            # REST API
-│   ├── routes.py                   # 엔드포인트 정의 (/api/judge 등)
-│   └── models.py                   # Pydantic 스키마 (WeightData, MediaPaths)
-│
-├── camera/                         # 이미지 로드 (Node.js가 전달한 경로에서)
-│   ├── camera_client.py            # camera_driver API (폴백용)
-│   └── frame_capturer.py           # 파일 시스템에서 프레임 로드
-│
-├── vision/                         # YOLO 추론
-│   ├── yolo_wrapper.py             # YOLO 모델 래퍼 (.pt 또는 .engine)
-│   ├── hand_filter.py              # 손 근접 필터
-│   ├── top5_extractor.py           # Top-K 추출
-│   └── multi_view_ensemble.py      # Top+Side 앙상블
-│
-├── weight/                         # 무게 계산
-│   ├── count_calculator.py         # 개수 계산
-│   └── multi_zone_monitor.py       # 다중 Zone 모니터링
-│
-├── engine/                         # 판단 엔진
-│   ├── decision_engine.py          # 핵심 판단 로직
-│   ├── event_tracker.py            # 이벤트 추적
-│   └── advanced/                   # 고급 시나리오
-│       ├── baseline_tracker.py     # 베이스라인 드리프트 감지
-│       ├── return_detector.py      # 반환 감지
-│       ├── cross_zone_detector.py  # Zone 간 이동
-│       └── rapid_pickup_handler.py # 연속 픽업
-│
-├── database/                       # 상품 DB
-│   └── product_db.py               # IF11 형식 지원
-│
-├── door_payment/                   # ★ 도어 결제 모듈 (신규)
-│   ├── transaction_controller.py   # 거래 상태 관리
-│   └── payment_client.py           # 결제 단말 통신
-│
-├── monitor/                        # 테스트 대시보드
-│   ├── console_dashboard.py
-│   └── test_mode.py
-│
-└── tests/                          # 테스트
-    ├── test_offline_dataset.py     # 오프라인 테스트
-    ├── test_hardware_integration.py # 하드웨어 테스트
-    └── conftest.py                 # 테스트 설정
+└── src/                            # ★ 소스 코드 폴더
+    ├── config.py                   # 설정 (Zone 매핑, Vision 파라미터)
+    │
+    ├── api/                        # REST API
+    │   ├── routes.py               # 엔드포인트 (/api/judge, /api/products, /api/door)
+    │   └── models.py               # Pydantic 스키마 (WeightData, MediaPaths)
+    │
+    ├── camera/                     # 이미지 로드
+    │   ├── camera_client.py        # camera_driver API (폴백용)
+    │   └── frame_capturer.py       # 파일 시스템에서 프레임 로드
+    │
+    ├── vision/                     # YOLO 추론
+    │   ├── yolo_wrapper.py         # YOLO 모델 래퍼 (.pt 또는 .engine)
+    │   ├── hand_filter.py          # 손 근접 필터
+    │   ├── top5_extractor.py       # Top-K 추출
+    │   ├── multi_view_ensemble.py  # Top+Side 앙상블
+    │   ├── multi_hand_detector.py  # 다중 손 감지
+    │   └── motion_correlation_filter.py # ★ Motion Tracking (연속 프레임)
+    │
+    ├── weight/                     # 무게 계산
+    │   ├── count_calculator.py     # 개수 계산
+    │   └── multi_zone_monitor.py   # 다중 Zone 모니터링
+    │
+    ├── engine/                     # 판단 엔진
+    │   ├── models.py               # 데이터 모델
+    │   ├── decision_engine.py      # 핵심 판단 로직
+    │   ├── event_tracker.py        # 이벤트 추적
+    │   └── advanced/               # 고급 시나리오
+    │       ├── baseline_manager.py # 베이스라인 드리프트 보정
+    │       ├── return_detector.py  # 반환 감지
+    │       ├── cross_zone_detector.py  # Zone 간 이동
+    │       └── rapid_pickup_handler.py # 연속 픽업
+    │
+    ├── database/                   # 상품 DB
+    │   └── product_db.py           # IF11 형식 지원
+    │
+    ├── door_payment/               # 도어 결제 모듈
+    │   ├── __init__.py             # DoorPaymentController export
+    │   ├── controller.py           # 거래 상태 관리
+    │   └── payment_client.py       # 결제 단말 통신
+    │
+    ├── error_recovery/             # 에러 복구 모듈
+    │
+    ├── monitor/                    # 테스트 대시보드
+    │   ├── console_dashboard.py
+    │   └── test_mode.py
+    │
+    └── tests/                      # 테스트
+        ├── test_offline_dataset.py # 오프라인 테스트
+        ├── test_hardware_integration.py # 하드웨어 테스트
+        └── conftest.py             # 테스트 설정
 ```
-
-> **삭제된 폴더**: `sse_client/` (io_board_subscriber.py, event_parser.py, zone_detector.py)
-> **삭제된 파일**: `api/node_client.py` (Model이 Node.js로 결과를 전송하지 않음)
 
 ---
 
@@ -549,22 +587,22 @@ python -m venv venv
 pip install -r requirements.txt
 
 # 2. 전체 데이터셋 테스트
-python -m tests.test_offline_dataset
+python -m src.tests.test_offline_dataset
 
 # 3. 특정 세션만 테스트
-python -m tests.test_offline_dataset --session 20260116_180419
+python -m src.tests.test_offline_dataset --session 20260116_180419
 
 # 4. 특정 프레임만 테스트
-python -m tests.test_offline_dataset --session 20260116_180419 --frame 10
+python -m src.tests.test_offline_dataset --session 20260116_180419 --frame 10
 
 # 5. 시각화 결과 저장
-python -m tests.test_offline_dataset --visualize --output-dir ./viz_results
+python -m src.tests.test_offline_dataset --visualize --output-dir ./viz_results
 
 # 6. JSON 결과 저장
-python -m tests.test_offline_dataset --output results.json
+python -m src.tests.test_offline_dataset --output results.json
 
 # 7. 커스텀 모델/데이터셋 경로
-python -m tests.test_offline_dataset \
+python -m src.tests.test_offline_dataset \
   --model "C:\path\to\custom_model.pt" \
   --dataset "C:\path\to\custom_dataset"
 ```
@@ -613,28 +651,28 @@ Overall Avg Time: 112ms/frame
 cd Edge_Environment/services/model
 
 # 1. 서비스 연결 확인
-python -m tests.test_hardware_integration --check-connection
+python -m src.tests.test_hardware_integration --check-connection
 
 # 2. SSE 이벤트 모니터링 (로드셀 변화 감지 확인)
-python -m tests.test_hardware_integration --monitor-sse --duration 10
+python -m src.tests.test_hardware_integration --monitor-sse --duration 10
 
 # 3. Zone별 카메라 캡처 테스트
-python -m tests.test_hardware_integration --capture-zone 1
+python -m src.tests.test_hardware_integration --capture-zone 1
 
 # 4. 전체 Zone 스캔
-python -m tests.test_hardware_integration --scan-all-zones
+python -m src.tests.test_hardware_integration --scan-all-zones
 
 # 5. 수동 판단 테스트 (특정 무게 변화 시뮬레이션)
-python -m tests.test_hardware_integration --manual-judge --zone 1 --delta -365
+python -m src.tests.test_hardware_integration --manual-judge --zone 1 --delta -365
 
 # 6. 실시간 모니터링 + 자동 판단
-python -m tests.test_hardware_integration --realtime-monitor --duration 60
+python -m src.tests.test_hardware_integration --realtime-monitor --duration 60
 
 # 7. 정확도 테스트 (반복 측정)
-python -m tests.test_hardware_integration --accuracy-test --zone 1 --repeat 10
+python -m src.tests.test_hardware_integration --accuracy-test --zone 1 --repeat 10
 
 # 8. 특정 상품 정확도 테스트
-python -m tests.test_hardware_integration \
+python -m src.tests.test_hardware_integration \
   --accuracy-test \
   --zone 1 \
   --repeat 10 \
@@ -796,21 +834,19 @@ npm start
 #### io_board 서비스
 ```bash
 cd Edge_Environment/services/io_board
-python main.py
-# 또는
-uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+python main.py                      # 포트 8001
 ```
 
 #### model 서비스
 ```bash
 cd Edge_Environment/services/model
-uvicorn main:app --host 0.0.0.0 --port 8002 --reload
+python main.py                      # 포트 8002
 ```
 
 #### camera_driver 서비스
 ```bash
 cd Edge_Environment/services/camera_driver
-uvicorn main:app --host 0.0.0.0 --port 8003 --reload
+python main.py                      # 포트 8003
 ```
 
 #### mqtt_client 서비스
@@ -1288,16 +1324,15 @@ module.exports = {
   apps: [
     { name: "orchestrator", script: "./server/index.js", ... },
     { name: "io-board", cwd: "./services/io_board", script: "python", args: "main.py", ... },
-    { name: "model", cwd: "./services/model",
-      args: "-m uvicorn main:app --host 0.0.0.0 --port 8002",
+    { name: "model", cwd: "./services/model", script: "python", args: "main.py",
       env: { YOLO_MODEL_PATH: "../../../siyeon_best.pt" }, ... },
-    { name: "camera-driver", cwd: "./services/camera_driver", ... },
-    { name: "card-terminal", cwd: "./services/card_terminal", ... },
+    { name: "camera-driver", cwd: "./services/camera_driver", script: "python", args: "main.py", ... },
+    { name: "card-terminal", cwd: "./services/card_terminal", script: "python", args: "main.py", ... },
   ]
 };
 ```
 
-### services/model/config.py
+### services/model/src/config.py
 ```python
 ZONE_CHANNEL_MAP = {0: [0,1], 1: [2,3], 2: [4,5], 3: [6,7], 4: [8,9]}
 ZONE_CAMERA_MAP = {0: 1, 1: 2, 2: 3, 3: 4, 4: 5}
@@ -1318,11 +1353,56 @@ tolerance_percent = 0.10  # 허용 오차 10%
 
 ## 9. 최신 업데이트
 
-### 9.1 아키텍처 변경 (2026-01-26) ★ 중요
+### 9.1 Event-Driven Architecture (2026-01-29) ★ 최신
+
+**Node.js 세션 관리 강화:**
+- `WeightChangeAccumulator`: 무게 변화 이벤트 누적 처리
+- `PendingItemsStack`: 데드볼트 열림/닫힘 기반 세션 관리
+- 정산 처리: 데드볼트 닫힘 후 15초 대기 → 픽업/반환 정산
+
+**Motion Tracking:**
+- `src/vision/motion_correlation_filter.py` 추가
+- 연속 프레임 분석으로 손 움직임 추적
+- `motion_bonus_map`으로 신뢰도 보정
+
+**추론 취소 기능:**
+- `POST /api/judge/cancel`: 진행 중인 추론 취소
+- `GET /api/judge/active`: 활성 추론 목록 조회
+- 새로운 무게 이벤트 발생 시 기존 추론 취소 가능
+
+**카메라별 결과 반환:**
+```json
+{
+  "camera_results": {
+    "cam0": {"detected": true, "confidence": 0.85, "candidates": [...]},
+    "cam1": {"detected": true, "confidence": 0.78, "candidates": [...]}
+  }
+}
+```
+
+### 9.2 통합 실행 (2026-01-28)
+
+**PM2로 전체 서비스 실행:**
+```bash
+npm start   # pm2 start ecosystem.config.js
+```
+
+**서비스 목록 (ecosystem.config.js):**
+| 서비스 | 포트 | 설명 |
+|--------|------|------|
+| orchestrator | 8889 | Node.js 오케스트레이터 |
+| client | 3000 | React 대시보드 |
+| io-board | 8001 | 로드셀 + 데드볼트 |
+| model | 8002 | AI 상품 판단 |
+| camera-driver | 8003 | 카메라 관리 |
+| mqtt-client | 8006 | MQTT IF01-04 |
+| card-terminal | 5000 | 결제 터미널 |
+
+### 9.3 아키텍처 변경 (2026-01-26)
 
 **Model 서비스 Stateless 전환:**
-- `sse_client/` 폴더 삭제 (io_board SSE 구독 제거)
-- `api/node_client.py` 삭제 (결과 푸시 → 동기 응답으로 변경)
+- `src/sse_client/` 폴더 삭제 (io_board SSE 구독 제거)
+- `src/api/node_client.py` 삭제 (결과 푸시 → 동기 응답으로 변경)
 - Node.js가 모든 흐름 제어 담당
 
 **새로운 API 요청 형식:**
@@ -1343,41 +1423,19 @@ tolerance_percent = 0.10  # 허용 오차 10%
 }
 ```
 
-### 9.2 Node.js 서비스 업데이트
+### 9.4 Node.js 서비스 파일
 
-**핵심 서비스 파일:**
 | 파일 | 역할 |
 |------|------|
-| `IOBoardSSESubscriber.js` | SSE 구독 + 무게 변화 감지 + 디바운스 |
-| `CameraDriverClient.js` | 스냅샷 요청 + Top 카메라 녹화 제어 |
-| `ProductJudgeClient.js` | Model 판단 요청 (weight_data + media_paths) |
+| `IOBoardSSESubscriber.js` | SSE 구독 + 세션 관리 + 무게 감지 |
+| `CameraDriverClient.js` | 스냅샷/녹화 요청 |
+| `ProductJudgeClient.js` | Model 판단 요청 |
+| `ConfigManager.js` | Zone 설정 관리 |
+| `WeightChangeAccumulator.js` | 무게 변화 누적 ★ |
+| `PendingItemsStack.js` | 세션별 픽업/반환 관리 ★ |
+| `ScheduledLogger.js` | 스케줄 로깅 |
 
-**포트 변경:**
-- Node.js: 8888 → **8889**
-
-### 9.3 IF11 상품 리스트 동기화
-
-Node.js에서 IF11 형식의 상품 리스트를 Model 서비스로 전송할 수 있습니다.
-
-```javascript
-const axios = require('axios');
-
-// IF11 상품 리스트를 Model 서비스에 동기화
-async function syncProductsToModel(productList) {
-    const response = await axios.post('http://localhost:8002/api/products/sync', {
-        product_list: productList.map(p => ({
-            product_idx: p.product_idx,
-            product_name: p.product_name,
-            sale_price: p.sale_price,
-            stock_qty: p.stock_qty,
-            product_weight: String(p.product_weight)
-        }))
-    });
-    return response.data;
-}
-```
-
-### 9.4 에러 코드 체계
+### 9.5 에러 코드 체계
 
 | 범위 | 서비스 | 예시 |
 |------|--------|------|
@@ -1387,7 +1445,7 @@ async function syncProductsToModel(productList) {
 | E5xxx | network | E5001(SSE 실패), E5003(Node.js 실패) |
 | E6xxx | payment | E6001(단말기 연결 실패), E6004(네트워크) |
 
-### 9.5 Door Payment 모듈 (신규)
+### 9.6 Door Payment 모듈
 
 Model 서비스에 도어 결제 모듈이 추가되었습니다.
 
@@ -1398,3 +1456,8 @@ GET  /api/door/status           # 도어 상태
 POST /api/door/cancel           # 거래 취소
 POST /api/door/emergency-lock   # 비상 잠금
 ```
+
+---
+
+> **문의**: minkyu 브랜치 담당자
+> **최종 업데이트**: 2026-01-29

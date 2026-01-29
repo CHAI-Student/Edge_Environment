@@ -5,6 +5,7 @@ import ZoneGrid from './components/ZoneGrid/ZoneGrid';
 import LoadcellGrid from './components/LoadcellGrid/LoadcellGrid';
 import DoorControl from './components/DoorControl/DoorControl';
 import CameraGrid from './components/CameraGrid/CameraGrid';
+import CameraControl from './components/CameraControl/CameraControl';
 import ModelTest from './components/ModelTest/ModelTest';
 import EventLog from './components/EventLog/EventLog';
 import ConfigModal from './components/ConfigModal/ConfigModal';
@@ -31,9 +32,12 @@ function App() {
     <>
       <ZoneGrid loadcells={sse.loadcellData} />
       <LoadcellGrid loadcells={sse.loadcellData} />
-      <DoorControl doorStatus={sse.doorStatus} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px' }}>
+        <DoorControl doorStatus={sse.doorStatus} />
+        <CameraControl />
+      </div>
 
-      <div className="glass-panel" style={{ padding: '16px', borderRadius: '12px' }}>
+      <div className="glass-panel" style={{ padding: '16px', borderRadius: '12px', marginTop: 'auto' }}>
         <div style={{
           borderBottom: '1px solid rgba(255,255,255,0.05)',
           paddingBottom: '8px',
@@ -48,13 +52,13 @@ function App() {
 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button onClick={handleResetBaseline} className="glass-btn" style={{ flex: 1 }}>
-            RESET CALIBRATION
+            RESET CALIB
           </button>
           <button onClick={() => dashboard.refresh()} className="glass-btn" style={{ flex: 1 }}>
-            REFRESH DATA
+            REFRESH
           </button>
           <button onClick={handleInitCameras} className="glass-btn" style={{ flex: 1 }}>
-            INIT CAMERAS
+            INIT CAMS
           </button>
         </div>
 

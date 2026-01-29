@@ -1,35 +1,54 @@
 # Camera-Only Test Guide
 
+> **최종 업데이트**: 2026-01-29
+
 로드셀 없이 카메라만으로 상품 판단 시스템을 테스트하는 방법입니다.
 
 ## 필요 서비스
 
 카메라 전용 테스트를 위해 다음 서비스가 실행 중이어야 합니다:
 
-| 서비스 | 포트 | 필수 | 실행 명령 |
-|--------|------|------|-----------|
-| Camera Driver | 8003 | O | `uvicorn services.camera_driver.main:app --port 8003` |
-| Model Service | 8002 | O | `uvicorn services.model.main:app --port 8002` |
-| Node.js Server | 8889 | O | `npm run start` |
+| 서비스 | 포트 | 필수 | 설명 |
+|--------|------|------|------|
+| Camera Driver | 8003 | O | 카메라 스냅샷/녹화 |
+| Model Service | 8002 | O | AI 상품 판단 |
+| Node.js Server | 8889 | O | 오케스트레이터 |
 | IO Board | 8001 | X | 불필요 (카메라 전용 모드) |
 
 ## 빠른 시작
 
-### 1. 서비스 실행
+### 방법 1: PM2 통합 실행 (권장)
+
+```bash
+cd Edge_Environment
+
+# 전체 서비스 시작 (IO Board 포함)
+npm start
+
+# 또는 필요한 서비스만 시작
+pm2 start ecosystem.config.js --only "orchestrator,model,camera-driver"
+
+# 상태 확인
+pm2 status
+```
+
+### 방법 2: 개별 터미널 실행
 
 ```bash
 # 터미널 1: Camera Driver
-cd Edge_Environment
-uvicorn services.camera_driver.main:app --host 0.0.0.0 --port 8003
+cd Edge_Environment/services/camera_driver
+python main.py
 
 # 터미널 2: Model Service
-uvicorn services.model.main:app --host 0.0.0.0 --port 8002
+cd Edge_Environment/services/model
+python main.py
 
 # 터미널 3: Node.js Server
-npm run start
+cd Edge_Environment
+npm run start:server
 ```
 
-### 2. 서비스 상태 확인
+### 서비스 상태 확인
 
 ```bash
 curl http://localhost:8889/api/camera/test/status
@@ -48,14 +67,19 @@ curl http://localhost:8889/api/camera/test/status
 }
 ```
 
-### 3. 테스트 실행
+### 테스트 실행
 
 ```bash
-# Zone 0 카메라 테스트
+# Zone 0 카메라 테스트 (스냅샷)
+curl -X POST http://localhost:8889/api/camera/test/snapshot-and-judge \
+  -H "Content-Type: application/json" \
+  -d '{"zone_id": 0, "include_top": true}'
+
+# Zone 0 카메라 테스트 (녹화 3초)
 curl -X POST http://localhost:8889/api/camera/test/record-and-judge \
   -H "Content-Type: application/json" \
   -d '{"zone_id": 0, "include_top": true, "duration_ms": 3000, "fps": 30, "top_k": 5}'
-'''
+```
 
 ## API 엔드포인트
 
@@ -77,12 +101,12 @@ curl -X POST http://localhost:8889/api/camera/test/record-and-judge \
   "success": true,
   "mode": "camera_only",
   "zone_id": 0,
-  "session_id": "260126153025",
+  "session_id": "260129153025",
   "snapshot": {
-    "session_path": "/data/snapshots/260126153025",
+    "session_path": "/data/snapshots/260129153025",
     "images": {
-      "cam_0": "/data/snapshots/260126153025/cam_0/snapshot.jpg",
-      "cam_1": "/data/snapshots/260126153025/cam_1/snapshot.jpg"
+      "cam_0": "/data/snapshots/260129153025/cam_0/snapshot.jpg",
+      "cam_1": "/data/snapshots/260129153025/cam_1/snapshot.jpg"
     }
   },
   "judgment": {
@@ -107,7 +131,7 @@ curl -X POST http://localhost:8889/api/camera/test/record-and-judge \
 
 ### POST /api/camera/test/record-and-judge
 
-3초간 연속 스냅샷 촬영 후 Vision 판단을 수행합니다. 로드셀 정합성 비교 전 후보군 도출에 사용합니다.
+지정 시간 동안 연속 스냅샷 촬영 후 Vision 판단을 수행합니다. 로드셀 정합성 비교 전 후보군 도출에 사용합니다.
 
 **Request:**
 ```json
@@ -125,11 +149,11 @@ curl -X POST http://localhost:8889/api/camera/test/record-and-judge \
   "success": true,
   "mode": "camera_only_recording",
   "zone_id": 0,
-  "session_id": "20260126_214859",
+  "session_id": "20260129_214859",
   "recording": {
     "duration_ms": 3000,
     "snapshot_count": 6,
-    "session_path": "/data/snapshots/20260126_214859"
+    "session_path": "/data/snapshots/20260129_214859"
   },
   "snapshots": [
     {
@@ -153,15 +177,15 @@ curl -X POST http://localhost:8889/api/camera/test/record-and-judge \
 
 이미 저장된 이미지로 판단을 테스트합니다.
 
-**Request:**
+**Request (폴더 경로):**
 ```json
 {
   "zone_id": 0,
-  "image_folder": "/data/snapshots/260126153025"
+  "image_folder": "/data/snapshots/260129153025"
 }
 ```
 
-또는 개별 이미지 경로:
+**Request (개별 이미지 경로):**
 ```json
 {
   "zone_id": 0,
@@ -195,7 +219,7 @@ python scripts/test_camera_only.py --zone 1
 python scripts/test_camera_only.py --mode check
 
 # 기존 이미지로 테스트
-python scripts/test_camera_only.py --mode folder --folder /data/snapshots/260126153025
+python scripts/test_camera_only.py --mode folder --folder /data/snapshots/260129153025
 
 # Model 서비스 직접 테스트
 python scripts/test_camera_only.py --mode direct --zone 0
@@ -233,7 +257,7 @@ curl -X POST http://localhost:8002/api/judge \
     "zone_id": 0,
     "vision_only": true,
     "media_paths": {
-      "image_folder": "/data/snapshots/260126153025"
+      "image_folder": "/data/snapshots/260129153025"
     }
   }'
 ```
@@ -268,6 +292,9 @@ curl http://localhost:8003/api/status
 
 # 디바이스 스캔
 curl http://localhost:8003/api/devices/scan
+
+# PM2 로그 확인
+pm2 logs camera-driver --lines 50
 ```
 
 ### Model 서비스 오류
@@ -278,6 +305,9 @@ curl http://localhost:8002/api/health
 
 # 상품 목록 확인 (모델 로드 확인)
 curl http://localhost:8002/api/products
+
+# PM2 로그 확인
+pm2 logs model --lines 50
 ```
 
 ### 이미지 경로 오류
@@ -285,6 +315,16 @@ curl http://localhost:8002/api/products
 - 이미지 경로는 절대 경로 사용 권장
 - Windows에서는 백슬래시(`\`) 대신 슬래시(`/`) 사용
 - 경로에 한글이 포함된 경우 인코딩 문제 확인
+
+### Node.js 서버 오류
+
+```bash
+# 헬스 체크
+curl http://localhost:8889/health
+
+# PM2 로그 확인
+pm2 logs orchestrator --lines 50
+```
 
 ## Zone 매핑
 
@@ -295,3 +335,20 @@ curl http://localhost:8002/api/products
 | 2 | cam_3 | cam_0 | [4, 5] |
 | 3 | cam_4 | cam_0 | [6, 7] |
 | 4 | cam_5 | cam_0 | [8, 9] |
+
+## PM2 명령어 요약
+
+```bash
+# 서비스 시작
+npm start                                    # 전체
+pm2 start ecosystem.config.js --only model   # 개별
+
+# 상태 확인
+pm2 status
+pm2 logs
+
+# 서비스 제어
+pm2 restart model
+pm2 stop camera-driver
+pm2 delete all
+```

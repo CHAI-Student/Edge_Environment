@@ -1,52 +1,14 @@
-"""
-IO Board Service entry point.
-
-This module provides the main entry point for running the IO Board service
-as a standalone FastAPI application on port 8001.
-
-Usage:
-    python -m main
-    or
-    uvicorn main:app --host 0.0.0.0 --port 8001 --reload
-"""
-
-import asyncio
+"""PM2 호환 진입점 - IO Board Service."""
+import os
+import runpy
 import sys
-
-from .api import app, serve_api
-from .config import api_config, serial_config
-from .serial_io import configure_serial
-from .logging_config import get_logger
-
-logger = get_logger(__name__)
-
-
-async def main() -> None:
-    """
-    Main entry point for IO Board service.
-
-    Configures serial communication and starts the FastAPI server.
-    """
-    logger.info("Starting IO Board Service v2.0.0")
-
-    # Configure serial communication
-    configure_serial(serial_config)
-
-    # Start API server
-    await serve_api(api_config)
-
-
-def run() -> None:
-    """Run the IO Board service."""
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("IO Board service stopped by user")
-        sys.exit(0)
-    except Exception as e:
-        logger.error(f"IO Board service failed: {e}", exc_info=True)
-        sys.exit(1)
-
+from pathlib import Path
 
 if __name__ == "__main__":
-    run()
+    # src 디렉토리를 작업 디렉토리와 import 경로로 설정
+    src_dir = Path(__file__).parent / "src"
+    os.chdir(src_dir)
+    sys.path.insert(0, str(src_dir))
+
+    # src/main.py를 __main__으로 실행
+    runpy.run_path("main.py", run_name="__main__")

@@ -1,0 +1,328 @@
+{
+  "version": "1.0",
+  "description": "40개 시연 상품 YOLO class_id 매핑",
+  "created_at": "2026-01-29",
+  "auto_matched": true,
+  "mappings": [
+    {
+      "yolo_class_id": 109,
+      "yolo_class_name": "BAG_DALGWANG_DONUT_CHOCO_45G",
+      "product_name": "달광도넛 초코",
+      "category": "snack",
+      "weight": 45,
+      "price": 1500
+    },
+    {
+      "yolo_class_id": 57,
+      "yolo_class_name": "BAG_HAITAI_JAGABEE_45G",
+      "product_name": "자가비(bag)",
+      "category": "snack",
+      "weight": 45,
+      "price": 1800
+    },
+    {
+      "yolo_class_id": 90,
+      "yolo_class_name": "BAG_NONGSHIM_SAEUKKANG_90G",
+      "product_name": "새우깡",
+      "category": "snack",
+      "weight": 90,
+      "price": 1500
+    },
+    {
+      "yolo_class_id": 32,
+      "yolo_class_name": "BAG_NULDAM_TTUNGKALONG_50G",
+      "product_name": "널담 뚱카롱 50g",
+      "category": "snack",
+      "weight": 50,
+      "price": 2000
+    },
+    {
+      "yolo_class_id": 114,
+      "yolo_class_name": "BOX_LOTTE_PEPERO_ORIGINAL_46G",
+      "product_name": "빼빼로 오리지널",
+      "category": "snack",
+      "weight": 46,
+      "price": 1500
+    },
+    {
+      "yolo_class_id": 40,
+      "yolo_class_name": "BOX_LOTTE_BINCH_102G",
+      "product_name": "롯데 빈츠",
+      "category": "snack",
+      "weight": 102,
+      "price": 2500
+    },
+    {
+      "yolo_class_id": 38,
+      "yolo_class_name": "BAG_HAITAI_HOME_RUN_BALL_41G",
+      "product_name": "홈런볼",
+      "category": "snack",
+      "weight": 41,
+      "price": 1800
+    },
+    {
+      "yolo_class_id": 115,
+      "yolo_class_name": "BOX_LOTTE_PEPERO_ALMOND_37G",
+      "product_name": "빼빼로 아몬드",
+      "category": "snack",
+      "weight": 37,
+      "price": 1700
+    },
+    {
+      "yolo_class_id": 113,
+      "yolo_class_name": "STICK_INNON_CONDITION_STICK_18G",
+      "product_name": "컨디션스틱",
+      "category": "health",
+      "weight": 18,
+      "price": 2500
+    },
+    {
+      "yolo_class_id": 118,
+      "yolo_class_name": "CUP_NONGSHIM_YUKGAEJANG_86G",
+      "product_name": "육개장",
+      "category": "food",
+      "weight": 86,
+      "price": 1500
+    },
+    {
+      "yolo_class_id": 35,
+      "yolo_class_name": "BAG_NONGSHIM_CHAPAGETTI_140G",
+      "product_name": "농심 짜파게티 140g",
+      "category": "food",
+      "weight": 140,
+      "price": 1800
+    },
+    {
+      "yolo_class_id": 52,
+      "yolo_class_name": "BAG_SAMYANG_BULDALG_BOKKEUMMYEON_140G",
+      "product_name": "삼양 불닭볶음면 140g",
+      "category": "food",
+      "weight": 140,
+      "price": 1900
+    },
+    {
+      "yolo_class_id": 12,
+      "yolo_class_name": "CAN_LOTTE_LETSBE_MILD_COFFEE_175ML",
+      "product_name": "레쓰비",
+      "category": "beverage",
+      "weight": 200,
+      "price": 1200
+    },
+    {
+      "yolo_class_id": 99,
+      "yolo_class_name": "BOTTLE_CJ_PROTEIN_SHAKE_NUTS_50G",
+      "product_name": "프로틴쉐이크 견과",
+      "category": "health",
+      "weight": 50,
+      "price": 3500
+    },
+    {
+      "yolo_class_id": 11,
+      "yolo_class_name": "BOTTLE_DONGA_BACCHUS_F_120ML",
+      "product_name": "박카스",
+      "category": "beverage",
+      "weight": 140,
+      "price": 1200
+    },
+    {
+      "yolo_class_id": 10,
+      "yolo_class_name": "BOTTLE_DONGA_ORONAMIN_C_120ML",
+      "product_name": "오로나민 C",
+      "category": "beverage",
+      "weight": 140,
+      "price": 1500
+    },
+    {
+      "yolo_class_id": 119,
+      "yolo_class_name": "BOTTLE_FANTA_ORANGE_600ML",
+      "product_name": "환타",
+      "category": "beverage",
+      "weight": 640,
+      "price": 2000
+    },
+    {
+      "yolo_class_id": 8,
+      "yolo_class_name": "CAN_LOTTE_HOT6_THE_KING_RUSH_355ML",
+      "product_name": "롯데 핫식스더킹러쉬355ml",
+      "category": "beverage",
+      "weight": 380,
+      "price": 1800
+    },
+    {
+      "yolo_class_id": 44,
+      "yolo_class_name": "BOTTLE_KWANGDONG_CORN_SILK_TEA_500ML",
+      "product_name": "광동) 옥수수수염차 500ml",
+      "category": "beverage",
+      "weight": 540,
+      "price": 1800
+    },
+    {
+      "yolo_class_id": 58,
+      "yolo_class_name": "BOTTLE_KWANGDONG_SAMDASOO_500ML",
+      "product_name": "삼다수",
+      "category": "beverage",
+      "weight": 520,
+      "price": 1000
+    },
+    {
+      "yolo_class_id": 61,
+      "yolo_class_name": "BOTTLE_LABNOSH_PROTEIN_DRINK_MILD_CACAO_350ML",
+      "product_name": "랩노쉬 프로틴 드링크 카카오 350ml",
+      "category": "beverage",
+      "weight": 380,
+      "price": 3500
+    },
+    {
+      "yolo_class_id": 75,
+      "yolo_class_name": "BOTTLE_LOTTE_PEPSI_ZERO_SUGAR_LIME_500ML",
+      "product_name": "롯데) 펩시 제로슈거 라임향 500ML",
+      "category": "beverage",
+      "weight": 540,
+      "price": 2000
+    },
+    {
+      "yolo_class_id": 54,
+      "yolo_class_name": "BOTTLE_LOTTE_TREVI_LEMON_500ML",
+      "product_name": "롯데) 트레비 500ML",
+      "category": "beverage",
+      "weight": 540,
+      "price": 1800
+    },
+    {
+      "yolo_class_id": 29,
+      "yolo_class_name": "BOTTLE_NONGSHIM_BAKSANSOO_500ML_V2",
+      "product_name": "농심) 백산수 500ml",
+      "category": "beverage",
+      "weight": 520,
+      "price": 1000
+    },
+    {
+      "yolo_class_id": 26,
+      "yolo_class_name": "CAN_WELCHS_ZERO_GRAPE_355ML",
+      "product_name": "웰치스제로",
+      "category": "beverage",
+      "weight": 380,
+      "price": 1800
+    },
+    {
+      "yolo_class_id": 112,
+      "yolo_class_name": "BOTTLE_PULMUONE_SPRING_WATER_500ML",
+      "product_name": "풀무원샘물",
+      "category": "beverage",
+      "weight": 520,
+      "price": 1000
+    },
+    {
+      "yolo_class_id": 95,
+      "yolo_class_name": "BOTTLE_HY_HALUYACHE_PURPLE_200ML_V2",
+      "product_name": "하루야채 퍼플 200ml",
+      "category": "beverage",
+      "weight": 220,
+      "price": 1800
+    },
+    {
+      "yolo_class_id": 31,
+      "yolo_class_name": "BOTTLE_WOONGIN_SKY_BARLEY_TEA_500ML",
+      "product_name": "하늘보리",
+      "category": "beverage",
+      "weight": 540,
+      "price": 1500
+    },
+    {
+      "yolo_class_id": 23,
+      "yolo_class_name": "BOTTLE_COCA_POWER_ADE_MOUNTAIN_BLAST_600ML",
+      "product_name": "파워에이드 마운틴블러스트 600ml",
+      "category": "beverage",
+      "weight": 640,
+      "price": 2200
+    },
+    {
+      "yolo_class_id": 14,
+      "yolo_class_name": "BAG_CAPRI_SUN_ORANGE_200ML",
+      "product_name": "카프리썬",
+      "category": "beverage",
+      "weight": 215,
+      "price": 1500
+    },
+    {
+      "yolo_class_id": 48,
+      "yolo_class_name": "BOTTLE_WOONGJIN_GREEN_PLUM_500ML",
+      "product_name": "웅진) 초록매실 500ml",
+      "category": "beverage",
+      "weight": 540,
+      "price": 1800
+    },
+    {
+      "yolo_class_id": 105,
+      "yolo_class_name": "BAG_CJ_CHICKEN_BREAST_STEAK_100G",
+      "product_name": "닭가슴살 직화스테이크",
+      "category": "food",
+      "weight": 100,
+      "price": 3500
+    },
+    {
+      "yolo_class_id": 124,
+      "yolo_class_name": "BAG_GAMBAS_RICE_230G",
+      "product_name": "빕스 감바스라이스 230g",
+      "category": "food",
+      "weight": 230,
+      "price": 5500
+    },
+    {
+      "yolo_class_id": 106,
+      "yolo_class_name": "BAG_SAJO_PIZZA_COMBINATION_80G",
+      "product_name": "한입피자 콤비네이션",
+      "category": "food",
+      "weight": 80,
+      "price": 2500
+    },
+    {
+      "yolo_class_id": 102,
+      "yolo_class_name": "STICK_DAERIM_STICK_CLAVIA_60G",
+      "product_name": "스틱 크라비아",
+      "category": "food",
+      "weight": 60,
+      "price": 1500
+    },
+    {
+      "yolo_class_id": 101,
+      "yolo_class_name": "STICK_MAXBONG_CHARCOAL_GRILLED_HOT_BAR_90G",
+      "product_name": "숯불구이맛 핫바",
+      "category": "food",
+      "weight": 90,
+      "price": 2000
+    },
+    {
+      "yolo_class_id": 82,
+      "yolo_class_name": "BAG_BIBIGO_CHEONGYANG_MEAT_DUMPLINGS_200G",
+      "product_name": "비비고 청양 고기만두 200g",
+      "category": "frozen",
+      "weight": 200,
+      "price": 4500
+    },
+    {
+      "yolo_class_id": 110,
+      "yolo_class_name": "BOX_SEYANG_BAKED_EGGS_70G",
+      "product_name": "정직한 구운란",
+      "category": "food",
+      "weight": 70,
+      "price": 2000
+    },
+    {
+      "yolo_class_id": 120,
+      "yolo_class_name": "CUP_BIBIGO_TTEOKBOKKI_110G",
+      "product_name": "비비고 컵떡볶이 110g",
+      "category": "food",
+      "weight": 110,
+      "price": 2500
+    },
+    {
+      "yolo_class_id": 100,
+      "yolo_class_name": "CUP_CJ_HATBAN_CUPBAN_CHICKEN_MAYO_313G",
+      "product_name": "치킨마요",
+      "category": "food",
+      "weight": 313,
+      "price": 4500
+    }
+  ]
+}

@@ -1,5 +1,31 @@
 # Edge_Environment
+
+> **최종 업데이트**: 2026-01-29
+
 Edge Environment setting for CHAI project - main server(js)
+
+## 서비스 포트
+
+| 서비스 | 포트 | 설명 |
+|--------|------|------|
+| IO Board | 8001 | 로드셀(10ch) + 데드볼트 SSE |
+| Model | 8002 | YOLO 추론 + 상품 판단 (stateless) |
+| Camera Driver | 8003 | 6대 카메라 스냅샷 (Nvidia 지원) |
+| Card Terminal | 5000 | 결제 터미널 |
+| MQTT Client | 8006 | CHAI IF01-04 프로토콜 |
+| Node.js | 8889 | 오케스트레이터 + 대시보드 |
+| React Client | 3000 | 웹 대시보드 |
+
+## 빠른 시작
+
+```bash
+# 전체 서비스 시작 (PM2)
+npm start
+
+# 또는 개별 실행
+npm run start:server   # Node.js 서버만
+npm run dev            # 서버 + React 동시 실행
+```
 
 ---
 
@@ -70,7 +96,7 @@ Edge Environment setting for CHAI project - main server(js)
 [TEST] starting server: /Edge_Environment/server/index.js
 [srv] [dotenv@17.2.3] injecting env (0) from .env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
 [srv] [dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  specify custom .env file path with { path: '/custom/path/.env' }
-[srv] Server Listening on 8888
+[srv] Server Listening on 8889
 [srv] [APP] MQTT init done
 [srv] [MQTT] connected (mqtt://api) clientId=clientId
 [srv] [MQTT] connected
