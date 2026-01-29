@@ -91,11 +91,11 @@ pm2 start ecosystem.config.js
 # 서비스 목록:
 # - orchestrator (Node.js :8889)
 # - client (React :3000)
-# - io-board (:8001)
+# - io-board (:8000)
 # - model (:8002)
 # - camera-driver (:8003)
 # - mqtt-client (:8006)
-# - card-terminal (:5000)
+# - card-terminal (:8001)
 ```
 
 ### 4. 개별 서비스 실행 (개발용)
@@ -132,7 +132,7 @@ http://localhost:8889        # Node.js 정적 파일 서빙 (production)
 
 ### 헬스 체크
 ```bash
-curl http://localhost:8001/health    # IO Board
+curl http://localhost:8000/health    # IO Board
 curl http://localhost:8002/api/health # Model
 curl http://localhost:8003/api/health # Camera
 curl http://localhost:8006/health    # MQTT
@@ -142,7 +142,7 @@ curl http://localhost:8889/health    # Node.js
 ### SSE 스트림
 ```bash
 # IO Board SSE
-curl -N "http://localhost:8001/sse?streams=loadcells,doors&loadcell_interval=0.5"
+curl -N "http://localhost:8000/sse?streams=loadcells,doors&loadcell_interval=0.5"
 
 # Node.js 통합 SSE
 curl -N http://localhost:8889/sse/events
@@ -187,9 +187,9 @@ curl -X POST http://localhost:8003/api/zone/0/snapshot \
 
 ### 로드셀/데드볼트
 ```bash
-curl http://localhost:8001/loadcells
-curl http://localhost:8001/status
-curl -X POST http://localhost:8001/deadbolt -d '{"action": "OPEN"}'
+curl http://localhost:8000/loadcells
+curl http://localhost:8000/status
+curl -X POST http://localhost:8000/deadbolt -d '{"action": "OPEN"}'
 ```
 
 ### 카메라 전용 테스트 (로드셀 없이)
@@ -252,7 +252,7 @@ python scripts/test_camera_only.py --zone 0
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | PORT | 8889 | 서버 포트 |
-| IO_BOARD_URL | http://localhost:8001 | IO Board URL |
+| IO_BOARD_URL | http://localhost:8000 | IO Board URL |
 | CAMERA_DRIVER_URL | http://localhost:8003 | Camera URL |
 | PRODUCT_JUDGE_URL | http://localhost:8002 | Model URL |
 | NODEJS_URL | http://localhost:8889 | 자체 URL |
@@ -325,7 +325,7 @@ Edge_Environment/
 │   ├── zone_mapping.json          # Zone-Channel-Camera 매핑
 │   └── camera_device_map.json     # 카메라 디바이스 매핑
 ├── services/
-│   ├── io_board/                  # 로드셀 + 데드볼트 (포트 8001)
+│   ├── io_board/                  # 로드셀 + 데드볼트 (포트 8000)
 │   │   ├── main.py                # FastAPI 진입점
 │   │   └── src/                   # ★ 소스 코드 폴더
 │   │       ├── protocol.py        # STX/ETX/LRC 프로토콜
@@ -465,7 +465,7 @@ POST /api/door/cancel            # 거래 취소
 POST /api/door/emergency-lock    # 비상 잠금
 ```
 
-### IO Board Service (8001)
+### IO Board Service (8000)
 ```
 GET  /health                     # 헬스 체크
 GET  /loadcells                  # 10채널 무게
@@ -608,7 +608,7 @@ LOG_LEVEL=DEBUG python services/io_board/main.py
 # LOG_LEVEL=DEBUG
 
 # SSE 모니터링
-curl -N "http://localhost:8001/sse?streams=loadcells,doors"
+curl -N "http://localhost:8000/sse?streams=loadcells,doors"
 
 # Node.js 디버그 모드
 LOG_LEVEL=debug node server/index.js
@@ -618,7 +618,7 @@ LOG_LEVEL=debug node server/index.js
 
 ```bash
 # 전체 서비스 헬스 체크
-curl http://localhost:8001/health      # IO Board
+curl http://localhost:8000/health      # IO Board
 curl http://localhost:8002/api/health  # Model
 curl http://localhost:8003/api/health  # Camera
 curl http://localhost:8006/health      # MQTT

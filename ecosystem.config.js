@@ -121,9 +121,21 @@ module.exports = {
         MODEL__API__HOST: "0.0.0.0",
         MODEL__API__PORT: "8002",
         MODEL__API__LOG_LEVEL: "info",
-        // Vision 설정
-        MODEL__VISION__YOLO_MODEL_PATH: "/home/chai/Edge_Environment/models/siyeon_best.engine",
+        // Vision 설정 (상대 경로 사용 - 자동 fallback 지원)
+        // Windows 개발: models/siyeon_best.pt
+        // Jetson 배포: models/siyeon_best.engine (CUDA 감지 시 자동 사용)
+        MODEL__VISION__YOLO_MODEL_PATH: "models/siyeon_best.pt",
         // Node.js 연동
+        MODEL__NODEJS_URL: "http://localhost:8889",
+      },
+      // Jetson 배포 환경 (pm2 start ecosystem.config.js --env production)
+      env_production: {
+        PYTHONUNBUFFERED: "1",
+        MODEL__API__HOST: "0.0.0.0",
+        MODEL__API__PORT: "8002",
+        MODEL__API__LOG_LEVEL: "info",
+        // Jetson: TensorRT 엔진 사용 (절대 경로 또는 상대 경로)
+        MODEL__VISION__YOLO_MODEL_PATH: "models/siyeon_best.engine",
         MODEL__NODEJS_URL: "http://localhost:8889",
       },
       watch: false,

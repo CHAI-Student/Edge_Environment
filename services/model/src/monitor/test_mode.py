@@ -107,7 +107,7 @@ class TestModeHandler:
             refresh_rate: 대시보드 갱신 주기
         """
         # DEPRECATED: io_board_url, camera_driver_url은 더 이상 config에 없음
-        self.io_board_url = io_board_url or "http://localhost:8001"
+        self.io_board_url = io_board_url or "http://localhost:8000"
         self.camera_driver_url = camera_driver_url or "http://localhost:8003"
         self.node_js_url = node_js_url or config.nodejs_url
         self.yolo_model_path = yolo_model_path or config.yolo_model_path

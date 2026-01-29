@@ -47,7 +47,10 @@ const divisionUploadSchema = mongoose.Schema({
         type: Date,
         default: Date.now
     },
+})
+
 // const ProductUpload = mongoose.model('ProductUpload', productUploadSchema);
 const DivisionUpload = mongoose.model('DivisionUpload', divisionUploadSchema, 'DivisionList');
+
 
 module.exports = { DivisionUpload }

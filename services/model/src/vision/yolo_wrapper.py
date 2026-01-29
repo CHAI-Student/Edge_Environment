@@ -7,6 +7,11 @@ YOLO Wrapper for Product Detection.
 
 파싱하여 YOLODetection 객체 리스트로 변환.
 
+CUDA/TensorRT 지원:
+    - Windows (개발): .pt 모델 + CPU/CUDA
+    - Jetson (배포): .engine 모델 + CUDA (TensorRT)
+    - 자동 fallback: .engine 요청 시 CUDA 없으면 .pt로 전환
+
 사용 예시:
     wrapper = YOLOWrapper(model_path="best.pt")
     detections = wrapper.detect(image)
@@ -15,6 +20,7 @@ YOLO Wrapper for Product Detection.
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Any
 import logging
+import os
 
 import numpy as np
 
@@ -163,14 +169,19 @@ class YOLOWrapper:
         self.device = device
         self.class_names: dict = {}
         self._loaded = False
-        self.is_tensorrt = self.model_path.endswith(".engine")
+        self.is_tensorrt = False  # load() 시 결정됨
+        self._cuda_available = False  # load() 시 결정됨
 
     def load(self) -> bool:
         """
-        YOLO 모델 로드.
+        YOLO 모델 로드 (CUDA/TensorRT 자동 감지).
 
         .pt (PyTorch) 또는 .engine (TensorRT) 파일을 로드합니다.
         TensorRT 모델은 Jetson Orin Nano에서 최적화된 추론을 제공합니다.
+
+        자동 fallback 지원:
+            - .engine 요청 + CUDA 없음 → .pt로 자동 전환
+            - .pt 요청 + CUDA 있고 .engine 존재 → .engine 사용
 
         Returns:
             성공 여부
@@ -182,22 +193,27 @@ class YOLOWrapper:
             from ultralytics import YOLO
             import torch
 
-            # Device 자동 결정
-            if self.device == "auto":
-                if self.is_tensorrt:
-                    self.device = "cuda"  # TensorRT는 항상 GPU
-                elif torch.cuda.is_available():
-                    self.device = "cuda"
-                else:
-                    self.device = "cpu"
+            # 1. CUDA 환경 체크 및 초기화
+            self._cuda_available = self._init_cuda()
+
+            # 2. 모델 경로 해석 (fallback 처리)
+            resolved_path = self._resolve_model_path(self._cuda_available)
+            self.is_tensorrt = resolved_path.endswith(".engine")
+
+            # 3. Device 결정
+            if self.is_tensorrt:
+                if not self._cuda_available:
+                    logger.error("TensorRT requires CUDA but CUDA is not available")
+                    return False
+                self.device = "cuda"
+            else:
+                if self.device == "auto":
+                    self.device = "cuda" if self._cuda_available else "cpu"
                 logger.info(f"Auto-selected device: {self.device}")
 
-            # TensorRT 모델인 경우
-            if self.is_tensorrt:
-                self.device = "cuda"  # TensorRT는 항상 GPU
-                logger.info(f"Loading TensorRT engine: {self.model_path}")
-
-            self.model = YOLO(self.model_path)
+            # 4. 모델 로드
+            logger.info(f"Loading model: {resolved_path} (device={self.device})")
+            self.model = YOLO(resolved_path)
 
             # TensorRT가 아닌 경우에만 device 이동
             # TensorRT 모델은 이미 GPU에 최적화되어 있음
@@ -209,16 +225,106 @@ class YOLOWrapper:
 
             model_type = "TensorRT" if self.is_tensorrt else "PyTorch"
             logger.info(
-                f"YOLO model loaded ({model_type}): {self.model_path}, "
-                f"{len(self.class_names)} classes, device={self.device}"
+                f"YOLO loaded ({model_type}): {len(self.class_names)} classes, device={self.device}"
             )
             return True
         except ImportError:
             logger.warning("ultralytics not installed. Use parse_results() for manual parsing.")
             return False
         except Exception as e:
-            logger.error(f"Failed to load YOLO model: {e}")
+            logger.error(f"Failed to load YOLO model: {e}", exc_info=True)
             return False
+
+    def _init_cuda(self) -> bool:
+        """
+        CUDA 환경 초기화 및 검증.
+
+        Returns:
+            CUDA 사용 가능 여부
+        """
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                logger.info("CUDA not available, using CPU")
+                return False
+
+            # CUDA 컨텍스트 초기화 (lazy init 강제)
+            torch.cuda.init()
+            device_name = torch.cuda.get_device_name(0)
+            cuda_version = torch.version.cuda
+            logger.info(f"CUDA initialized: {device_name} (CUDA {cuda_version})")
+            return True
+        except Exception as e:
+            logger.warning(f"CUDA init failed: {e}")
+            return False
+
+    def _resolve_model_path(self, cuda_available: bool) -> str:
+        """
+        모델 경로 해석 및 fallback 처리.
+
+        Args:
+            cuda_available: CUDA 사용 가능 여부
+
+        Returns:
+            실제 사용할 모델 경로
+        """
+        original_path = self.model_path
+
+        # 서비스 디렉토리 기준 (services/model/src/vision -> services/model)
+        service_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        # 프로젝트 루트 (services/model -> Edge_Environment)
+        project_root = os.path.dirname(os.path.dirname(service_dir))
+
+        # 1. 절대 경로이고 파일이 존재하면 그대로 사용
+        if os.path.isabs(original_path):
+            if os.path.exists(original_path):
+                logger.debug(f"Using absolute path: {original_path}")
+                return original_path
+            # 절대 경로지만 파일이 없으면 fallback 시도
+            logger.warning(f"Absolute path not found: {original_path}")
+        else:
+            # 2. 상대 경로 해석 (프로젝트 루트 기준)
+            full_path = os.path.join(project_root, original_path)
+            if os.path.exists(full_path):
+                logger.debug(f"Resolved relative path: {original_path} -> {full_path}")
+                return full_path
+            logger.warning(f"Relative path not found: {full_path}")
+
+        # 3. Fallback: .engine -> .pt (CUDA 없을 경우)
+        if original_path.endswith(".engine") and not cuda_available:
+            pt_path = original_path.replace(".engine", ".pt")
+
+            # 절대 경로 fallback
+            if os.path.isabs(pt_path) and os.path.exists(pt_path):
+                logger.warning(f"Falling back to .pt (no CUDA): {pt_path}")
+                return pt_path
+
+            # 상대 경로 fallback
+            pt_full = os.path.join(project_root, pt_path)
+            if os.path.exists(pt_full):
+                logger.warning(f"Falling back to .pt (no CUDA): {pt_full}")
+                return pt_full
+
+        # 4. Fallback: .pt -> .engine (CUDA 있고 .engine 파일이 존재할 경우)
+        if original_path.endswith(".pt") and cuda_available:
+            engine_path = original_path.replace(".pt", ".engine")
+
+            # 절대 경로 fallback
+            if os.path.isabs(engine_path) and os.path.exists(engine_path):
+                logger.info(f"Using TensorRT engine (auto-detected): {engine_path}")
+                return engine_path
+
+            # 상대 경로 fallback
+            engine_full = os.path.join(project_root, engine_path)
+            if os.path.exists(engine_full):
+                logger.info(f"Using TensorRT engine (auto-detected): {engine_full}")
+                return engine_full
+
+        # 5. 원래 경로 반환 (에러는 YOLO 로드 시 발생)
+        if os.path.isabs(original_path):
+            return original_path
+        return os.path.join(project_root, original_path)
 
     def detect(self, image: np.ndarray) -> List[YOLODetection]:
         """

@@ -39,7 +39,7 @@ class DoorPaymentController:
     3. 데드볼트 잠금 확인 → 결제 처리 (card_terminal 호출)
 
     사용법:
-        controller = DoorPaymentController(io_board_url="http://localhost:8001")
+        controller = DoorPaymentController(io_board_url="http://localhost:8000")
 
         result = await controller.process_transaction(
             card_info=CardInfo(card_number="****-****-****-1234"),
@@ -50,7 +50,7 @@ class DoorPaymentController:
 
     def __init__(
         self,
-        io_board_url: str = "http://localhost:8001",
+        io_board_url: str = "http://localhost:8000",
         card_terminal_url: str = "http://127.0.0.1:8004",
         card_terminal_api_key: Optional[str] = None,
         lock_delay_seconds: float = 3.0,

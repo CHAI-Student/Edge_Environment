@@ -13,7 +13,7 @@
 | Camera Driver | 8003 | O | 카메라 스냅샷/녹화 |
 | Model Service | 8002 | O | AI 상품 판단 |
 | Node.js Server | 8889 | O | 오케스트레이터 |
-| IO Board | 8001 | X | 불필요 (카메라 전용 모드) |
+| IO Board | 8000 | X | 불필요 (카메라 전용 모드) |
 
 ## 빠른 시작
 

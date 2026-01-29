@@ -13,10 +13,12 @@ module.exports = {
     // 매장 고유번호
     divisionIdx: 'DI17647205538493077',
     // 장비 고유번호
+    // deviceIdx: 'DE17560868094789999',
     deviceIdx: 'DE17683631997086480',
     // PNT RestAPI 연결
     restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
     userId: 'chaitest',
+    // userId: 'chaitest2',
     userPassword: 'iljin123!',
     get jwtToken() {
         return process.env.JWT_TOKEN;
@@ -24,26 +26,17 @@ module.exports = {
     get jwtTokenAt() {
         return process.env.JWT_TOKEN_AT;
     },
-
-    // ============================================
-    // 서비스 API 설정 (통합)
-    // ============================================
-    // 기본 서비스 URL (환경변수 우선)
-    ioBoardUrl: process.env.IO_BOARD_URL || 'http://localhost:8000',
-    cameraDriverUrl: process.env.CAMERA_DRIVER_URL || 'http://localhost:8003',
-    productJudgeUrl: process.env.PRODUCT_JUDGE_URL || 'http://localhost:8002',
-    modelUrl: process.env.MODEL_URL || 'http://localhost:8002',
-    mqttClientUrl: process.env.MQTT_CLIENT_URL || 'http://localhost:8006',
-    cardTerminalUrl: process.env.CARD_TERMINAL_URL || 'http://localhost:8001',
-
-    // 레거시 호환용 별칭 (HealthMqtt, Payments 등에서 사용)
-    get ioboardApi() { return this.ioBoardUrl; },
-    get cameraApi() { return this.cameraDriverUrl; },
-    get modelApi() { return this.productJudgeUrl; },
-    get deadboltApi() { return this.ioBoardUrl; },
-    get cardTerminalApi() { return this.cardTerminalUrl; },
-    get ioboardApiHost() { return this.ioBoardUrl; },
-    get cameraControlApi() { return this.cameraDriverUrl; },
+    ioboardApi: 'http://localhost:8000',
+    // ioboardApi: 'http://192.168.0.20:8000',
+    // 데드볼트 제어 API (IO Board에서 처리)
+    deadboltApi: 'http://localhost:8000',
+    // 카메라 서버 API 설정
+    cameraApi: "http://localhost:8003",
+    // 카드단말기 서버 API 설정
+    cardTerminalApi: "http://localhost:8001",
+    // cardTerminalApi: "http://192.168.0.20:8001",
+    // 모델 서버 API 설정
+    modelApi: "http://localhost:8002",
 
     // 임베딩 모델 버전
     modelVersion: "v1.0.0",

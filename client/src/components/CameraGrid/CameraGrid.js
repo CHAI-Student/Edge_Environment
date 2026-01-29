@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { api } from '../../services/api';
+import { api, CONSTANTS } from '../../services/api';
 import './CameraGridStyles.css';
 
 const CameraGrid = () => {
@@ -26,7 +26,7 @@ const CameraGrid = () => {
                     const match = file.match(/cam_(\d+)\.jpg/);
                     if (match) {
                         const index = parseInt(match[1]);
-                        const url = `${api.CONSTANTS.API_BASE}/api/logs/camera/${today}/${latest.time}/${file}`;
+                        const url = `${CONSTANTS.API_BASE}/api/logs/camera/${today}/${latest.time}/${file}`;
                         updateCamera(index, { preview: url, status: 'healthy' });
                     }
                 });

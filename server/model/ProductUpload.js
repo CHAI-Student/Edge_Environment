@@ -66,13 +66,11 @@ const productUploadSchema = mongoose.Schema({
     eventPromotion: {
         type: Array,
         default: []
-    },
-    trainProductIdx: {
-        type: Number, //1부터 순차적으로 시작
-    },
+    }
 })
 
 // const ProductUpload = mongoose.model('ProductUpload', productUploadSchema);
 const ProductUpload = mongoose.model('ProductUpload', productUploadSchema, 'ProductsList');
+
 
 module.exports = { ProductUpload }

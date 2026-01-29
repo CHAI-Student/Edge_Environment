@@ -3,14 +3,16 @@ Camera Driver API Routes
 """
 
 import io
+import logging
 import shutil
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
+
+logger = logging.getLogger(__name__)
 
 from config import (
     settings,
@@ -21,6 +23,7 @@ from config import (
     get_enabled_zones,
     get_max_zone_id,
     is_zone_enabled,
+    get_kst_now,
 )
 from core import CameraManager
 from models import (
@@ -184,7 +187,7 @@ def _test_storage_writable() -> bool:
         # 프로젝트 루트 기준: Edge_Environment/{날짜시간}/images/cam0~cam5
         # camera_driver/api/routes.py 기준 상위 4단계가 프로젝트 루트
         project_root = Path(__file__).parent.parent.parent.parent
-        test_session = datetime.now().strftime("%Y%m%d_%H%M%S_healthcheck")
+        test_session = get_kst_now().strftime("%Y%m%d_%H%M%S_healthcheck")
         test_path = project_root / test_session / "images"
 
         # 활성화된 카메라 폴더 생성 테스트
@@ -202,6 +205,90 @@ def _test_storage_writable() -> bool:
         return True
     except Exception:
         return False
+
+
+def _test_image_save(manager) -> dict:
+    """
+    실제 이미지 저장 테스트.
+
+    각 카메라에서 프레임을 캡처하고 JPEG로 저장한 후 파일을 확인합니다.
+
+    Returns:
+        {
+            "success": bool,
+            "cameras_tested": int,
+            "cameras_passed": int,
+            "details": {camera_id: {"captured": bool, "saved": bool, "verified": bool}}
+        }
+    """
+    import cv2
+    import os
+
+    project_root = Path(__file__).parent.parent.parent.parent
+    test_session = get_kst_now().strftime("%Y%m%d_%H%M%S_imgtest")
+    test_path = project_root / test_session / "images"
+
+    results = {
+        "success": False,
+        "cameras_tested": 0,
+        "cameras_passed": 0,
+        "details": {}
+    }
+
+    try:
+        test_path.mkdir(parents=True, exist_ok=True)
+
+        for camera_id in ALL_CAMERA_IDS:
+            detail = {"captured": False, "saved": False, "verified": False}
+            results["cameras_tested"] += 1
+
+            try:
+                # 1. 프레임 캡처
+                frame = manager.get_frame(camera_id)
+                if frame is None:
+                    results["details"][camera_id] = detail
+                    continue
+                detail["captured"] = True
+
+                # 2. JPEG 저장
+                img_path = test_path / f"cam_{camera_id}_test.jpg"
+                encode_result = cv2.imwrite(
+                    str(img_path),
+                    frame,
+                    [cv2.IMWRITE_JPEG_QUALITY, 90]
+                )
+                if not encode_result:
+                    results["details"][camera_id] = detail
+                    continue
+                detail["saved"] = True
+
+                # 3. 파일 확인 (존재 + 크기 > 0)
+                if img_path.exists() and os.path.getsize(img_path) > 0:
+                    detail["verified"] = True
+                    results["cameras_passed"] += 1
+
+            except Exception as e:
+                logger.warning(f"Image save test failed for camera {camera_id}: {e}")
+
+            results["details"][camera_id] = detail
+
+        # 전체 성공 여부
+        results["success"] = (
+            results["cameras_tested"] > 0 and
+            results["cameras_passed"] == results["cameras_tested"]
+        )
+
+    except Exception as e:
+        logger.error(f"Image save test error: {e}")
+    finally:
+        # 테스트 파일 정리
+        try:
+            if test_path.exists():
+                shutil.rmtree(project_root / test_session)
+        except Exception:
+            pass
+
+    return results
 
 
 @router.get("/health")
@@ -222,9 +309,18 @@ async def health_check() -> CameraHealthResponse:
     # 2. 저장 경로 쓰기 테스트
     storage_ok = _test_storage_writable()
 
+    # 3. 실제 이미지 저장 테스트 (프레임 캡처 → JPEG 저장 → 파일 확인)
+    image_save_result = _test_image_save(manager)
+
     return CameraHealthResponse(
         cameras="HEALTHY" if all_cameras_ok else "UNHEALTHY",
         storage="HEALTHY" if storage_ok else "UNHEALTHY",
+        image_save="HEALTHY" if image_save_result["success"] else "UNHEALTHY",
+        image_save_details={
+            "cameras_tested": image_save_result["cameras_tested"],
+            "cameras_passed": image_save_result["cameras_passed"],
+            "details": image_save_result["details"],
+        },
     )
 
 
@@ -363,6 +459,17 @@ class ZoneSnapshotRequest(BaseModel):
     """Zone 스냅샷 요청."""
     session_id: str
     include_top: bool = True
+    base_path: Optional[str] = None  # Node.js에서 지정하는 저장 경로
+
+
+class ContinuousCaptureRequest(BaseModel):
+    """연속 촬영 요청."""
+    session_id: Optional[str] = None
+    camera_ids: Optional[list] = None  # 기본: [0] = Top 카메라
+    interval: float = 0.5  # 촬영 간격 (초)
+    include_video: bool = True  # 영상도 함께 녹화
+    duration: Optional[float] = None  # 촬영 시간 (초, None이면 수동 중지까지)
+    save_images: bool = True  # 이미지 저장 여부
 
 
 @router.post("/zone/{zone_id}/snapshot")
@@ -395,18 +502,24 @@ async def capture_zone_snapshot(zone_id: int, request: ZoneSnapshotRequest) -> d
 
     manager = get_manager()
 
+    # Node.js에서 지정한 base_path 우선 사용, 없으면 기본값
+    if request.base_path:
+        effective_base_path = Path(request.base_path)
+    elif settings.media_base_path:
+        effective_base_path = Path(settings.media_base_path)
+    else:
+        effective_base_path = Path("data/")
+
     # 스냅샷 캡처 (기존 메서드 활용)
     saved_paths = manager.capture_snapshot(
         session_id=request.session_id,
         zone_id=zone_id,
         all_cameras=False,
+        base_path=str(effective_base_path),  # Node.js 지정 경로 전달
     )
 
     # 세션 경로 계산
-    # 기본 경로: Edge_Environment/data/{session_id}/images/camX
-    # settings.media_base_path 사용 (기본값: "data/")
-    base_path = Path(settings.media_base_path) if settings.media_base_path else Path("data/")
-    session_path = str(base_path / request.session_id / "images")
+    session_path = str(effective_base_path / request.session_id / "images")
 
     # 응답 형식 (Node.js 클라이언트 호환)
     images = {}
@@ -428,36 +541,77 @@ async def capture_zone_snapshot(zone_id: int, request: ZoneSnapshotRequest) -> d
 # =========================================================================
 
 
+class RecordingStartRequest(BaseModel):
+    """녹화 시작 요청."""
+    zone_id: Optional[int] = None  # Zone ID (0-4, None이면 전체)
+    include_top: bool = True  # Top 카메라 포함 여부
+    record_video: bool = True  # 영상 녹화 여부
+    base_path: Optional[str] = None  # 저장 기본 경로
+    session_id: Optional[str] = None  # 세션 ID (없으면 자동 생성)
+    top_only: bool = False  # Top 카메라만 녹화 (데드볼트 열림 시)
+    duration: Optional[float] = None  # 촬영 시간 (초, None이면 수동 중지)
+    save_images: bool = False  # 이미지도 저장할지 여부
+    camera_ids: Optional[list] = None  # 특정 카메라 ID 목록
+
+
 @router.post("/recording/start")
-async def start_recording(
-    zone_id: Optional[int] = None,
-    include_top: bool = True,
-    record_video: bool = True,
-    base_path: Optional[str] = None,
-) -> dict:
+async def start_recording(request: RecordingStartRequest) -> dict:
     """
     녹화 시작.
 
     Args:
-        zone_id: Zone ID (0-4, None이면 전체)
-        include_top: Top 카메라 포함 여부
-        record_video: 영상 녹화 여부
-        base_path: 저장 기본 경로
+        request: 녹화 요청 설정
+            - zone_id: Zone ID (0-4, None이면 전체)
+            - include_top: Top 카메라 포함 여부
+            - record_video: 영상 녹화 여부
+            - base_path: 저장 기본 경로
+            - session_id: 세션 ID (없으면 자동 생성)
+            - top_only: Top 카메라만 녹화 (데드볼트 열림 시)
+            - duration: 촬영 시간 (초, None이면 수동 중지)
+            - save_images: 이미지도 저장할지 여부
+            - camera_ids: 특정 카메라 ID 목록
 
     Returns:
         세션 ID 및 경로 정보
     """
     manager = get_manager()
 
-    if base_path:
-        manager.init_media_recorder(base_path=base_path)
+    if request.base_path:
+        manager.init_media_recorder(base_path=request.base_path)
     elif not manager._media_recorder:
         manager.init_media_recorder()
 
+    # Top 카메라만 녹화 모드 (데드볼트 열림 시)
+    if request.top_only:
+        result = manager.start_top_video_only(session_id=request.session_id)
+        return {
+            "success": True,
+            "mode": "top_only",
+            **result,
+            "timestamp": time.time(),
+        }
+
+    # 시간 제한 촬영 모드 (무게 변화 시)
+    if request.duration is not None and request.camera_ids:
+        result = manager.start_timed_capture(
+            session_id=request.session_id,
+            camera_ids=request.camera_ids,
+            duration=request.duration,
+            save_images=request.save_images,
+            save_side_video=request.record_video,
+        )
+        return {
+            "success": True,
+            "mode": "timed",
+            **result,
+            "timestamp": time.time(),
+        }
+
+    # 일반 녹화 모드
     session_id = manager.start_recording(
-        zone_id=zone_id,
-        include_top=include_top,
-        record_video=record_video,
+        zone_id=request.zone_id,
+        include_top=request.include_top,
+        record_video=request.record_video,
     )
 
     if not session_id:
@@ -467,23 +621,51 @@ async def start_recording(
 
     return {
         "success": True,
+        "mode": "normal",
         "session_id": session_id,
-        "zone_id": zone_id,
-        "record_video": record_video,
+        "zone_id": request.zone_id,
+        "record_video": request.record_video,
         "paths": paths,
     }
 
 
+class RecordingStopRequest(BaseModel):
+    """녹화 중지 요청."""
+    top_only: bool = False  # Top 카메라만 녹화 중지
+
+
 @router.post("/recording/stop")
-async def stop_recording() -> dict:
+async def stop_recording(request: RecordingStopRequest = None) -> dict:
     """
     녹화 중지.
+
+    Args:
+        request: 중지 옵션
+            - top_only: Top 카메라만 녹화 중지 (데드볼트 닫힘 시)
 
     Returns:
         세션 정보 (저장된 파일 경로 등)
     """
     manager = get_manager()
 
+    # request가 None이면 기본값 사용
+    if request is None:
+        request = RecordingStopRequest()
+
+    # Top 카메라만 녹화 중지 모드
+    if request.top_only:
+        if not manager.is_top_video_recording:
+            raise HTTPException(status_code=400, detail="No active top video recording")
+
+        result = manager.stop_top_video_only()
+        return {
+            "success": True,
+            "mode": "top_only",
+            "session_info": result,
+            "timestamp": time.time(),
+        }
+
+    # 일반 녹화 중지
     if not manager.is_recording:
         raise HTTPException(status_code=400, detail="No active recording")
 
@@ -494,6 +676,7 @@ async def stop_recording() -> dict:
 
     return {
         "success": True,
+        "mode": "normal",
         "session_info": result,
     }
 
@@ -542,9 +725,14 @@ async def get_recording_status() -> dict:
     """녹화 상태 조회."""
     manager = get_manager()
 
+    top_video_session = getattr(manager, '_top_video_session_id', None)
+
     return {
         "is_recording": manager.is_recording,
+        "is_top_video_recording": manager.is_top_video_recording,
+        "top_video_session_id": top_video_session,
         "has_media_recorder": manager._media_recorder is not None,
+        "timestamp": time.time(),
     }
 
 
@@ -705,4 +893,99 @@ async def stop_sse_subscription() -> dict:
     return {
         "success": True,
         "message": "SSE subscriber stopped",
+    }
+
+
+# =========================================================================
+# 연속 촬영 API (문이 열려있는 동안 계속 이미지 저장)
+# =========================================================================
+
+
+@router.post("/continuous-capture/start")
+async def start_continuous_capture(request: ContinuousCaptureRequest) -> dict:
+    """
+    연속 촬영 시작.
+
+    데드볼트가 열릴 때 호출하여 문이 닫힐 때까지
+    지정된 간격으로 이미지를 계속 저장합니다.
+
+    Args:
+        request: 연속 촬영 요청 (session_id, camera_ids, interval, include_video)
+
+    Returns:
+        {
+            "success": True,
+            "session_id": str,
+            "cameras": List[int],
+            "interval": float,
+            "paths": Dict[str, str]
+        }
+    """
+    manager = get_manager()
+
+    result = manager.start_continuous_capture(
+        session_id=request.session_id,
+        camera_ids=request.camera_ids,
+        interval=request.interval,
+        include_video=request.include_video,
+    )
+
+    return {
+        "success": True,
+        **result,
+        "timestamp": time.time(),
+    }
+
+
+@router.post("/continuous-capture/stop")
+async def stop_continuous_capture() -> dict:
+    """
+    연속 촬영 중지.
+
+    데드볼트가 닫힐 때 호출하여 연속 촬영을 중지하고
+    저장된 미디어 경로를 반환합니다.
+
+    Returns:
+        {
+            "success": True,
+            "session_info": {
+                "session_id": str,
+                "base_path": str,
+                "frame_counts": Dict[int, int],
+                "video_paths": Dict[int, str],
+                ...
+            }
+        }
+    """
+    manager = get_manager()
+
+    if not manager.is_continuous_capture_active:
+        raise HTTPException(status_code=400, detail="No active continuous capture")
+
+    result = manager.stop_continuous_capture()
+
+    return {
+        "success": True,
+        "session_info": result,
+        "timestamp": time.time(),
+    }
+
+
+@router.get("/continuous-capture/status")
+async def get_continuous_capture_status() -> dict:
+    """
+    연속 촬영 상태 조회.
+
+    Returns:
+        {
+            "active": bool,
+            "session_id": str | None,
+            "interval": float
+        }
+    """
+    manager = get_manager()
+
+    return {
+        **manager.get_continuous_capture_status(),
+        "timestamp": time.time(),
     }

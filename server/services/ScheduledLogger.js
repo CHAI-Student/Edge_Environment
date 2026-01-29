@@ -383,17 +383,37 @@ class ScheduledLogger {
     }
 
     /**
-     * 날짜 포맷 (YYYY-MM-DD)
+     * UTC Date를 KST(UTC+9)로 변환
      */
-    _formatDate(date) {
-        return date.toISOString().split('T')[0];
+    _toKST(date) {
+        // KST = UTC + 9시간
+        const kstOffset = 9 * 60 * 60 * 1000;
+        return new Date(date.getTime() + kstOffset);
     }
 
     /**
-     * 시간 포맷 (HH-MM-SS)
+     * 날짜 포맷 (YYYY-MM-DD, KST 기준)
+     */
+    _formatDate(date) {
+        const kst = this._toKST(date);
+        return kst.toISOString().split('T')[0];
+    }
+
+    /**
+     * 시간 포맷 (HH-MM-SS, KST 기준)
      */
     _formatTime(date) {
-        return date.toISOString().split('T')[1].split('.')[0].replace(/:/g, '-');
+        const kst = this._toKST(date);
+        return kst.toISOString().split('T')[1].split('.')[0].replace(/:/g, '-');
+    }
+
+    /**
+     * KST 기준 ISO 문자열 반환
+     */
+    _toKSTISOString(date) {
+        const kst = this._toKST(date);
+        // ISO 형식에서 'Z'를 '+09:00'으로 변경
+        return kst.toISOString().replace('Z', '+09:00');
     }
 }
 

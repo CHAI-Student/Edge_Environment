@@ -209,7 +209,7 @@ recordings/
 
 ## 5. 서비스별 테스트
 
-### 5.1 IO Board 서비스 (포트 8001)
+### 5.1 IO Board 서비스 (포트 8000)
 
 **하드웨어 없이 테스트 불가** - 시리얼 연결 필요
 
@@ -220,13 +220,13 @@ set IO_BOARD__SERIAL__PORT=COM3
 python main.py
 
 # 헬스 체크
-curl http://localhost:8001/health
+curl http://localhost:8000/health
 
 # 로드셀 무게 조회
-curl http://localhost:8001/loadcells
+curl http://localhost:8000/loadcells
 
 # 도어/데드볼트 상태
-curl http://localhost:8001/status
+curl http://localhost:8000/status
 ```
 
 ### 5.2 Model 서비스 (포트 8002)
@@ -315,7 +315,7 @@ npm start
 # 터미널 4: node server/index.js
 
 # 헬스 체크
-curl http://localhost:8001/health      # io_board
+curl http://localhost:8000/health      # io_board
 curl http://localhost:8002/api/health  # model
 curl http://localhost:8003/api/health  # camera_driver
 curl http://localhost:8889/health      # node.js
@@ -403,7 +403,7 @@ pm2 save
 
 ## API 엔드포인트 요약
 
-### IO Board (8001)
+### IO Board (8000)
 ```
 GET  /health      # 헬스 체크
 GET  /loadcells   # 로드셀 무게

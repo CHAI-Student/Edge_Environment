@@ -4,7 +4,7 @@
 이 테스트는 실제 자판기 환경에서 모델의 성능과 로직을 테스트합니다.
 
 필수 조건:
-    - io_board 서비스 실행 중 (포트 8001)
+    - io_board 서비스 실행 중 (포트 8000)
     - camera_driver 서비스 실행 중 (포트 8003)
     - model 서비스 실행 중 (포트 8002)
 
@@ -97,7 +97,7 @@ class HardwareIntegrationTester:
 
     def __init__(
         self,
-        io_board_url: str = "http://localhost:8001",
+        io_board_url: str = "http://localhost:8000",
         camera_driver_url: str = "http://localhost:8003",
         model_url: str = "http://localhost:8002",
         timeout: float = 10.0,
@@ -538,7 +538,7 @@ async def main():
     )
     parser.add_argument(
         "--io-board-url",
-        default="http://localhost:8001",
+        default="http://localhost:8000",
         help="io_board 서비스 URL"
     )
     parser.add_argument(

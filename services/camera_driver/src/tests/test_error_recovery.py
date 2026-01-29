@@ -508,7 +508,7 @@ class TestSSESubscriberBackoff:
         """IOBoardSubscriber instance."""
         from model.sse_client.io_board_subscriber import IOBoardSubscriber
         return IOBoardSubscriber(
-            base_url="http://localhost:8001",
+            base_url="http://localhost:8000",
             initial_reconnect_delay=1.0,
             max_reconnect_delay=30.0,
             backoff_multiplier=2.0,

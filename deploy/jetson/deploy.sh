@@ -119,7 +119,7 @@ docker compose -f docker-compose.yaml -f docker-compose.jetson.yaml ps
 
 echo ""
 echo "=== Health Check ==="
-for port in 8001 8002 8003 8004 8006 8888; do
+for port in 8000 8002 8003 8004 8006 8888; do
     status=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:\${port}/health 2>/dev/null || echo "000")
     if [ "\$status" = "200" ]; then
         echo "Port \${port}: ✓ OK"

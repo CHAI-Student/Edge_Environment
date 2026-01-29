@@ -26,16 +26,19 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 from dataclasses import dataclass, field
 
 import aiohttp
 
+# 한국 표준시 (KST, UTC+9)
+KST = timezone(timedelta(hours=9))
+
 if TYPE_CHECKING:
     from .manager import CameraManager
-    from .sse_subscriber import WeightChangeEvent
+    from .sse_subscriber import WeightChangeEvent, DoorEvent
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +118,15 @@ class EventRecordingManager:
         # Zone → Camera 매핑 (config/zone_mapping.json에서 로드)
         self._zone_camera_map = self._load_zone_camera_mapping()
 
+        # Top 카메라 영상 녹화 상태 (데드볼트 열림 시 시작)
+        self._top_video_session_id: Optional[str] = None
+        self._top_video_recording_task: Optional[asyncio.Task] = None
+        self._top_video_stop_event = asyncio.Event()
+
+        # 3초 촬영 설정
+        self._timed_capture_duration = 3.0  # 3초
+        self._timed_capture_interval = 0.1  # 0.1초 간격 (10fps, 약 30장)
+
     def _load_zone_camera_mapping(self) -> Dict[int, List[int]]:
         """
         config/zone_mapping.json에서 Zone-Camera 매핑 로드.
@@ -158,9 +170,135 @@ class EventRecordingManager:
         logger.info(f"Using default zone-camera mapping: {default_mapping}")
         return default_mapping
 
+    async def on_door_change(self, event: "DoorEvent"):
+        """
+        도어/데드볼트 이벤트 처리
+
+        Args:
+            event: 도어 이벤트
+        """
+        deadbolt_state = event.deadbolt_state
+
+        if deadbolt_state == "OPEN":
+            # 데드볼트 열림 → Top 카메라 영상 녹화 시작
+            await self._start_top_video_recording()
+        elif deadbolt_state in ("CLOSED", "CLOSE"):
+            # 데드볼트 닫힘 → Top 카메라 영상 녹화 중지
+            await self._stop_top_video_recording()
+
+    async def _start_top_video_recording(self):
+        """
+        Top 카메라 영상 녹화 시작 (데드볼트 열림 시)
+
+        문이 닫힐 때까지 Top 카메라의 영상을 계속 녹화합니다.
+        """
+        if self._top_video_session_id:
+            logger.warning("Top video recording already active")
+            return
+
+        # 세션 ID 생성
+        self._top_video_session_id = datetime.now(KST).strftime("%Y%m%d_%H%M%S")
+        session_path = self._media_base_path / self._top_video_session_id
+        videos_path = session_path / "videos"
+        videos_path.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"Top video recording started: session={self._top_video_session_id}")
+
+        # 녹화 태스크 시작
+        self._top_video_stop_event.clear()
+        self._top_video_recording_task = asyncio.create_task(
+            self._top_video_recording_loop(videos_path)
+        )
+
+    async def _top_video_recording_loop(self, videos_path: Path):
+        """
+        Top 카메라 영상 녹화 루프
+
+        Args:
+            videos_path: 영상 저장 경로
+        """
+        try:
+            import cv2
+
+            camera = self._camera_manager.get_camera(0)  # Top camera
+            if camera is None:
+                logger.error("Top camera (0) not found")
+                return
+
+            # VideoWriter 설정
+            video_path = videos_path / "cam_0.mp4"
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            fps = camera.config.fps if hasattr(camera, 'config') else 30
+            resolution = (640, 480)  # 기본 해상도
+
+            # 첫 프레임에서 해상도 확인
+            frame = camera.get_frame()
+            if frame is not None:
+                height, width = frame.shape[:2]
+                resolution = (width, height)
+
+            writer = cv2.VideoWriter(str(video_path), fourcc, fps, resolution)
+
+            if not writer.isOpened():
+                logger.error(f"Failed to create VideoWriter for top camera")
+                return
+
+            frame_count = 0
+            interval = 1.0 / fps
+
+            logger.info(f"Top video recording loop started: {video_path}")
+
+            while not self._top_video_stop_event.is_set():
+                frame = camera.get_frame()
+                if frame is not None:
+                    writer.write(frame)
+                    frame_count += 1
+
+                    if frame_count % 100 == 0:
+                        logger.debug(f"Top video: {frame_count} frames recorded")
+
+                await asyncio.sleep(interval)
+
+            writer.release()
+            logger.info(f"Top video recording stopped: {frame_count} frames saved to {video_path}")
+
+        except ImportError:
+            logger.error("OpenCV not available for video recording")
+        except asyncio.CancelledError:
+            logger.info("Top video recording cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"Top video recording error: {e}")
+
+    async def _stop_top_video_recording(self):
+        """
+        Top 카메라 영상 녹화 중지 (데드볼트 닫힘 시)
+        """
+        if not self._top_video_session_id:
+            logger.debug("No active top video recording")
+            return
+
+        # 중지 신호
+        self._top_video_stop_event.set()
+
+        # 태스크 종료 대기
+        if self._top_video_recording_task:
+            try:
+                await asyncio.wait_for(self._top_video_recording_task, timeout=2.0)
+            except asyncio.TimeoutError:
+                self._top_video_recording_task.cancel()
+            except asyncio.CancelledError:
+                pass
+            self._top_video_recording_task = None
+
+        logger.info(f"Top video recording stopped: session={self._top_video_session_id}")
+        self._top_video_session_id = None
+
     async def on_weight_change(self, event: "WeightChangeEvent"):
         """
         무게 변화 이벤트 처리
+
+        새로운 로직: 3초간 Top + Side 이미지 저장, Side 영상 녹화
 
         Args:
             event: 무게 변화 이벤트
@@ -193,17 +331,127 @@ class EventRecordingManager:
             weight_data=weight_data,
         )
 
-        # 타이머 시작 (post_buffer_seconds 후 저장)
+        # 3초 촬영 태스크 시작 (즉시 시작, 3초 후 완료)
         pending.timer_task = asyncio.create_task(
-            self._delayed_save(pending)
+            self._timed_capture(pending)
         )
 
         self._pending_recordings[zone_id] = pending
-        logger.info(f"Zone {zone_id}: Recording scheduled in {self._post_buffer_seconds}s")
+        logger.info(f"Zone {zone_id}: 3-second timed capture started")
+
+    async def _timed_capture(self, pending: PendingRecording):
+        """
+        3초간 시간 제한 촬영 (무게 변화 시)
+
+        Top + Side 카메라 이미지 저장 + Side 카메라 영상 녹화
+
+        Args:
+            pending: 대기 중인 녹화 정보
+        """
+        zone_id = pending.zone_id
+        start_time = time.time()
+
+        # 세션 ID (Top 영상 녹화 세션 사용, 없으면 새로 생성)
+        session_id = self._top_video_session_id or datetime.now(KST).strftime("%Y%m%d_%H%M%S")
+
+        # 저장 경로 생성
+        session_path = self._media_base_path / session_id
+        images_path = session_path / "images"
+        videos_path = session_path / "videos"
+        images_path.mkdir(parents=True, exist_ok=True)
+        videos_path.mkdir(parents=True, exist_ok=True)
+
+        # 카메라 ID (Top: 0, Side: zone_id + 1)
+        top_cam_id = 0
+        side_cam_id = zone_id + 1
+        camera_ids = [top_cam_id, side_cam_id]
+
+        logger.info(f"Zone {zone_id}: Timed capture started - cameras={camera_ids}, duration={self._timed_capture_duration}s")
+
+        try:
+            import cv2
+
+            # 카메라별 이미지 폴더 생성
+            for cam_id in camera_ids:
+                (images_path / f"cam_{cam_id}").mkdir(exist_ok=True)
+
+            # Side 카메라 VideoWriter 설정
+            side_camera = self._camera_manager.get_camera(side_cam_id)
+            side_video_writer = None
+            side_video_path = None
+
+            if side_camera and self._save_videos:
+                frame = side_camera.get_frame()
+                if frame is not None:
+                    height, width = frame.shape[:2]
+                    side_video_path = videos_path / f"cam_{side_cam_id}.mp4"
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                    fps = side_camera.config.fps if hasattr(side_camera, 'config') else 30
+                    side_video_writer = cv2.VideoWriter(str(side_video_path), fourcc, fps, (width, height))
+
+            # 프레임 카운터
+            frame_counts = {cam_id: 0 for cam_id in camera_ids}
+
+            # 3초간 촬영 루프
+            while (time.time() - start_time) < self._timed_capture_duration:
+                for cam_id in camera_ids:
+                    camera = self._camera_manager.get_camera(cam_id)
+                    if camera is None:
+                        continue
+
+                    frame = camera.get_frame()
+                    if frame is None:
+                        continue
+
+                    # 이미지 저장
+                    if self._save_images:
+                        frame_counts[cam_id] += 1
+                        img_path = images_path / f"cam_{cam_id}" / f"frame_{frame_counts[cam_id]:04d}.jpg"
+                        cv2.imwrite(str(img_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+
+                    # Side 영상에 프레임 추가
+                    if cam_id == side_cam_id and side_video_writer:
+                        side_video_writer.write(frame)
+
+                await asyncio.sleep(self._timed_capture_interval)
+
+            # VideoWriter 정리
+            if side_video_writer:
+                side_video_writer.release()
+
+            # 미디어 경로 정보
+            media_paths = MediaPaths(
+                base_path=str(session_path),
+                session_id=session_id,
+            )
+            for cam_id in camera_ids:
+                media_paths.images[f"cam_{cam_id}"] = str(images_path / f"cam_{cam_id}")
+            if side_video_path:
+                media_paths.videos[f"cam_{side_cam_id}"] = str(side_video_path)
+
+            logger.info(
+                f"Zone {zone_id}: Timed capture completed - "
+                f"images={sum(frame_counts.values())}, video={'yes' if side_video_path else 'no'}"
+            )
+
+            # Node.js에 알림
+            await self._notify_nodejs(zone_id, pending.weight_data, media_paths)
+
+        except ImportError:
+            logger.error("OpenCV not available for timed capture")
+        except asyncio.CancelledError:
+            logger.debug(f"Zone {zone_id}: Timed capture cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"Zone {zone_id}: Timed capture error - {e}")
+        finally:
+            # 정리
+            if zone_id in self._pending_recordings:
+                del self._pending_recordings[zone_id]
 
     async def _delayed_save(self, pending: PendingRecording):
         """
-        지연 저장 (post_buffer_seconds 후)
+        지연 저장 (post_buffer_seconds 후) - 레거시 호환용
 
         Args:
             pending: 대기 중인 녹화 정보
@@ -231,8 +479,8 @@ class EventRecordingManager:
         event_time = pending.event_time
         current_time = time.time()
 
-        # 세션 ID 생성 (YYYYMMDD_HHMMSS 형식)
-        session_id = datetime.fromtimestamp(event_time).strftime("%Y%m%d_%H%M%S")
+        # 세션 ID 생성 (YYYYMMDD_HHMMSS 형식, KST 기준)
+        session_id = datetime.fromtimestamp(event_time, tz=KST).strftime("%Y%m%d_%H%M%S")
 
         # 저장 경로 생성
         session_path = self._media_base_path / session_id
@@ -477,6 +725,10 @@ class EventRecordingManager:
 
     async def close(self):
         """리소스 정리"""
+        # Top 영상 녹화 중지
+        if self._top_video_session_id:
+            await self._stop_top_video_recording()
+
         # 대기 중인 녹화 취소 (모든 태스크 취소 시도)
         for zone_id, pending in list(self._pending_recordings.items()):
             if pending.timer_task:
@@ -516,4 +768,8 @@ class EventRecordingManager:
             "save_videos": self._save_videos,
             "nodejs_callback_url": self._nodejs_callback_url,
             "media_base_path": str(self._media_base_path),
+            "top_video_recording": self._top_video_session_id is not None,
+            "top_video_session_id": self._top_video_session_id,
+            "timed_capture_duration": self._timed_capture_duration,
+            "timed_capture_interval": self._timed_capture_interval,
         }

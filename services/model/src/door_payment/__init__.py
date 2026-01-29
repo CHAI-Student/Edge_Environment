@@ -12,7 +12,7 @@ Door Payment Controller Module
     from door_payment import DoorPaymentController
 
     controller = DoorPaymentController(
-        io_board_url="http://localhost:8001",
+        io_board_url="http://localhost:8000",
         card_terminal_host="127.0.0.1",
         card_terminal_port=5000
     )

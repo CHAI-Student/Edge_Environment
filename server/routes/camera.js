@@ -239,19 +239,32 @@ router.get('/devices/scan', async (req, res) => {
 /**
  * 카메라 헬스 체크
  * GET /api/camera/health
+ *
+ * 반환 값:
+ * - cameras: 카메라 연결 및 프레임 캡처 상태 ("HEALTHY" | "UNHEALTHY")
+ * - storage: 저장 경로 쓰기 가능 여부 ("HEALTHY" | "UNHEALTHY")
+ * - image_save: 실제 이미지 저장 테스트 결과 ("HEALTHY" | "UNHEALTHY")
+ * - image_save_details: 카메라별 상세 결과
  */
 router.get('/health', async (req, res) => {
     try {
-        const isHealthy = await cameraClient.isHealthy();
+        const healthDetails = await cameraClient.getHealthDetails();
         res.json({
-            status: isHealthy ? 'healthy' : 'unhealthy',
+            status: healthDetails.healthy ? 'healthy' : 'unhealthy',
             service: 'camera_driver',
+            cameras: healthDetails.cameras,
+            storage: healthDetails.storage,
+            image_save: healthDetails.image_save,
+            image_save_details: healthDetails.image_save_details,
             timestamp: new Date().toISOString()
         });
     } catch (error) {
         res.status(503).json({
             status: 'unhealthy',
             service: 'camera_driver',
+            cameras: 'UNHEALTHY',
+            storage: 'UNKNOWN',
+            image_save: 'UNKNOWN',
             error: error.message,
             timestamp: new Date().toISOString()
         });

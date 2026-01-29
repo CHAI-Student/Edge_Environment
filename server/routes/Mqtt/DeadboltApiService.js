@@ -7,16 +7,16 @@ const API_ENDPOINT = "/deadbolt"; // 상세 경로
 
 /**
  * API 서버에 도어 제어 요청을 보냅니다.
- * Python 서버의 스펙: POST /deadbolt, Body: { "state": "OPEN" | "CLOSE" }
+ * Python 서버의 스펙: POST /deadbolt, Body: { "action": "OPEN" | "CLOSE" }
  * @param {string} targetState - "OPEN" or "CLOSE"
- * @returns {Promise<string>} - 서버가 반환한 최종 상태 ("OPEN" or "CLOSE")
+ * @returns {Promise<string>} - 서버가 반환한 최종 상태 ("OPENED" or "LOCKED")
  */
 async function callApiToControlDeadbolt(targetState) {
   const DEADBOLT_API_URL = `${API_HOST}${API_ENDPOINT}`;
   try {
     console.log(`[API] Sending Request to ${DEADBOLT_API_URL} (action: ${targetState})...`);
 
-    // POST 요청 전송
+    // POST 요청 전송 - Python API는 'action' 필드를 사용함
     const response = await axios.post(DEADBOLT_API_URL, {
       action: targetState
     }, {

@@ -73,12 +73,14 @@ router.post("/uploads/images", (req, res) => {
         if (!productIdx || !divisionIdx) {
           return res.status(400).json({ success: false, err: "productIdx and divisionIdx are required" });
         }
-        
+
+        // ✅ 날짜_시간 폴더명은 body로 받자
         const rootName = req.body.rootName; // 예: "20260122_170612"
         if (!rootName) {
           return res.status(400).json({ success: false, err: "rootName is required (e.g., 날짜_시간)" });
         }
 
+        // ✅ files와 같은 개수/순서로 상대경로를 받는다
         const relPaths = req.body.relPaths;
         const relPathArr =
           Array.isArray(relPaths) ? relPaths :
@@ -92,7 +94,7 @@ router.post("/uploads/images", (req, res) => {
           });
         }
 
-        // 최종 상위 폴더: productImg/<productIdx>_<날짜_시간>/
+        // ✅ 최종 상위 폴더: productImg/<productIdx>_<날짜_시간>/
         const foldername = `${safe(productIdx)}_${safe(rootName)}`;
         const basePrefix = `productImg/${foldername}`;
         const folderpath = `s3://${BUCKET}/${basePrefix}/`;
@@ -103,7 +105,7 @@ router.post("/uploads/images", (req, res) => {
             // relPath 예: "images/cam_0/0001.jpg"
             const p = String(relPathArr[i]).replace(/\\/g, "/");
 
-            // images/ 제거 후 cam_x/... 유지
+            // ✅ images/ 제거 후 cam_x/... 유지
             let rel = p.startsWith("images/") ? p.slice("images/".length) : p;
 
             // 보안: 상위 디렉토리 이동 방지
@@ -114,12 +116,12 @@ router.post("/uploads/images", (req, res) => {
             const ext = path.extname(rel) || path.extname(f.originalname || "") || ".jpg";
             const withoutExt = ext ? rel.slice(0, -ext.length) : rel;
 
-            // 최종 key: based_image/<productIdx>_<rootName>/<cam_x/...>_<hash>.jpg
+            // ✅ 최종 key: based_image/<productIdx>_<rootName>/<cam_x/...>_<hash>.jpg
             const key = `${basePrefix}/${withoutExt}_${sha1(f.buffer)}${ext.toLowerCase()}`;
 
             const meta = { "Content-Type": f.mimetype || "application/octet-stream" };
 
-            // putObjectAsync(minioClient, BUCKET, key, ...)
+            // ✅ putObjectAsync(minioClient, BUCKET, key, ...)
             const etag = await putObjectAsync(minioClient, BUCKET, key, f.buffer, meta);
 
             return { key, etag, size: f.size, mimeType: f.mimetype };

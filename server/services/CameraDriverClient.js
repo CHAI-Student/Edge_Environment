@@ -120,15 +120,22 @@ class CameraDriverClient {
      * @param {number} zoneId - Zone ID (0-4)
      * @param {string} sessionId - 세션 ID (예: "260126143025")
      * @param {boolean} includeTop - Top 카메라 포함 여부
+     * @param {string|null} basePath - 이미지 저장 기본 경로 (Node.js가 지정)
      * @returns {Promise<{session_path: string, images: Object}>}
      */
-    async captureSnapshot(zoneId, sessionId, includeTop = true) {
+    async captureSnapshot(zoneId, sessionId, includeTop = true, basePath = null) {
         try {
+            // Node.js가 저장 경로를 지정 (없으면 환경변수 또는 기본값 사용)
+            const effectiveBasePath = basePath ||
+                process.env.SNAPSHOT_BASE_PATH ||
+                'data/snapshots';
+
             const response = await axios.post(
                 `${this.baseUrl}/api/zone/${zoneId}/snapshot`,
                 {
                     session_id: sessionId,
-                    include_top: includeTop
+                    include_top: includeTop,
+                    base_path: effectiveBasePath  // Node.js에서 경로 지정
                 },
                 { timeout: this.timeout }
             );
@@ -273,9 +280,42 @@ class CameraDriverClient {
                 `${this.baseUrl}/api/health`,
                 { timeout: 2000 }
             );
-            return response.data.status === 'healthy';
+            // Camera Driver의 /api/health 응답 형식:
+            // { cameras: "HEALTHY"|"UNHEALTHY", storage: "HEALTHY"|"UNHEALTHY", image_save: "HEALTHY"|"UNHEALTHY" }
+            const data = response.data;
+            return data.cameras === 'HEALTHY' && data.storage === 'HEALTHY';
         } catch (error) {
             return false;
+        }
+    }
+
+    /**
+     * 상세 헬스 체크 (카메라, 저장소, 이미지 저장 테스트 포함)
+     * @returns {Promise<{healthy: boolean, cameras: string, storage: string, image_save: string, image_save_details: Object}>}
+     */
+    async getHealthDetails() {
+        try {
+            const response = await axios.get(
+                `${this.baseUrl}/api/health`,
+                { timeout: 5000 }  // 이미지 저장 테스트가 포함되어 시간이 더 걸릴 수 있음
+            );
+            const data = response.data;
+            return {
+                healthy: data.cameras === 'HEALTHY' && data.storage === 'HEALTHY' && data.image_save === 'HEALTHY',
+                cameras: data.cameras,
+                storage: data.storage,
+                image_save: data.image_save,
+                image_save_details: data.image_save_details || null
+            };
+        } catch (error) {
+            return {
+                healthy: false,
+                cameras: 'UNHEALTHY',
+                storage: 'UNKNOWN',
+                image_save: 'UNKNOWN',
+                image_save_details: null,
+                error: error.message
+            };
         }
     }
 
@@ -434,6 +474,222 @@ class CameraDriverClient {
         } catch (error) {
             console.error('[CameraDriverClient] getRecordingStatus error:', error.message);
             return { is_recording: false, has_media_recorder: false };
+        }
+    }
+
+    // =========================================================================
+    // 연속 촬영 API (문이 열려있는 동안 계속 이미지 저장)
+    // =========================================================================
+
+    /**
+     * 연속 촬영 시작
+     * 데드볼트가 열릴 때 호출하여 문이 닫힐 때까지 계속 이미지를 저장합니다.
+     *
+     * @param {string} sessionId - 세션 ID
+     * @param {Object} options - 옵션
+     * @param {number[]} options.camera_ids - 촬영할 카메라 ID 목록 (기본: [0] = Top 카메라)
+     * @param {number} options.interval - 촬영 간격 (초, 기본: 0.5)
+     * @param {boolean} options.include_video - 영상도 함께 녹화할지 여부 (기본: true)
+     * @returns {Promise<{session_id: string, cameras: number[], interval: number, paths: Object}>}
+     */
+    async startContinuousCapture(sessionId, options = {}) {
+        const {
+            camera_ids = [0],
+            interval = 0.5,
+            include_video = true
+        } = options;
+
+        try {
+            const response = await axios.post(
+                `${this.baseUrl}/api/continuous-capture/start`,
+                {
+                    session_id: sessionId,
+                    camera_ids,
+                    interval,
+                    include_video
+                },
+                { timeout: this.timeout }
+            );
+
+            console.log(`[CameraDriverClient] Continuous capture started: session=${response.data.session_id}, interval=${interval}s`);
+            return response.data;
+        } catch (error) {
+            console.error('[CameraDriverClient] startContinuousCapture error:', error.message);
+            throw new Error(`Continuous capture start failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * 연속 촬영 중지
+     * 데드볼트가 닫힐 때 호출하여 연속 촬영을 중지합니다.
+     *
+     * @returns {Promise<{session_info: Object}>}
+     */
+    async stopContinuousCapture() {
+        try {
+            const response = await axios.post(
+                `${this.baseUrl}/api/continuous-capture/stop`,
+                {},
+                { timeout: this.timeout }
+            );
+
+            console.log(`[CameraDriverClient] Continuous capture stopped: session=${response.data.session_info?.session_id}`);
+            return response.data;
+        } catch (error) {
+            // 활성 연속 촬영이 없는 경우 에러 무시
+            if (error.response && error.response.status === 400) {
+                console.log('[CameraDriverClient] No active continuous capture to stop');
+                return { success: true, session_info: null };
+            }
+            console.error('[CameraDriverClient] stopContinuousCapture error:', error.message);
+            throw new Error(`Continuous capture stop failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * 연속 촬영 상태 조회
+     *
+     * @returns {Promise<{active: boolean, session_id: string|null, interval: number}>}
+     */
+    async getContinuousCaptureStatus() {
+        try {
+            const response = await axios.get(
+                `${this.baseUrl}/api/continuous-capture/status`,
+                { timeout: this.timeout }
+            );
+            return response.data;
+        } catch (error) {
+            console.error('[CameraDriverClient] getContinuousCaptureStatus error:', error.message);
+            return { active: false, session_id: null, interval: 0.5 };
+        }
+    }
+
+    // =========================================================================
+    // Top 카메라 영상 전용 녹화 (기존 /recording/start 확장)
+    // =========================================================================
+
+    /**
+     * Top 카메라 영상만 녹화 시작
+     * 데드볼트가 열릴 때 호출하여 문이 닫힐 때까지 영상만 녹화합니다.
+     * 기존 /api/recording/start에 top_only 파라미터 사용
+     *
+     * @param {string} sessionId - 세션 ID
+     * @returns {Promise<{session_id: string, video_path: string}>}
+     */
+    async startTopVideoOnly(sessionId) {
+        try {
+            const response = await axios.post(
+                `${this.baseUrl}/api/recording/start`,
+                {
+                    session_id: sessionId,
+                    top_only: true,
+                    record_video: true
+                },
+                { timeout: this.timeout }
+            );
+
+            console.log(`[CameraDriverClient] Top video recording started: session=${response.data.session_id}`);
+            return response.data;
+        } catch (error) {
+            console.error('[CameraDriverClient] startTopVideoOnly error:', error.message);
+            throw new Error(`Top video recording start failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Top 카메라 영상 녹화 중지
+     * 데드볼트가 닫힐 때 호출하여 녹화를 중지합니다.
+     * 기존 /api/recording/stop에 top_only 파라미터 사용
+     *
+     * @returns {Promise<{session_info: Object}>}
+     */
+    async stopTopVideoOnly() {
+        try {
+            const response = await axios.post(
+                `${this.baseUrl}/api/recording/stop`,
+                { top_only: true },
+                { timeout: this.timeout }
+            );
+
+            console.log(`[CameraDriverClient] Top video recording stopped: session=${response.data.session_info?.session_id}`);
+            return response.data;
+        } catch (error) {
+            // 활성 녹화가 없는 경우 에러 무시
+            if (error.response && error.response.status === 400) {
+                console.log('[CameraDriverClient] No active top video recording to stop');
+                return { success: true, session_info: null };
+            }
+            console.error('[CameraDriverClient] stopTopVideoOnly error:', error.message);
+            throw new Error(`Top video recording stop failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * 녹화 상태 조회 (Top 영상 녹화 포함)
+     * 기존 /api/recording/status 확장
+     *
+     * @returns {Promise<{is_recording: boolean, is_top_video_recording: boolean, top_video_session_id: string|null}>}
+     */
+    async getRecordingStatusExtended() {
+        try {
+            const response = await axios.get(
+                `${this.baseUrl}/api/recording/status`,
+                { timeout: this.timeout }
+            );
+            return response.data;
+        } catch (error) {
+            console.error('[CameraDriverClient] getRecordingStatusExtended error:', error.message);
+            return { is_recording: false, is_top_video_recording: false, top_video_session_id: null };
+        }
+    }
+
+    // =========================================================================
+    // 시간 제한 촬영 (기존 /recording/start 확장)
+    // =========================================================================
+
+    /**
+     * 시간 제한 촬영 시작
+     * 무게 변화 시 호출하여 지정된 시간 동안 이미지와 영상을 저장합니다.
+     * 기존 /api/recording/start에 duration, camera_ids 파라미터 사용
+     *
+     * @param {Object} options - 옵션
+     * @param {string} options.session_id - 세션 ID (기존 세션에 추가)
+     * @param {number[]} options.camera_ids - 촬영할 카메라 ID 목록 [Top, Side]
+     * @param {number} options.duration - 촬영 시간 (초, 기본: 3.0)
+     * @param {boolean} options.save_images - 이미지 저장 여부 (기본: true)
+     * @param {boolean} options.save_side_video - Side 카메라 영상 저장 여부 (기본: true)
+     * @returns {Promise<{session_id: string, cameras: number[], duration: number}>}
+     */
+    async startTimedCapture(options) {
+        const {
+            session_id,
+            camera_ids,
+            duration = 3.0,
+            save_images = true,
+            save_side_video = true
+        } = options;
+
+        try {
+            const response = await axios.post(
+                `${this.baseUrl}/api/recording/start`,
+                {
+                    session_id,
+                    camera_ids,
+                    duration,
+                    save_images,
+                    record_video: save_side_video
+                },
+                { timeout: this.timeout }
+            );
+
+            console.log(
+                `[CameraDriverClient] Timed capture started: session=${response.data.session_id}, ` +
+                `cameras=${camera_ids}, duration=${duration}s`
+            );
+            return response.data;
+        } catch (error) {
+            console.error('[CameraDriverClient] startTimedCapture error:', error.message);
+            throw new Error(`Timed capture start failed: ${error.message}`);
         }
     }
 }

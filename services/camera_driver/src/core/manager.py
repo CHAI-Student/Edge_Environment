@@ -98,6 +98,18 @@ class CameraManager:
         self._media_recorder: Optional[MediaRecorder] = None
         self._event_recorder: Optional[EventRecorder] = None
 
+        # 연속 촬영 상태
+        self._continuous_capture_active = False
+        self._continuous_capture_thread: Optional[threading.Thread] = None
+        self._continuous_capture_stop_event = threading.Event()
+        self._continuous_capture_session_id: Optional[str] = None
+        self._continuous_capture_interval = 0.5  # 기본 0.5초 간격
+
+        # Top 카메라 영상 전용 녹화 상태
+        self._top_video_session_id: Optional[str] = None
+        self._top_video_stop_event = threading.Event()
+        self._top_video_thread: Optional[threading.Thread] = None
+
     def initialize_all(self) -> Dict[int, bool]:
         """
         활성화된 카메라 초기화
@@ -639,6 +651,7 @@ class CameraManager:
         session_id: Optional[str] = None,
         zone_id: Optional[int] = None,
         all_cameras: bool = False,
+        base_path: Optional[str] = None,
     ) -> Dict[int, str]:
         """
         스냅샷 캡처.
@@ -647,12 +660,14 @@ class CameraManager:
             session_id: 기존 세션에 저장 (없으면 새 세션 생성)
             zone_id: Zone ID (None이면 Top만)
             all_cameras: 모든 카메라 캡처
+            base_path: Node.js에서 지정하는 저장 경로
 
         Returns:
             {camera_id: image_path} 매핑
         """
-        if not self._media_recorder:
-            self.init_media_recorder()
+        # base_path가 지정되면 새 recorder 초기화 (Node.js 경로 지정 지원)
+        if base_path or not self._media_recorder:
+            self.init_media_recorder(base_path=base_path)
 
         # 카메라 목록 결정
         cameras = []
@@ -741,3 +756,427 @@ class CameraManager:
         if self._event_recorder:
             return self._event_recorder.is_recording
         return False
+
+    # =========================================================================
+    # 연속 촬영 기능 (문이 열려있는 동안 계속 이미지 저장)
+    # =========================================================================
+
+    def start_continuous_capture(
+        self,
+        session_id: Optional[str] = None,
+        camera_ids: Optional[List[int]] = None,
+        interval: float = 0.5,
+        include_video: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        연속 촬영 시작.
+
+        문이 열려있는 동안 지정된 간격으로 이미지를 계속 저장합니다.
+
+        Args:
+            session_id: 세션 ID (없으면 자동 생성)
+            camera_ids: 촬영할 카메라 ID 목록 (기본: [0] = Top 카메라)
+            interval: 촬영 간격 (초, 기본: 0.5초)
+            include_video: 영상도 함께 녹화할지 여부
+
+        Returns:
+            {
+                "session_id": str,
+                "cameras": List[int],
+                "interval": float,
+                "paths": Dict[str, str]
+            }
+        """
+        if self._continuous_capture_active:
+            logger.warning("Continuous capture already active")
+            return {
+                "session_id": self._continuous_capture_session_id,
+                "already_active": True
+            }
+
+        if not self._media_recorder:
+            self.init_media_recorder()
+
+        # 카메라 목록 결정 (기본: Top 카메라만)
+        if camera_ids is None:
+            camera_ids = [TOP_CAMERA_ID]
+
+        # 세션 ID 생성
+        if session_id is None:
+            from datetime import datetime, timezone, timedelta
+            KST = timezone(timedelta(hours=9))
+            session_id = datetime.now(KST).strftime("%Y%m%d_%H%M%S")
+
+        self._continuous_capture_session_id = session_id
+        self._continuous_capture_interval = interval
+
+        # 세션 생성
+        self._media_recorder.create_session(camera_ids, session_id)
+
+        # 영상 녹화도 시작
+        if include_video:
+            self._media_recorder.start_video_recording(session_id)
+
+        # 연속 촬영 스레드 시작
+        self._continuous_capture_stop_event.clear()
+        self._continuous_capture_active = True
+        self._continuous_capture_thread = threading.Thread(
+            target=self._continuous_capture_loop,
+            args=(session_id, camera_ids, interval, include_video),
+            daemon=True,
+            name="ContinuousCapture",
+        )
+        self._continuous_capture_thread.start()
+
+        paths = self._media_recorder.get_session_paths(session_id)
+
+        logger.info(
+            f"Continuous capture started: session={session_id}, "
+            f"cameras={camera_ids}, interval={interval}s"
+        )
+
+        return {
+            "session_id": session_id,
+            "cameras": camera_ids,
+            "interval": interval,
+            "include_video": include_video,
+            "paths": paths,
+        }
+
+    def _continuous_capture_loop(
+        self,
+        session_id: str,
+        camera_ids: List[int],
+        interval: float,
+        include_video: bool,
+    ) -> None:
+        """
+        연속 촬영 루프.
+
+        지정된 간격으로 이미지를 캡처하고 저장합니다.
+        """
+        frame_count = 0
+
+        while not self._continuous_capture_stop_event.is_set():
+            try:
+                # 각 카메라에서 프레임 캡처 및 저장
+                for cam_id in camera_ids:
+                    if cam_id in self._cameras:
+                        frame = self._cameras[cam_id].get_frame()
+                        if frame is not None:
+                            # 이미지 저장
+                            self._media_recorder.save_image(
+                                session_id, cam_id, frame
+                            )
+                            # 영상에도 프레임 기록
+                            if include_video:
+                                self._media_recorder.write_video_frame(
+                                    session_id, cam_id, frame
+                                )
+
+                frame_count += 1
+
+                if frame_count % 10 == 0:
+                    logger.debug(
+                        f"Continuous capture: {frame_count} frames captured"
+                    )
+
+            except Exception as e:
+                logger.error(f"Continuous capture error: {e}")
+
+            # 간격 대기 (stop 이벤트로 중단 가능)
+            self._continuous_capture_stop_event.wait(interval)
+
+        logger.info(f"Continuous capture loop ended: {frame_count} total frames")
+
+    def stop_continuous_capture(self) -> Optional[Dict[str, Any]]:
+        """
+        연속 촬영 중지.
+
+        Returns:
+            세션 정보 (저장된 파일 경로 등)
+        """
+        if not self._continuous_capture_active:
+            logger.warning("No active continuous capture")
+            return None
+
+        # 중지 신호 전송
+        self._continuous_capture_stop_event.set()
+
+        # 스레드 종료 대기
+        if self._continuous_capture_thread and self._continuous_capture_thread.is_alive():
+            self._continuous_capture_thread.join(timeout=2.0)
+
+        self._continuous_capture_active = False
+
+        # 세션 종료 및 결과 반환
+        session_id = self._continuous_capture_session_id
+        result = None
+
+        if session_id and self._media_recorder:
+            result = self._media_recorder.close_session(session_id)
+
+        self._continuous_capture_session_id = None
+
+        logger.info(f"Continuous capture stopped: session={session_id}")
+
+        return result
+
+    @property
+    def is_continuous_capture_active(self) -> bool:
+        """연속 촬영 활성 여부"""
+        return self._continuous_capture_active
+
+    def get_continuous_capture_status(self) -> Dict[str, Any]:
+        """연속 촬영 상태 조회"""
+        return {
+            "active": self._continuous_capture_active,
+            "session_id": self._continuous_capture_session_id,
+            "interval": self._continuous_capture_interval,
+        }
+
+    # =========================================================================
+    # Top 카메라 영상 전용 녹화 (데드볼트 열림 ~ 닫힘)
+    # =========================================================================
+
+    def start_top_video_only(self, session_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Top 카메라 영상만 녹화 시작.
+
+        데드볼트가 열릴 때 호출하여 문이 닫힐 때까지
+        Top 카메라의 영상만 녹화합니다 (이미지 저장 없음).
+
+        Args:
+            session_id: 세션 ID (없으면 자동 생성)
+
+        Returns:
+            {
+                "session_id": str,
+                "video_path": str
+            }
+        """
+        if not self._media_recorder:
+            self.init_media_recorder()
+
+        # 세션 ID 생성
+        if session_id is None:
+            from datetime import datetime, timezone, timedelta
+            KST = timezone(timedelta(hours=9))
+            session_id = datetime.now(KST).strftime("%Y%m%d_%H%M%S")
+
+        # Top 카메라만으로 세션 생성
+        self._media_recorder.create_session([TOP_CAMERA_ID], session_id)
+
+        # 영상 녹화 시작
+        self._media_recorder.start_video_recording(session_id)
+
+        # 연속 영상 프레임 기록 스레드 시작
+        self._top_video_session_id = session_id
+        self._top_video_stop_event = threading.Event()
+        self._top_video_thread = threading.Thread(
+            target=self._top_video_recording_loop,
+            args=(session_id,),
+            daemon=True,
+            name="TopVideoRecording",
+        )
+        self._top_video_thread.start()
+
+        paths = self._media_recorder.get_session_paths(session_id)
+
+        logger.info(f"Top video recording started: session={session_id}")
+
+        return {
+            "session_id": session_id,
+            "video_path": paths.get("video", {}).get(str(TOP_CAMERA_ID)),
+            "paths": paths,
+        }
+
+    def _top_video_recording_loop(self, session_id: str) -> None:
+        """
+        Top 카메라 영상 녹화 루프.
+
+        FPS에 맞춰 프레임을 캡처하고 영상에 기록합니다.
+        """
+        interval = 1.0 / self.fps
+        frame_count = 0
+
+        while not self._top_video_stop_event.is_set():
+            try:
+                if TOP_CAMERA_ID in self._cameras:
+                    frame = self._cameras[TOP_CAMERA_ID].get_frame()
+                    if frame is not None:
+                        self._media_recorder.write_video_frame(
+                            session_id, TOP_CAMERA_ID, frame
+                        )
+                        frame_count += 1
+
+                        if frame_count % 100 == 0:
+                            logger.debug(
+                                f"Top video recording: {frame_count} frames"
+                            )
+
+            except Exception as e:
+                logger.error(f"Top video recording error: {e}")
+
+            self._top_video_stop_event.wait(interval)
+
+        logger.info(f"Top video recording loop ended: {frame_count} total frames")
+
+    def stop_top_video_only(self) -> Optional[Dict[str, Any]]:
+        """
+        Top 카메라 영상 녹화 중지.
+
+        Returns:
+            세션 정보 (저장된 파일 경로 등)
+        """
+        if not hasattr(self, '_top_video_session_id') or not self._top_video_session_id:
+            logger.warning("No active top video recording")
+            return None
+
+        # 중지 신호 전송
+        if hasattr(self, '_top_video_stop_event'):
+            self._top_video_stop_event.set()
+
+        # 스레드 종료 대기
+        if hasattr(self, '_top_video_thread') and self._top_video_thread and self._top_video_thread.is_alive():
+            self._top_video_thread.join(timeout=2.0)
+
+        # 세션 종료 및 결과 반환
+        session_id = self._top_video_session_id
+        result = None
+
+        if session_id and self._media_recorder:
+            result = self._media_recorder.close_session(session_id)
+
+        self._top_video_session_id = None
+
+        logger.info(f"Top video recording stopped: session={session_id}")
+
+        return result
+
+    @property
+    def is_top_video_recording(self) -> bool:
+        """Top 영상 녹화 중 여부"""
+        return hasattr(self, '_top_video_session_id') and self._top_video_session_id is not None
+
+    # =========================================================================
+    # 시간 제한 촬영 (무게 변화 시 3초간 이미지 + 영상)
+    # =========================================================================
+
+    def start_timed_capture(
+        self,
+        session_id: str,
+        camera_ids: List[int],
+        duration: float = 3.0,
+        interval: float = 0.1,
+        save_images: bool = True,
+        save_side_video: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        시간 제한 촬영 시작.
+
+        무게 변화 시 호출하여 지정된 시간 동안
+        이미지와 영상을 저장합니다.
+
+        Args:
+            session_id: 세션 ID (기존 세션에 추가)
+            camera_ids: 촬영할 카메라 ID 목록 [Top, Side]
+            duration: 촬영 시간 (초, 기본: 3초)
+            interval: 촬영 간격 (초, 기본: 0.1초 = 10fps)
+            save_images: 이미지 저장 여부
+            save_side_video: Side 카메라 영상 저장 여부
+
+        Returns:
+            {
+                "session_id": str,
+                "cameras": List[int],
+                "duration": float,
+                "paths": Dict
+            }
+        """
+        if not self._media_recorder:
+            self.init_media_recorder()
+
+        # 세션이 없으면 생성
+        if session_id not in self._media_recorder._sessions:
+            self._media_recorder.create_session(camera_ids, session_id)
+
+        # Side 카메라 영상 녹화 시작 (Top 제외)
+        side_cameras = [cid for cid in camera_ids if cid != TOP_CAMERA_ID]
+        if save_side_video and side_cameras:
+            self._media_recorder.start_video_recording(session_id, cameras=side_cameras)
+
+        # 시간 제한 촬영 스레드 시작
+        capture_thread = threading.Thread(
+            target=self._timed_capture_loop,
+            args=(session_id, camera_ids, duration, interval, save_images, save_side_video, side_cameras),
+            daemon=True,
+            name=f"TimedCapture-{session_id}",
+        )
+        capture_thread.start()
+
+        logger.info(
+            f"Timed capture started: session={session_id}, "
+            f"cameras={camera_ids}, duration={duration}s"
+        )
+
+        return {
+            "session_id": session_id,
+            "cameras": camera_ids,
+            "duration": duration,
+            "interval": interval,
+            "save_images": save_images,
+            "save_side_video": save_side_video,
+        }
+
+    def _timed_capture_loop(
+        self,
+        session_id: str,
+        camera_ids: List[int],
+        duration: float,
+        interval: float,
+        save_images: bool,
+        save_side_video: bool,
+        side_cameras: List[int],
+    ) -> None:
+        """
+        시간 제한 촬영 루프.
+
+        지정된 시간 동안 이미지를 캡처하고 저장합니다.
+        """
+        start_time = time.time()
+        frame_count = 0
+
+        while (time.time() - start_time) < duration:
+            try:
+                for cam_id in camera_ids:
+                    if cam_id in self._cameras:
+                        frame = self._cameras[cam_id].get_frame()
+                        if frame is not None:
+                            # 이미지 저장
+                            if save_images:
+                                self._media_recorder.save_image(
+                                    session_id, cam_id, frame
+                                )
+                            # Side 영상에 프레임 기록
+                            if save_side_video and cam_id in side_cameras:
+                                self._media_recorder.write_video_frame(
+                                    session_id, cam_id, frame
+                                )
+
+                frame_count += 1
+
+            except Exception as e:
+                logger.error(f"Timed capture error: {e}")
+
+            time.sleep(interval)
+
+        # Side 영상 녹화 중지
+        if save_side_video and side_cameras:
+            for cam_id in side_cameras:
+                self._media_recorder.stop_video_recording_for_camera(session_id, cam_id)
+
+        logger.info(
+            f"Timed capture completed: session={session_id}, "
+            f"{frame_count} frames in {duration}s"
+        )

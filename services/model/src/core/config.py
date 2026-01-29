@@ -233,8 +233,8 @@ class VisionModel(BaseModel):
     """Vision configuration settings."""
 
     yolo_model_path: str = Field(
-        default="/home/chai/Edge_Environment/models/siyeon_best.engine",
-        description="YOLO model path (.pt or .engine)",
+        default="models/siyeon_best.pt",
+        description="YOLO model path (.pt or .engine). Supports relative (project root) or absolute paths. Auto-fallback: .engine → .pt if CUDA unavailable.",
     )
     hand_class_id: int = Field(
         default=0,
@@ -465,15 +465,27 @@ def get_side_camera_path(session_id: str, zone_id: int) -> str:
     )
 
 
+def get_kst_now():
+    """
+    한국 표준시(KST, UTC+9) 현재 시각 반환.
+
+    Returns:
+        KST timezone-aware datetime 객체
+    """
+    from datetime import datetime, timezone, timedelta
+
+    KST = timezone(timedelta(hours=9))
+    return datetime.now(KST)
+
+
 def generate_session_id() -> str:
     """
-    세션 ID 생성 (YYMMDD_HHMMSS 형식).
+    세션 ID 생성 (YYMMDD_HHMMSS 형식, KST 기준).
 
     Returns:
         세션 ID 문자열
     """
-    from datetime import datetime
-    return datetime.now().strftime("%y%m%d_%H%M%S")
+    return get_kst_now().strftime("%y%m%d_%H%M%S")
 
 
 if __name__ == "__main__":

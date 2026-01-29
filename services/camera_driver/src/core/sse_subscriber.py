@@ -33,17 +33,26 @@ class WeightChangeEvent:
     raw_data: Dict[str, Any]
 
 
+@dataclass
+class DoorEvent:
+    """도어/데드볼트 이벤트 데이터"""
+    door_state: str  # OPEN, CLOSED
+    deadbolt_state: str  # OPEN, CLOSED
+    timestamp: str
+    raw_data: Dict[str, Any]
+
+
 class IOBoardSSESubscriber:
     """
     IO Board SSE 구독자
 
-    IO Board 서비스(8001)의 SSE 스트림을 구독하여
+    IO Board 서비스(8000)의 SSE 스트림을 구독하여
     loadcell.change 이벤트를 감지하고 콜백을 호출합니다.
     """
 
     def __init__(
         self,
-        io_board_url: str = "http://localhost:8001",
+        io_board_url: str = "http://localhost:8000",
         zone_mapping_path: Optional[str] = None,
     ):
         """
@@ -69,10 +78,14 @@ class IOBoardSSESubscriber:
 
         # 이벤트 콜백
         self._on_weight_change: Optional[Callable[[WeightChangeEvent], None]] = None
+        self._on_door_change: Optional[Callable[[DoorEvent], None]] = None
 
         # 연결 상태
         self._connected = False
         self._last_event_time: Optional[float] = None
+
+        # 이전 도어 상태 (변화 감지용)
+        self._last_deadbolt_state: Optional[str] = None
 
     def _load_zone_mapping(self, config_path: Optional[str] = None) -> Dict[int, int]:
         """
@@ -120,6 +133,10 @@ class IOBoardSSESubscriber:
     def set_on_weight_change(self, callback: Callable[[WeightChangeEvent], None]):
         """무게 변화 이벤트 콜백 설정"""
         self._on_weight_change = callback
+
+    def set_on_door_change(self, callback: Callable[[DoorEvent], None]):
+        """도어/데드볼트 이벤트 콜백 설정"""
+        self._on_door_change = callback
 
     async def start(self):
         """SSE 구독 시작"""
@@ -266,6 +283,45 @@ class IOBoardSSESubscriber:
         # loadcell.change 이벤트 처리
         if event_type == "loadcell.change":
             await self._handle_loadcell_change(data)
+        # door.update 이벤트 처리
+        elif event_type == "door.update":
+            await self._handle_door_update(data)
+
+    async def _handle_door_update(self, data: Dict[str, Any]):
+        """door.update 이벤트 처리"""
+        deadbolt_state = data.get("deadbolt", "").upper()
+        door_state = data.get("door", "").upper()
+        timestamp = data.get("timestamp", "")
+
+        # 데드볼트 상태 변화 감지
+        if self._last_deadbolt_state != deadbolt_state:
+            logger.info(f"Deadbolt state changed: {self._last_deadbolt_state} -> {deadbolt_state}")
+            self._last_deadbolt_state = deadbolt_state
+
+            # 이벤트 객체 생성
+            event = DoorEvent(
+                door_state=door_state,
+                deadbolt_state=deadbolt_state,
+                timestamp=timestamp,
+                raw_data=data,
+            )
+
+            # 콜백 호출
+            if self._on_door_change:
+                try:
+                    result = self._on_door_change(event)
+                    if asyncio.iscoroutine(result):
+                        try:
+                            await result
+                        except asyncio.CancelledError:
+                            logger.debug("Door change callback cancelled")
+                            raise
+                        except Exception as async_error:
+                            logger.error(f"Door change async callback error: {async_error}")
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error(f"Door change callback error: {e}")
 
     async def _handle_loadcell_change(self, data: Dict[str, Any]):
         """loadcell.change 이벤트 처리"""

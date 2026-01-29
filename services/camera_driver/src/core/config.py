@@ -1,6 +1,7 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Dict, List, Tuple, Optional
+from datetime import datetime, timezone, timedelta
 import os
 import json
 import logging
@@ -19,7 +20,32 @@ __all__ = [
     "get_max_zone_id",
     "is_zone_enabled",
     "ZONE_CONFIG",
+    "get_kst_now",
+    "generate_session_id",
 ]
+
+# 한국 표준시 (KST, UTC+9)
+KST = timezone(timedelta(hours=9))
+
+
+def get_kst_now() -> datetime:
+    """
+    한국 표준시(KST, UTC+9) 현재 시각 반환.
+
+    Returns:
+        KST timezone-aware datetime 객체
+    """
+    return datetime.now(KST)
+
+
+def generate_session_id() -> str:
+    """
+    세션 ID 생성 (YYYYMMDD_HHMMSS 형식, KST 기준).
+
+    Returns:
+        세션 ID 문자열
+    """
+    return get_kst_now().strftime("%Y%m%d_%H%M%S")
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +82,6 @@ def load_zone_config(config_path: Optional[str] = None) -> Dict[str, Dict]:
         # 기본 경로: project/config/zone_mapping.json
         # src/core/config.py (5 levels up) -> Edge_Environment
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
-        print(project_root)
         config_path = os.path.join(project_root, "config", "zone_mapping.json")
 
     # 기본값 (fallback) - 5개 zone 전부 활성화
@@ -365,6 +390,10 @@ def load_device_map(config_path: Optional[str] = None) -> Dict[int, int]:
             project_root, "config", "camera_device_map.json"
         )
 
+    # 모듈 로드 시점 디버깅 (로거가 설정되지 않았을 수 있음)
+    print(f"[Camera Config] Loading device map from: {config_path}")
+    print(f"[Camera Config] File exists: {os.path.exists(config_path)}")
+
     if os.path.exists(config_path):
         try:
             with open(config_path, "r", encoding="utf-8") as f:
@@ -382,11 +411,18 @@ def load_device_map(config_path: Optional[str] = None) -> Dict[int, int]:
                     for k, v in data["device_map"].items()
                 })
 
+            # 모듈 로드 시점 디버깅 출력
+            print(f"[Camera Config] DEVICE_PHYSICAL_MAP loaded: {DEVICE_PHYSICAL_MAP}")
+            print(f"[Camera Config] nvidia_mode: {settings.nvidia_mode}")
             logger.info(f"Device map loaded from {config_path}: nvidia_mode={settings.nvidia_mode}")
             logger.info(f"DEVICE_PHYSICAL_MAP: {DEVICE_PHYSICAL_MAP}")
 
         except Exception as e:
+            print(f"[Camera Config] Failed to load device map: {e}")
             logger.warning(f"Failed to load device map: {e}")
+    else:
+        print(f"[Camera Config] Device map file not found: {config_path}")
+        logger.warning(f"Device map file not found: {config_path}")
 
     return DEVICE_PHYSICAL_MAP
 

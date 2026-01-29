@@ -1,7 +1,7 @@
 const config = require("../../config/key");
 const { getClient, subscribe } = require("./MqttClient");
 const { v4: uuidv4 } = require("uuid");
-const axios = require("axios");
+const axios = require("axios"); // ✅ API 통신을 위한 라이브러리
 
 async function CardTerminalStatusAPI() {
   let CardTerminalState = '39'
@@ -10,7 +10,7 @@ async function CardTerminalStatusAPI() {
 
     // POST 요청 전송
     const response = await axios.get(`${config.cardTerminalApi}/status`, {
-      timeout: 30000 // 30초 안에 응답 없으면 에러 처리
+      timeout: 30000 // 5초 안에 응답 없으면 에러 처리
 
     });
     console.log(response.data)
@@ -48,8 +48,7 @@ async function CardTerminalStatusAPI() {
     } else if (CatResCode == "255" || CatStatus == 'RC_ERROR') { // 기타 오류
       CardTerminalState = '38'
       console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
-    }
-    return CardTerminalState
+    } return CardTerminalState
   } catch (error) {
     // 카드 단말기에서 return이 없는 경우 -- timeout
     if (error.code === "ECONNABORTED" || error.code === 'EHOSTUNREACH') {
@@ -57,12 +56,12 @@ async function CardTerminalStatusAPI() {
       console.log(`[CARD-DEVICE] Card Terminal connect timeout: ${CardTerminalState}`);
     } else if (error.response) {
       CardTerminalState = "30"
-      console.error(`[CARD-DEVICE] Server Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
+      // 서버가 4xx, 5xx 에러를 보낸 경우
+      throw new Error(`[CARD-DEVICE] Server Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
     } else {
       CardTerminalState = "30"
-      console.error(`[CARD-DEVICE] Error: ${error.message}`);
-    }
-    return CardTerminalState
+      throw new Error(error.message);
+    } return CardTerminalState
   }
 }
 
@@ -76,8 +75,7 @@ async function LoadcellStatusAPI() {
     if (LoadcellRes.data.loadcells) {
       console.log('[LOADCELL] Loadcell connect successful')
       LoadcellState = '29'
-    }
-    return LoadcellState
+    } return LoadcellState
   } catch (error) {
     // ioboard timeout
     if (error.code === "ECONNABORTED") {
@@ -86,12 +84,11 @@ async function LoadcellStatusAPI() {
     } else if (error.response) {
       // 서버가 4xx, 5xx 에러를 보낸 경우
       LoadcellState = "20"
-      console.error(`[LOADCELL] Server Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
+      throw new Error(`[LOADCELL] Server Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
     } else {
       LoadcellState = "20"
-      console.error(`[LOADCELL] Error: ${error.message}`);
-    }
-    return LoadcellState
+      throw new Error(error.message);
+    } return LoadcellState
   }
 }
 
@@ -114,8 +111,7 @@ async function DeadboltStatusAPI() {
     } else if (DeadboltRes.data.door == 'OPENED' && DeadboltRes.data.deadbolt == 'LOCKED') {
       DeadboltState = '10'
       console.log(`[DEADBOLT] door is ${DeadboltRes.data.door}, but deadbolt is ${DeadboltRes.data.deadbolt}`)
-    }
-    return DeadboltState
+    } return DeadboltState
   } catch (error) {
     // deatbolt timeout
     if (error.code === "ECONNABORTED") {
@@ -124,20 +120,19 @@ async function DeadboltStatusAPI() {
     } else if (error.response) {
       // 서버가 4xx, 5xx 에러를 보낸 경우
       DeadboltState = "30"
-      console.error(`[DEADBOLT] Server Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
+      throw new Error(`[DEADBOLT] Server Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
     } else {
       DeadboltState = "30"
-      console.error(`[DEADBOLT] Error: ${error.message}`);
-    }
-    return DeadboltState
+      throw new Error(error.message);
+    } return DeadboltState
   }
 }
 
 async function CameraStatusAPI() {
   //camera status check
-  let CameraState = '09'
+  let CameraState = ''
   try {
-    console.log(`[CAMERA] Sending Request to ${config.cameraApi}/api/health`);
+    console.log(`[CAMERA] Sending Request to ${config.cameraApi}`);
     const CameraRes = await axios.get(`${config.cameraApi}/api/health`, { timeout: 5000 });
     console.log(CameraRes.data)
     if (CameraRes.data) {
@@ -147,7 +142,6 @@ async function CameraStatusAPI() {
       CameraState = '00'
       console.log('[CAMERA] camera unconnected')
     }
-    return CameraState
   } catch (error) {
     // camera timeout
     if (error.code === "ECONNABORTED") {
@@ -156,19 +150,19 @@ async function CameraStatusAPI() {
     } else if (error.response) {
       // 서버가 4xx, 5xx 에러를 보낸 경우
       CameraState = "00"
-      console.error(`[CAMERA] Server Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
+      throw new Error(`[CAMERA] Server Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
     } else {
       CameraState = "00"
-      console.error(`[CAMERA] Error: ${error.message}`);
-    }
-    return CameraState
+      throw new Error(error.message);
+    } return CameraState
   }
 }
 
 
 async function HealthMqtt() {
-  const deviceIdx = config.deviceIdx;
-  const divisionIdx = config.divisionIdx;
+  // divisionIdx 기준으로 토픽 네이밍 예시
+  const deviceIdx = config.deviceIdx
+  const divisionIdx = config.divisionIdx
 
   // publish
   const healthCheck = `chai/device/${deviceIdx}/health` // healthcare
@@ -176,20 +170,20 @@ async function HealthMqtt() {
   const client = getClient(); // 연결 시작
   client.on("connect", () => {
     console.log("[MQTT] connected");
-
-    // 기본값 (API 호출 실패 시 사용)
-    let CameraStatus = "09";
-    let DeadboltStatus = '19'
-    let LoadcellStatus = '29'
-    let CardTerminalStatus = '39'
+    const CameraStatus = "09";
+    const DeadboltStatus = '19'
+    const LoadcellStatus = '29'
+    const CardTerminalStatus = '39'
 
     const publishOnce = async () => {
-      // 실제 API 호출하여 상태 확인 (필요시 주석 해제)
       // const [CardTerminalStatus, DeadboltStatus, LoadcellStatus, CameraStatus] = await Promise.all([
       //   CardTerminalStatusAPI(),
       //   DeadboltStatusAPI(),
       //   LoadcellStatusAPI(),
       //   CameraStatusAPI()
+      // ]);
+      // const [CardTerminalStatus] = await Promise.all([
+      //   CardTerminalStatusAPI()
       // ]);
 
       const timestamp = Date.now();
@@ -211,15 +205,16 @@ async function HealthMqtt() {
       };
 
       const payload = JSON.stringify({ HEADER: header, DATA: body });
-      console.log("[HealthMqtt] Publishing:", payload);
+      console.log("Health Check", payload);
 
       client.publish(healthCheck, payload, { qos: 1, retain: false }, (e) => {
         if (e) console.error("[MQTT] publish error:", e.message);
       });
     };
-    // publishOnce(); // 연결 직후 1회 (필요시 주석 해제)
-    setInterval(publishOnce, 30000); // 30초마다 주기적으로
+    // publishOnce(); // ✅ 연결 직후 1회
+    setInterval(publishOnce, 30000); // ✅ 이후 주기
   });
 }
 
-module.exports = { HealthMqtt, CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI, CameraStatusAPI };
+module.exports = { HealthMqtt, CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI };
+// module.exports = { HealthMqtt };

@@ -24,11 +24,14 @@ Media Recorder
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import threading
 import logging
 import time
 import os
+
+# 한국 표준시 (KST, UTC+9)
+KST = timezone(timedelta(hours=9))
 
 try:
     import cv2
@@ -147,10 +150,10 @@ class MediaRecorder:
             session_id: 세션 ID (없으면 자동 생성)
 
         Returns:
-            세션 ID (예: "20251106_141029")
+            세션 ID (예: "20251106_141029", KST 기준)
         """
         if session_id is None:
-            session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            session_id = datetime.now(KST).strftime("%Y%m%d_%H%M%S")
 
         # 기본 경로 생성
         base_path = Path(self.config.base_path) / session_id
@@ -183,12 +186,17 @@ class MediaRecorder:
 
         return session_id
 
-    def start_video_recording(self, session_id: str) -> bool:
+    def start_video_recording(
+        self,
+        session_id: str,
+        cameras: Optional[List[int]] = None,
+    ) -> bool:
         """
         영상 녹화 시작 (크롭된 해상도로 저장: 480x480)
 
         Args:
             session_id: 세션 ID
+            cameras: 녹화할 카메라 ID 목록 (None이면 세션의 모든 카메라)
 
         Returns:
             시작 성공 여부
@@ -205,7 +213,15 @@ class MediaRecorder:
         videos_path = session.base_path / "videos"
         fourcc = cv2.VideoWriter_fourcc(*self.config.video_codec)
 
-        for cam_id in session.cameras:
+        # 카메라 목록 결정
+        target_cameras = cameras if cameras is not None else session.cameras
+
+        for cam_id in target_cameras:
+            # 이미 녹화 중이면 스킵
+            if cam_id in session.video_writers:
+                logger.debug(f"Video writer already exists for cam_{cam_id}")
+                continue
+
             video_path = videos_path / f"cam_{cam_id}.mp4"
             # 크롭된 해상도로 VideoWriter 생성 (480x480)
             writer = cv2.VideoWriter(
@@ -247,6 +263,36 @@ class MediaRecorder:
 
         session.video_writers.clear()
         return video_paths
+
+    def stop_video_recording_for_camera(
+        self,
+        session_id: str,
+        camera_id: int,
+    ) -> Optional[str]:
+        """
+        특정 카메라의 영상 녹화 중지
+
+        Args:
+            session_id: 세션 ID
+            camera_id: 카메라 ID
+
+        Returns:
+            저장된 영상 파일 경로 (없으면 None)
+        """
+        session = self._sessions.get(session_id)
+        if not session:
+            return None
+
+        writer = session.video_writers.get(camera_id)
+        if not writer:
+            return None
+
+        writer.release()
+        video_path = session.base_path / "videos" / f"cam_{camera_id}.mp4"
+        del session.video_writers[camera_id]
+
+        logger.info(f"Video saved for cam_{camera_id}: {video_path}")
+        return str(video_path)
 
     def write_video_frame(
         self,

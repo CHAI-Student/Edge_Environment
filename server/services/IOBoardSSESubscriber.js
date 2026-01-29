@@ -42,8 +42,8 @@ class IOBoardSSESubscriber extends EventEmitter {
         this.baselineWeights = null;
         this.lastUpdateTime = null;
 
-        // 무게 변화 감지 설정
-        this.weightChangeThreshold = 50; // 50g 이상 변화 감지
+        // 무게 변화 감지 설정 (Node.js 측 fallback - IO Board SSE threshold와 동일하게 유지)
+        this.weightChangeThreshold = parseInt(process.env.LOADCELL_CHANGE_THRESHOLD) || 50; // 50g 이상 변화 감지
         this.debounceTime = 500; // 500ms 디바운스
         this.pendingChanges = new Map(); // zoneId -> {timeout, delta}
 
@@ -81,7 +81,18 @@ class IOBoardSSESubscriber extends EventEmitter {
             return;
         }
 
-        const sseUrl = `${this.ioBoardUrl}/sse?streams=loadcells,doors&loadcell_interval=0.5&door_interval=1.0`;
+        // SSE 연결 설정:
+        // - filter_method=exponential: 지수평활 필터로 노이즈 제거 (alpha=0.3)
+        // - threshold=50: 50g 이상 변화 시에만 loadcell.change 이벤트 발생
+        // - threshold_scope=filtered: 필터링된 값에 임계값 적용
+        const filterMethod = process.env.LOADCELL_FILTER_METHOD || 'exponential';
+        const filterAlpha = process.env.LOADCELL_FILTER_ALPHA || '0.3';
+        const changeThreshold = process.env.LOADCELL_CHANGE_THRESHOLD || '50';
+        const thresholdScope = process.env.LOADCELL_THRESHOLD_SCOPE || 'filtered';
+
+        const sseUrl = `${this.ioBoardUrl}/sse?streams=loadcells,doors` +
+            `&filter_method=${filterMethod}&filter_alpha=${filterAlpha}` +
+            `&threshold=${changeThreshold}&threshold_scope=${thresholdScope}`;
         console.log(`[IOBoardSSE] Connecting to ${sseUrl}`);
 
         this.eventSource = new EventSource(sseUrl);
@@ -372,6 +383,10 @@ class IOBoardSSESubscriber extends EventEmitter {
 
     /**
      * 데드볼트 열림 시 처리
+     *
+     * Camera Driver가 SSE를 통해 자동으로 Top 카메라 영상 녹화를 시작합니다.
+     * (camera_driver/src/core/event_recording_manager.py의 on_door_change)
+     *
      * @param {string} timestamp - 타임스탬프
      */
     async _onDeadboltOpened(timestamp) {
@@ -381,6 +396,11 @@ class IOBoardSSESubscriber extends EventEmitter {
             const sessionId = await stack.startSession();
 
             console.log(`[IOBoardSSE] Deadbolt opened: session started (${sessionId})`);
+
+            // Camera Driver가 SSE를 통해 자동으로 Top 영상 녹화 시작
+            // (이 정보는 상태 추적용으로만 저장)
+            this.topCameraRecordingSession = sessionId;
+            this.topCameraActive = true;
 
             this.emit('session_started', {
                 session_id: sessionId,
@@ -394,6 +414,9 @@ class IOBoardSSESubscriber extends EventEmitter {
 
     /**
      * 정산 처리 스케줄링 (데드볼트 닫힘)
+     *
+     * Camera Driver가 SSE를 통해 자동으로 Top 카메라 영상 녹화를 중지합니다.
+     *
      * @param {string} timestamp - 타임스탬프
      */
     _scheduleSettlement(timestamp) {
@@ -401,6 +424,10 @@ class IOBoardSSESubscriber extends EventEmitter {
         if (this.settlementTimer) {
             clearTimeout(this.settlementTimer);
         }
+
+        // Camera Driver가 SSE를 통해 자동으로 Top 영상 녹화 중지
+        // (상태만 업데이트)
+        this.topCameraActive = false;
 
         // 대기 시간 (WeightAccumulator 타이머 완료 대기)
         const settlementDelay = 15000;  // 15초 (10초 + 여유 5초)
@@ -468,7 +495,7 @@ class IOBoardSSESubscriber extends EventEmitter {
     }
 
     /**
-     * Top 카메라 활성화 및 녹화 시작 (Deadbolt 열릴 때)
+     * Top 카메라 활성화 및 녹화 시작 (Deadbolt 열릴 때) - 레거시
      * @param {string} timestamp - 타임스탬프
      */
     async _activateTopCameraWithRecording(timestamp) {
@@ -506,6 +533,79 @@ class IOBoardSSESubscriber extends EventEmitter {
 
         } catch (error) {
             console.error('[IOBoardSSE] Failed to activate top camera:', error.message);
+        }
+    }
+
+    /**
+     * Top 카메라 영상만 녹화 시작 (Deadbolt 열릴 때)
+     * 문이 닫힐 때까지 Top 카메라의 영상만 녹화합니다 (이미지 저장 없음).
+     * @param {string} timestamp - 타임스탬프
+     * @param {string} sessionId - PendingItemsStack 세션 ID
+     */
+    async _startTopVideoRecording(timestamp, sessionId) {
+        try {
+            // 기존 비활성화 타이머 취소
+            if (this.topCameraDeactivateTimer) {
+                clearTimeout(this.topCameraDeactivateTimer);
+                this.topCameraDeactivateTimer = null;
+            }
+
+            // 이미 활성화 상태면 스킵
+            if (this.topCameraActive) {
+                console.log('[IOBoardSSE] Top camera already active');
+                return;
+            }
+
+            // Top 카메라 활성화
+            await cameraClient.activateTopCamera();
+            this.topCameraActive = true;
+
+            // Top 카메라 영상만 녹화 시작 (Camera Driver API 호출)
+            const recordingResult = await cameraClient.startTopVideoOnly(sessionId);
+
+            this.topCameraRecordingSession = recordingResult.session_id || sessionId;
+
+            console.log(`[IOBoardSSE] Top camera video recording started: session=${this.topCameraRecordingSession}`);
+
+            this.emit('top_camera_activated', {
+                session_id: this.topCameraRecordingSession,
+                video_only: true,
+                timestamp
+            });
+
+        } catch (error) {
+            console.error('[IOBoardSSE] Failed to start top video recording:', error.message);
+            // 폴백: 기존 녹화 방식으로 시도
+            try {
+                await this._activateTopCameraWithRecording(timestamp);
+            } catch (fallbackError) {
+                console.error('[IOBoardSSE] Fallback recording also failed:', fallbackError.message);
+            }
+        }
+    }
+
+    /**
+     * Top 카메라 영상 녹화 중지 (Deadbolt 닫힐 때)
+     */
+    async _stopTopVideoRecording() {
+        try {
+            if (!this.topCameraActive) {
+                return;
+            }
+
+            // Top 영상 녹화 중지
+            const result = await cameraClient.stopTopVideoOnly();
+
+            console.log(`[IOBoardSSE] Top camera video recording stopped: session=${this.topCameraRecordingSession}`);
+
+            this.emit('top_camera_video_stopped', {
+                session_id: this.topCameraRecordingSession,
+                result
+            });
+
+            // Top 카메라 비활성화는 정산 처리 후 수행
+        } catch (error) {
+            console.error('[IOBoardSSE] Failed to stop top video recording:', error.message);
         }
     }
 
@@ -606,6 +706,11 @@ class IOBoardSSESubscriber extends EventEmitter {
 
     /**
      * 무게 변화 시 실행할 액션들
+     *
+     * Camera Driver가 SSE를 통해 자동으로 이미지/영상을 캡처하고
+     * /api/camera/media-ready 콜백으로 Node.js에 알림을 보냅니다.
+     * 이 메서드는 세션 관리와 이벤트 발생만 담당합니다.
+     *
      * @param {number} zoneId - Zone ID
      * @param {Object} change - 변화 정보
      * @param {string} timestamp - 타임스탬프
@@ -613,7 +718,7 @@ class IOBoardSSESubscriber extends EventEmitter {
     async _executeWeightChangeActions(zoneId, change, timestamp) {
         console.log(`[IOBoardSSE] Processing weight change - Zone ${zoneId}, Delta: ${change.delta}g`);
 
-        // 이벤트 데이터 구성 (새로운 형식)
+        // 이벤트 데이터 구성
         const eventData = {
             zone_id: zoneId,
             timestamp: Date.now() / 1000,
@@ -623,50 +728,31 @@ class IOBoardSSESubscriber extends EventEmitter {
                 delta_weight: change.delta,
                 channels: change.channels || [zoneId * 2, zoneId * 2 + 1]
             },
+            // Camera Driver가 /api/camera/media-ready 콜백으로 media_paths 전달
             media_paths: null,
             judgment_result: null
         };
 
         try {
-            // 1. 카메라 활성화 및 녹화 시작 (아직 활성화되지 않은 경우)
-            const isNewActivation = !this.activeZones.has(zoneId);
-            if (isNewActivation) {
-                await cameraClient.activateZone(zoneId);
+            // Zone 활성화 추적 (카메라 제어는 Camera Driver가 SSE로 자동 처리)
+            if (!this.activeZones.has(zoneId)) {
                 this.activeZones.add(zoneId);
-                console.log(`[IOBoardSSE] Camera activated for Zone ${zoneId}`);
-
-                // 녹화 시작
-                await this._startZoneRecording(zoneId, timestamp);
-            } else {
-                // 이미 활성화된 상태에서 추가 무게 변화 → 타이머 리셋
-                console.log(`[IOBoardSSE] Zone ${zoneId} already active, extending recording timer`);
+                console.log(`[IOBoardSSE] Zone ${zoneId} marked as active`);
             }
 
-            // 2. 스냅샷 캡처 및 저장
-            const snapshotResult = await this._captureAndSaveSnapshot(zoneId, timestamp);
-            if (snapshotResult) {
-                eventData.media_paths = {
-                    image_folder: snapshotResult.session_path,
-                    top_image: snapshotResult.top_image,
-                    side_image: snapshotResult.side_image,
-                    video_path: this.zoneRecordingSessions.get(zoneId)?.videoPath || null
-                };
-            }
-
-            // 3. Model 서비스에 판단 요청
-            const judgeResult = await this._requestJudgment(eventData);
-            eventData.judgment_result = judgeResult;
-
-            // 4. 이벤트 발생 (외부 리스너용)
+            // 이벤트 발생 (외부 리스너용)
             eventData.delta = change.delta;
             eventData.current = change.current;
             eventData.previous = change.previous;
             eventData.cameras_activated = this.activeZones.has(zoneId);
-            eventData.recording_session = this.zoneRecordingSessions.get(zoneId)?.sessionId || null;
+            eventData.recording_session = this.topCameraRecordingSession || null;
             this.emit('weight_change', eventData);
 
-            // 5. 카메라 비활성화 + 녹화 중지 타이머 설정/리셋 (마지막 변화로부터 10초)
+            // Zone 비활성화 타이머 설정/리셋 (마지막 변화로부터 10초)
             this._scheduleZoneDeactivation(zoneId);
+
+            // 참고: 실제 이미지/영상 촬영은 Camera Driver의 EventRecordingManager가 처리
+            // Camera Driver → /api/camera/media-ready → WeightChangeAccumulator → Model 판단
 
         } catch (error) {
             console.error(`[IOBoardSSE] Error processing weight change:`, error.message);
@@ -741,8 +827,9 @@ class IOBoardSSESubscriber extends EventEmitter {
     }
 
     /**
-     * Zone 카메라 비활성화 스케줄링 (녹화 중지 포함)
-     * 마지막 무게 변화로부터 10초 후 녹화 중지 및 카메라 비활성화
+     * Zone 카메라 비활성화 스케줄링
+     * 마지막 무게 변화로부터 10초 후 카메라 비활성화
+     * (녹화는 timed capture로 3초 후 자동 중지됨)
      * @param {number} zoneId - Zone ID
      */
     _scheduleZoneDeactivation(zoneId) {
@@ -755,14 +842,11 @@ class IOBoardSSESubscriber extends EventEmitter {
         // 새 비활성화 타이머 설정 (마지막 무게 변화로부터 10초 후)
         const deactivateTimer = setTimeout(async () => {
             try {
-                // 1. 녹화 먼저 중지
-                await this._stopZoneRecording(zoneId);
-
-                // 2. 카메라 비활성화
+                // 카메라 비활성화 (timed capture는 3초 후 자동 종료됨)
                 await cameraClient.deactivateZone(zoneId);
                 this.activeZones.delete(zoneId);
 
-                console.log(`[IOBoardSSE] Zone ${zoneId} recording stopped and camera deactivated`);
+                console.log(`[IOBoardSSE] Zone ${zoneId} camera deactivated`);
 
                 this.emit('zone_deactivated', {
                     zone_id: zoneId,

@@ -38,15 +38,25 @@ class PendingItemsStack extends EventEmitter {
     }
 
     /**
+     * UTC Date를 KST(UTC+9)로 변환
+     * @param {Date} date - UTC Date 객체
+     * @returns {Date} KST Date 객체
+     */
+    _toKST(date) {
+        const kstOffset = 9 * 60 * 60 * 1000; // 9시간
+        return new Date(date.getTime() + kstOffset);
+    }
+
+    /**
      * 새 세션 시작 (문 열림 시)
      * @param {string} sessionId - 세션 ID (없으면 자동 생성)
      * @returns {string} 세션 ID
      */
     async startSession(sessionId = null) {
         if (!sessionId) {
-            // 세션 ID 생성 (YYYYMMDD_HHMMSS 형식)
-            const now = new Date();
-            sessionId = now.toISOString()
+            // 세션 ID 생성 (YYYYMMDD_HHMMSS 형식, KST 기준)
+            const kstNow = this._toKST(new Date());
+            sessionId = kstNow.toISOString()
                 .replace(/[-:T.Z]/g, '')
                 .slice(0, 14);
         }

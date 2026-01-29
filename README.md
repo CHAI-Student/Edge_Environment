@@ -8,7 +8,7 @@ Edge Environment setting for CHAI project - main server(js)
 
 | 서비스 | 포트 | 설명 |
 |--------|------|------|
-| IO Board | 8001 | 로드셀(10ch) + 데드볼트 SSE |
+| IO Board | 8000 | 로드셀(10ch) + 데드볼트 SSE |
 | Model | 8002 | YOLO 추론 + 상품 판단 (stateless) |
 | Camera Driver | 8003 | 6대 카메라 스냅샷 (Nvidia 지원) |
 | Card Terminal | 5000 | 결제 터미널 |

@@ -57,7 +57,7 @@ async function ManualDeadbolt() {
     // [API 통신 및 결과 처리]
     // ---------------------------------------------------------
     let finalState = "";
-    let resultCd = "S"; 
+    let resultCd = "S";
     let resultMsg = "";
 
     try {
@@ -74,10 +74,10 @@ async function ManualDeadbolt() {
 
     } catch (err) {
       console.error("[DOOR] API Control Failed:", err.message);
-      resultCd = "F"; 
+      resultCd = "F";
       resultMsg = "API Error: " + err.message;
       // 실패 시 요청의 반대 상태(또는 기존 상태 유지)로 가정
-      finalState = targetState === "OPEN" ? "CLOSE" : "OPEN"; 
+      finalState = targetState === "OPEN" ? "CLOSE" : "OPEN";
     }
 
     // ---------------------------------------------------------
