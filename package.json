@@ -5,11 +5,13 @@
   "main": "index.js",
   "scripts": {
     "start": "pm2 start ecosystem.config.js",
+    "start:prod": "npm run build:client && pm2 start ecosystem.config.js --env production",
     "stop": "pm2 stop all",
     "restart": "pm2 restart all",
     "logs": "pm2 logs",
     "status": "pm2 status",
     "delete": "pm2 delete all",
+    "build:client": "npm run build --prefix client",
     "start:server": "node server/index.js",
     "start:server:dev": "nodemon server/index.js",
     "start:frontend": "npm run start --prefix client",

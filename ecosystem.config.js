@@ -30,6 +30,23 @@ module.exports = {
       restart_delay: 1000,
     },
 
+    // React Client (포트 3000) - 프론트엔드 웹 애플리케이션
+    {
+      name: "client",
+      cwd: "./client",
+      script: "npm",
+      args: "start",
+      interpreter: "none",
+      env: {
+        BROWSER: "none",
+        PORT: "3000",
+      },
+      watch: false,
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 2000,
+    },
+
     // Python io_board 서비스 (포트 8001)
     {
       name: "io-board",
