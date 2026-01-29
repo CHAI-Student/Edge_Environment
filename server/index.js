@@ -61,29 +61,30 @@ app.use(function (req, res, next) {
 // app.use('/api/users', require('./routes/users'));
 // app.use('/api/upload', require('./routes/upload'));
 const authModule = require("./routes/auth");
-app.use("/api/auth", authModule.router);
+// app.use("/api/auth", authModule.router);
 
-// (async () => {
-//   try {
-//     await authModule.devAutoLogin();
-//   } catch (e) {
-//     console.error("[APP] dev auto login failed:", e?.message || e);
-//   }
-// })();
+(async () => {
+  try {
+    await authModule.devAutoLogin();
+  } catch (e) {
+    console.error("[APP] dev auto login failed:", e?.message || e);
+  }
+})();
 
 
 //use this to show the image you have in node js server to client (react js)
 //https://stackoverflow.com/questions/48914987/send-image-path-from-node-js-express-server-to-react-client
+const paymentRouter = require("./routes/RestAPI/Payments");
 
 // app.use('/payment', paymentRouter.router)
-// (async () => {
-//   try {
-//     await authModule.devAutoLogin();
-//     await paymentRouter.init();
-//   } catch (e) {
-//     console.error("[APP] dev auto payment failed:", e?.message || e);
-//   }
-// })();
+(async () => {
+  try {
+    // await authModule.devAutoLogin();
+    await paymentRouter.init();
+  } catch (e) {
+    console.error("[APP] dev auto payment failed:", e?.message || e);
+  }
+})();
 
 const productRouter = require("../server/routes/AIServer/Products"); // 네 라우터 파일 경로
 app.use("/api", productRouter);
@@ -135,13 +136,13 @@ process.on("SIGTERM", async () => {
   process.exit(0);
 });
 
-const paymentRouter = require("./routes/RestAPI/Payments");
+// const paymentRouter = require("./routes/RestAPI/Payments");
 
-(async () => {
-  try {
-    const token = await authModule.devAutoLogin();
-    await paymentRouter.init({ token });
-  } catch (e) {
-    console.error("[APP] dev auto login failed:", e?.message || e);
-  }
-})();
+// (async () => {
+//   try {
+//     // const token = await authModule.devAutoLogin();
+//     await paymentRouter.init();
+//   } catch (e) {
+//     console.error("[APP] dev auto login failed:", e?.message || e);
+//   }
+// })();

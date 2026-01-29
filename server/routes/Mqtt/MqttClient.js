@@ -77,7 +77,7 @@ async function subscribe(topics, qos = 0) {
 
   return new Promise((resolve, reject) => {
     // QoS는 요구사항에 맞게 조절 (0/1/2)
-    c.subscribe(list, { qos: 0 }, (err, granted) => {
+    c.subscribe(list, { qos: 1 }, (err, granted) => {
       if (err) return reject(err);
       console.log("[MQTT] subscribed:", granted);
       resolve(granted);
@@ -88,6 +88,7 @@ async function subscribe(topics, qos = 0) {
 function publish(topic, payload, opts = {}) {
   const c = getClient();
   const message = typeof payload === "string" ? payload : JSON.stringify(payload);
+  console.log('payload', payload)
 
   const options = {
     qos: 1,

@@ -211,7 +211,7 @@ async function HealthMqtt() {
         if (e) console.error("[MQTT] publish error:", e.message);
       });
     };
-    publishOnce(); // ✅ 연결 직후 1회
+    // publishOnce(); // ✅ 연결 직후 1회
     setInterval(publishOnce, 30000); // ✅ 이후 주기
   });
 }
