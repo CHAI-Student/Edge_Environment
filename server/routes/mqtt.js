@@ -7,7 +7,6 @@ const { publish } = require("./Mqtt/MqttClient");
 const { ManualDoor } = require('./Mqtt/ManualDoor');
 
 const router = express.Router();
-router.use(express.json({ limit: "1mb" }));
 
 // REST -> MQTT publish 예시
 router.post("/api/publish", async (req, res) => {

@@ -30,6 +30,23 @@ module.exports = {
       restart_delay: 1000,
     },
 
+    // React Client (포트 3000) - 프론트엔드 웹 애플리케이션
+    {
+      name: "client",
+      cwd: "./client",
+      script: "npm",
+      args: "start",
+      interpreter: "none",
+      env: {
+        BROWSER: "none",
+        PORT: "3000",
+      },
+      watch: false,
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 2000,
+    },
+
     // Python io_board 서비스 (포트 8001)
     {
       name: "io-board",
@@ -85,6 +102,22 @@ module.exports = {
       cwd: "./services/camera_driver",
       script: "python",
       args: "-m uvicorn main:app --host 0.0.0.0 --port 8003",
+      interpreter: "none",
+      env: {
+        PYTHONUNBUFFERED: "1",
+      },
+      watch: false,
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 2000,
+    },
+
+    // Python mqtt_client 서비스 (포트 8006) - MQTT IF04 프로토콜
+    {
+      name: "mqtt-client",
+      cwd: "./services/mqtt_client",
+      script: "python",
+      args: "-m uvicorn main:app --host 0.0.0.0 --port 8006",
       interpreter: "none",
       env: {
         PYTHONUNBUFFERED: "1",

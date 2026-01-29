@@ -113,6 +113,7 @@ app.use("/api", productRouter);
 const mqttModule = require("./routes/mqtt");
 const { disconnect } = require("./routes/Mqtt/MqttClient");
 app.use('/', mqttModule.router);
+console.log('[APP] MQTT module loaded', mqttModule);
 
 // MQTT 초기화
 mqttModule.init().catch((e) => {
