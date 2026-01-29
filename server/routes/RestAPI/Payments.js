@@ -79,17 +79,15 @@ async function requestTopCameraON({ include_top, record_video, folderPath }) {
       }
     });
 
-  // 성공 시 응답 데이터 반환
+    // 성공 시 응답 데이터 반환
     if (response.status === 200) {
         console.log("Recording Started with Path:", response.data);
         return response.data;
     }
 
   } catch (error) {
-    // 에러 로깅 시 action 변수가 없으므로 제거하거나 함수명을 사용
     const errorContext = "requestTopCameraON"; 
     if (error.response) {
-      // 422 Validation Error 등이 발생할 수 있음 [cite: 466]
       console.error(`API Error (${errorContext}):`, error.response.data);
     } else {
       console.error(`Request Error (${errorContext}):`, error.message);
@@ -113,9 +111,14 @@ async function requestCameraOFF() {
   }
 }
 
-let token = ''
+let token = null
 
 async function init() {
+    try {
+        await axios.post(`${config.ioboardApi}/init`);
+    } catch (e) {
+        console.error("[IO Board] Init failed", e);
+    }
     // --- 1. 이벤트 리스너 설정 ---
     const TokenHandler = new EventSource(`${config.cardTerminalApi}/sse`);
     console.log("[Card Terminal] Listening for card tokens...");
@@ -158,45 +161,45 @@ async function init() {
     });
 }
 
-const DeadboltHandler = axios.post(`${config.ioboardApi}/deadbolt`); // 엔드포인트 확인 필요
 function waitForDeadboltClose() {
     return new Promise((resolve) => {
-        console.log("[Door] Waiting for CLOSE event & Log Path from sensor...");
+        const deadboltSource = new EventSource(`${config.ioboardApi}/sse?streams=doors`);
 
         const statusHandler = (event) => {
             if (!event.data) return;
             try {
                 const data = JSON.parse(event.data);
-                const currentState = data.state || data; 
-                const logPath = data.log_path || data.logPath || null; // 로그 경로 추출
-
-                if (currentState === "CLOSE") {
-                    console.log(`[Door] Event Received: CLOSE. (LogPath: ${logPath})`);
+                
+                if (data.deadbolt === "CLOSE" || data.deadbolt === "LOCKED") { 
+                    console.log(`[Door] Event Received: CLOSE.`);
                     
-                    DeadboltHandler.removeEventListener('status', statusHandler);
+                    deadboltSource.close(); // 리스너 해제 및 연결 종료
                     
-                    // 상태뿐만 아니라 로그 경로도 함께 반환
                     resolve({ 
                         state: "CLOSE", 
-                        logPath: logPath 
+                        logPath: data.log_path || null // io_board_docs에는 구현되어 있지 않지만, 여기서 log path를 받아야함
                     });
                 }
             } catch (err) {
                 console.error("[Door] Event parsing error:", err);
             }
         };
-        DeadboltHandler.addEventListener('status', statusHandler);
+
+        deadboltSource.addEventListener('door.update', statusHandler);
+
+        deadboltSource.onerror = (err) => {
+            console.error("[Door] SSE Error:", err);
+            deadboltSource.close();
+        };
     });
 }
 
 // --- 2. 프로세스 시작 및 상태 체크 ---
 async function startProcess(token, CardMethod) {
-    // const LoadcellStatus = LoadcellStatusAPI
     const CameraStatus = '09'
     const CardTerminalStatus = await CardTerminalStatusAPI()
-    // const DeadboltStatus = DeadboltStatusAPI
-    const DeadboltStatus = '19'
-    const LoadcellStatus = '29'
+    const DeadboltStatus = await DeadboltStatusAPI()
+    const LoadcellStatus = await LoadcellStatusAPI()
 
     if (CardTerminalStatus == '39' && DeadboltStatus == '19' && LoadcellStatus == '29' && CameraStatus == '09') {
         console.log('[PAYMENT] Health check passed. Starting Payments process...');
@@ -302,8 +305,14 @@ async function Payments(token, CardMethod) {
         zone_id: 0, 
         include_top: true, 
         record_video: true,   // [중요] 영상 녹화를 하려면 true여야 합니다 
-        folderPath: folderPath
+        folderPath: folderName
     });
+
+    try {
+      const LoadcellStartRes = await axios.post(`${config.ioboardApi}/start`, {}); 
+    } catch (error) {
+      console.error("녹화 시작 실패:", error);
+    }
 
     // [7] 로드셀 무게 정보 실시간 전달
     
@@ -313,7 +322,13 @@ async function Payments(token, CardMethod) {
     let receivedLogPath = null;
     try {
         // 1. 문이 닫히고 로그 경로가 올 때까지 대기
-        const closeEventData = await waitForDeadboltClose(); 
+        const closeEventData = await waitForDeadboltClose();
+        try {
+          const LoadcellStopRes = await axios.post(`${config.ioboardApi}/stop`, {}); 
+        } catch (error) {
+          console.error("녹화 종료 실패:", error);
+        }
+
         if (closeEventData.state === "CLOSE") {
             receivedLogPath = closeEventData.logPath; // 경로 저장
             await requestCameraOFF();
@@ -323,32 +338,41 @@ async function Payments(token, CardMethod) {
         return; // 에러 시 중단
     }
 
+    let LoadcellData = null
+    try {
+          LoadcellData = await axios.post(`${config.ioboardApi}/data`, {}); 
+        } catch (error) {
+          console.error("로드셀 데이터 갖고오기 실패:", error);
+        } 
     try {
         console.log("[Model] Sending data for inference...");
         
         const inferencePayload = {
-            product_info: productData,
-            image_path: folderPath,
-            log_path: receivedLogPath,
+            ProductList     : productData,
+            ImageFolder     : folderName,
+            Loadcell    : LoadcellData,
         };
 
-        // 모델 서버 요청 (POST) , endpoint 확인 필요, 응답 대기 시간은 60초로 설정
-        const modelRes = await axios.post(`${config.modelApi}/inference`, inferencePayload, { timeout: 60000 });
+        // 모델 서버 요청 (POST)
+        const modelRes = await axios.post(`${config.modelApi}/api/judge/multi-zone`, inferencePayload);
         const inferenceResult = modelRes.data;
         console.log("[Model] Inference Result:", inferenceResult);
 
-        if (modelRes.data.successs === 'success'){
+        const finalAmount = String(inferenceResult.totalPrice).padStart(9, '0');
+        if (modelRes.data.success === true){
           let paymentResponse = null;
           if (CardMethod === "S") {
             paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {
-                    amount: inferenceResult.totalPrice, 
+                    // amount: inferenceResult.totalPrice,
+                    amount: finalAmount, 
                     authorization_type: "PURCHASE",
                     display_message: "SamsungPay Payment"
                 });
           }
           else if (CardMethod === "N"){
             paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/token/approve`, {
-                    amount: inferenceResult.totalPrice,
+                    // amount: inferenceResult.totalPrice,
+                    amount: finalAmount,
                     vankey_hash: token 
                 });
           }
@@ -366,7 +390,7 @@ async function Payments(token, CardMethod) {
               paymentDate = payTime,
               paymentData = paymentResponse,
               inferenceData = inferenceResult,
-              folderPath = folderPath,
+              folderPath = folderName,
               token = token
             )
 
