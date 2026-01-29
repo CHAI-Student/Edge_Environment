@@ -179,11 +179,13 @@ class IOBoardSSESubscriber:
             try:
                 await self._connect_and_listen()
             except asyncio.CancelledError:
+                logger.info("SSE subscription cancelled")
                 break
             except Exception as e:
                 print(f"[SSE_LOOP] Subscription loop error: {e}", flush=True)
                 logger.error(f"SSE subscription error: {e}")
 
+            # _running이 False이면 루프 종료
             if not self._running:
                 break
 
@@ -206,19 +208,35 @@ class IOBoardSSESubscriber:
 
     async def _connect_and_listen(self):
         """SSE 연결 및 이벤트 수신"""
-        sse_url = f"{self.io_board_url}/sse?streams=loadcells,doors&loadcell_interval=0.5"
+        # IO Board SSE API 파라미터:
+        # - streams: loadcells,doors (필수)
+        # - filter_method: none, exponential, kalman (선택)
+        # - filter_alpha: 0.0~1.0 (선택, exponential 필터용)
+        # - threshold: 0.0 (선택, 변화 감지 임계값)
+        # - threshold_scope: filtered or raw (선택)
+        sse_url = f"{self.io_board_url}/sse?streams=loadcells,doors&filter_method=exponential&threshold=1.0"
 
-        # aiohttp 세션 생성 (try-finally로 정리 보장)
-        session_created_here = False
+        # aiohttp 세션 생성 (필요시)
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
-            session_created_here = True
+            # Use headers to request SSE and allow environment proxy settings when present
+            self._session = aiohttp.ClientSession(
+                headers={"Accept": "text/event-stream"},
+                trust_env=True,
+            )
+            logger.debug("New aiohttp session created (Accept: text/event-stream, trust_env=True)")
 
         print(f"[SSE_CONNECT] Attempting to connect to {sse_url}", flush=True)
         logger.info(f"Connecting to SSE: {sse_url}")
 
         try:
-            async with self._session.get(sse_url) as response:
+            # Force no-ssl at request level when connecting to http://localhost to avoid
+            # environment/agent SSL interception issues. If your IO board uses HTTPS,
+            # remove `ssl=False` or pass an appropriate SSL context.
+            async with self._session.get(
+                sse_url,
+                timeout=aiohttp.ClientTimeout(total=None, sock_read=30),
+                ssl=False,
+            ) as response:
                 if response.status != 200:
                     error_msg = f"SSE connection failed: HTTP {response.status}"
                     print(f"[SSE_CONNECT] ERROR: {error_msg}", flush=True)
@@ -229,22 +247,36 @@ class IOBoardSSESubscriber:
                 print(f"[SSE_CONNECT] Successfully connected, listening for events...", flush=True)
                 logger.info("SSE connected successfully")
 
-                # SSE 이벤트 파싱
+                # SSE 이벤트 파싱 (라인 단위로 안정적으로 읽기)
                 event_type = None
                 event_data = ""
 
-                async for line in response.content:
+                while True:
                     if not self._running:
+                        print(f"[SSE_CONNECT] Stopping event listening (running={self._running})", flush=True)
                         break
 
-                    line = line.decode("utf-8").strip()
+                    line_bytes = await response.content.readline()
+                    if not line_bytes:
+                        # EOF
+                        break
+
+                    try:
+                        line = line_bytes.decode("utf-8").rstrip("\r\n")
+                    except Exception:
+                        line = line_bytes.decode("utf-8", errors="ignore").rstrip("\r\n")
 
                     if line.startswith("event:"):
                         event_type = line[6:].strip()
                     elif line.startswith("data:"):
-                        event_data = line[5:].strip()
+                        # data: may contain multi-line JSON pieces; accumulate
+                        chunk = line[5:].strip()
+                        if event_data:
+                            event_data += "\n" + chunk
+                        else:
+                            event_data = chunk
                     elif line == "" and event_data:
-                        # 이벤트 완료
+                        # 이벤트 완료 (빈 줄로 구분)
                         await self._process_event(event_type, event_data)
                         event_type = None
                         event_data = ""
@@ -262,27 +294,16 @@ class IOBoardSSESubscriber:
             self._connected = False
             print(f"[SSE_CONNECT] ERROR: {type(e).__name__}: {e}", flush=True)
             logger.error(f"SSE subscription error: {e}")
-            # 재연결은 _subscribe_loop()에서 자동으로 처리됨
-        finally:
-            self._connected = False
-            # 세션 정리 조건 개선:
-            # - 여기서 생성한 세션이거나
-            # - 서비스가 중지 상태이거나
-            # - 세션이 닫힌 상태인 경우
-            should_close = (
-                session_created_here or
-                not self._running or
-                (self._session and self._session.closed)
-            )
-            if should_close and self._session:
+            # 연결 오류 시 세션 정리해서 다음 연결에서 새로 생성
+            if self._session:
                 try:
                     if not self._session.closed:
                         await self._session.close()
-                    self._session = None
-                    logger.debug("SSE session closed and cleaned up")
-                except Exception as e:
-                    logger.warning(f"Error closing SSE session: {e}")
-                    self._session = None  # 에러 시에도 참조 정리
+                except Exception as close_error:
+                    logger.warning(f"Error closing session: {close_error}")
+                self._session = None
+        finally:
+            self._connected = False
 
     async def _process_event(self, event_type: Optional[str], event_data: str):
         """SSE 이벤트 처리"""

@@ -6,10 +6,11 @@ import io
 import logging
 import shutil
 import time
+import asyncio
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
 logger = logging.getLogger(__name__)
@@ -569,6 +570,7 @@ class RecordingStartRequest(BaseModel):
 @router.post("/recording/start")
 async def start_recording(
     request: RecordingStartRequest = None,
+    request_obj: Request = None,
     # Query parameters for Node.js compatibility
     zone_id: Optional[int] = None,
     include_top: bool = True,
@@ -601,6 +603,103 @@ async def start_recording(
         세션 ID 및 경로 정보
     """
     manager = get_manager()
+
+    # If event-driven components are not ready, attempt to start them now
+    # (client convenience: auto-start SSE and event manager when /recording/start called).
+    try:
+        if not getattr(request_obj.app.state, "event_ready", False):
+            logger.info("Event-driven components not ready - attempting to start from /recording/start")
+
+            sse_sub = get_sse_subscriber()
+            event_mgr = get_event_recording_manager()
+
+            # Lazy-create SSE subscriber if missing
+            if sse_sub is None:
+                try:
+                    from core import IOBoardSSESubscriber, EventRecordingManager
+
+                    sse_sub = IOBoardSSESubscriber(io_board_url=settings.io_board_url)
+
+                    # If event manager missing, create one tied to current camera manager
+                    if event_mgr is None:
+                        try:
+                            event_mgr = EventRecordingManager(
+                                camera_manager=manager,
+                                pre_buffer_seconds=settings.pre_buffer_seconds,
+                                post_buffer_seconds=settings.post_buffer_seconds,
+                                save_images=settings.save_images,
+                                save_videos=settings.save_videos,
+                                nodejs_callback_url=settings.nodejs_callback_url,
+                                media_base_path=settings.media_base_path if settings.media_base_path else None,
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to create EventRecordingManager on-demand: {e}")
+
+                except Exception as e:
+                    logger.error(f"Failed to lazy-create SSE subscriber: {e}")
+
+            # Link callbacks if possible
+            try:
+                if sse_sub and event_mgr:
+                    sse_sub.set_on_weight_change(event_mgr.on_weight_change)
+                    sse_sub.set_on_door_change(event_mgr.on_door_change)
+            except Exception as e:
+                logger.warning(f"Failed linking SSE callbacks: {e}")
+
+            # Register components in this module's globals
+            try:
+                init_sse_components(sse_sub, event_mgr)
+            except Exception:
+                # init_sse_components should be available in this module
+                pass
+
+            # Start SSE subscriber (non-blocking start then wait briefly for connected)
+            if sse_sub:
+                try:
+                    if not getattr(sse_sub, "_running", False):
+                        await sse_sub.start()
+
+                    # Wait up to `start_wait` seconds for connection
+                    start_wait = 3.0
+                    step = 0.2
+                    waited = 0.0
+                    while waited < start_wait:
+                        try:
+                            status = sse_sub.get_status()
+                            if status.get("connected"):
+                                break
+                        except Exception:
+                            pass
+                        await asyncio.sleep(step)
+                        waited += step
+
+                    # Mark app as ready even if not fully connected - we've triggered startup
+                    request_obj.app.state.event_ready = True
+                    logger.info("Event-driven components triggered from /recording/start")
+
+                    # If cameras are not yet initialized, start initialization in background
+                    try:
+                        if not getattr(manager, "is_initialized", False):
+                            async def _lazy_init_cameras():
+                                try:
+                                    logger.info("Lazy initializing cameras triggered by /recording/start")
+                                    await asyncio.to_thread(manager.initialize_all)
+                                    # small delay to allow device handles to settle
+                                    await asyncio.sleep(0.1)
+                                    await asyncio.to_thread(manager.start_streaming)
+                                    logger.info("Lazy camera initialization completed")
+                                except Exception as e:
+                                    logger.error(f"Lazy camera initialization failed: {e}")
+
+                            asyncio.create_task(_lazy_init_cameras())
+                    except Exception as e:
+                        logger.warning(f"Failed to schedule lazy camera init: {e}")
+
+                except Exception as e:
+                    logger.error(f"Failed to start SSE subscriber on-demand: {e}")
+                    # fallthrough - we will still attempt to proceed but log the issue
+    except Exception as e:
+        logger.error(f"Error while attempting to ensure event-driven readiness: {e}")
 
     # Query params가 우선, 없으면 JSON body 사용
     effective_zone_id = zone_id

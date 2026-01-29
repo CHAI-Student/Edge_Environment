@@ -140,6 +140,8 @@ def create_lifespan():
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """FastAPI lifespan handler"""
+        # Event-driven components readiness flag
+        app.state.event_ready = False
         # Startup - 카메라 초기화를 백그라운드로 처리하여 서버가 먼저 시작되도록 함
         async def init_cameras_background():
             """백그라운드에서 카메라 초기화"""
@@ -151,6 +153,8 @@ def create_lifespan():
                 print("[STARTUP] Starting event-driven services (SSE subscriber)...", flush=True)
                 await _start_event_driven_services()
                 print("[STARTUP] Event-driven services started successfully", flush=True)
+                # Mark event-driven components as ready
+                app.state.event_ready = True
             except Exception as e:
                 logger.error(f"Failed to initialize cameras in background: {e}", exc_info=True)
                 print(f"[STARTUP] CRITICAL ERROR: {e}", flush=True)
