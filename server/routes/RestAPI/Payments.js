@@ -297,7 +297,7 @@ async function Payments(token, CardMethod) {
     // [5] 문 열기 (OPEN)
     const openResult = await callApiToControlDeadbolt("OPEN");
     if (openResult !== "OPEN") throw new Error(`Failed to open door. Status: ${openResult}`);
-    console.log("여기까지 진행됐다 쉬벌")
+    console.log("로드셀 제어까지 완료")
 
     // await requestTopCameraCapture({ folderPath: folderPath, action: 'ON' });
 
@@ -309,7 +309,7 @@ async function Payments(token, CardMethod) {
     });
 
     try {
-      const LoadcellStartRes = await axios.post(`${config.ioboardApi}/start`, {}); 
+      const LoadcellStartRes = await axios.post(`${config.ioboardApi}/recording/start`, {}); 
     } catch (error) {
       console.error("녹화 시작 실패:", error);
     }
@@ -324,7 +324,7 @@ async function Payments(token, CardMethod) {
         // 1. 문이 닫히고 로그 경로가 올 때까지 대기
         const closeEventData = await waitForDeadboltClose();
         try {
-          const LoadcellStopRes = await axios.post(`${config.ioboardApi}/stop`, {}); 
+          const LoadcellStopRes = await axios.post(`${config.ioboardApi}/recording/stop`, {}); 
         } catch (error) {
           console.error("녹화 종료 실패:", error);
         }
@@ -340,7 +340,7 @@ async function Payments(token, CardMethod) {
 
     let LoadcellData = null
     try {
-          LoadcellData = await axios.post(`${config.ioboardApi}/data`, {}); 
+          LoadcellData = await axios.post(`${config.ioboardApi}/recording/data`, {}); 
         } catch (error) {
           console.error("로드셀 데이터 갖고오기 실패:", error);
         } 
@@ -350,7 +350,7 @@ async function Payments(token, CardMethod) {
         const inferencePayload = {
             ProductList     : productData,
             ImageFolder     : folderName,
-            Loadcell    : LoadcellData,
+            Loadcell        : LoadcellData,
         };
 
         // 모델 서버 요청 (POST)
