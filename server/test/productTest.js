@@ -13,7 +13,7 @@ const external = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-// event 없이 'node ./server/routes/RestAPI/ProductList.js'로 실행
+// event 없이 'node ./server/test/productTest.js'로 실행
 if (require.main === module) {
   (async () => {
     try {

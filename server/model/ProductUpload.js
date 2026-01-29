@@ -60,7 +60,10 @@ const productUploadSchema = mongoose.Schema({
     //상품 등록일(이미지가 DB에 저장된 날)
     createDate: {
         type: Date,
-        default: Date.now
+    },
+    updateDate: {
+        type: Date,
+        default: null
     },
     //상품은 동일하나 이벤트(예: 크리스마스, 뺴빼로데이)로 인해 포장지가 달라져 재학습이 필요한 경우
     eventPromotion: {
@@ -70,10 +73,12 @@ const productUploadSchema = mongoose.Schema({
     trainProductIdx: {
         type: Number, //1부터 순차적으로 시작
     },
-})
+    }, { versionKey: false, timestamps: false }
+)
+
+productUploadSchema.index({ productIdx: 1, productEngName: 1, trainProductIdx: 1 }, { unique: true });
 
 // const ProductUpload = mongoose.model('ProductUpload', productUploadSchema);
 const ProductUpload = mongoose.model('ProductUpload', productUploadSchema, 'ProductsList');
-
 
 module.exports = { ProductUpload }

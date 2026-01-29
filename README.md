@@ -82,8 +82,20 @@ Edge Environment setting for CHAI project - main server(js)
 
 **IF02-Monitering**
 ```
-[0] Health Check {"HEADER":{"IF_ID":"IF_02","IF_SYSID":"bc091a51-88c1-4d72-90b1-5d81ddb53480","IF_HOST":"MQTTX","IF_DATE":1768313124579},"DATA":{"device_idx":"device_idx","division_idx":"division_idx","camera_status":"09","deadbolt_status":"19","loadcell_status":"29","card_terminal_status":"39"}}
+Health Check {"HEADER":{"IF_ID":"IF_02","IF_SYSID":"3d1d0101-0ef2-4bce-b9b5-f69341b2f591","IF_HOST":"MQTTX","IF_DATE":1769666940465},"DATA":{"device_idx":"DE17683631997086480","division_idx":"DI17647205538493077","camera_status":"09","deadbolt_status":"19","loadcell_status":"29","card_terminal_status":"39","edgepc_status":"49"}}
 ```
+
+
+**IF03-Door Manual**
+```
+[MQTT] topic=chai/device/DE17683631997086480/cmd/door/manual payload={"HEADER":{"IF_ID":"IF_03","IF_SYSID":"41523224-79bb-48a5-b6cc-db10b4dbc45a","IF_HOST":"PNT","IF_DATE":"20260119113540"},"DATA":{"division_idx":"DI17647205538493077","device_idx":"DE17683631997086480","door_state":"OPEN"}}
+[DOOR] cmd received. IF_SYSID= 41523224-79bb-48a5-b6cc-db10b4dbc45a doorState= OPEN
+[DOOR] ack published: chai/device/DE17683631997086480/ack/door/manual IF_SYSID= 41523224-79bb-48a5-b6cc-db10b4dbc45a
+
+//Response to PNT
+{"HEADER":{"IF_ID":"IF_03","IF_SYSID":"c8297fe7-bd9f-46de-9501-de3a27f6d36f","IF_HOST":"CHAI","IF_DATE":"1768386459953"},"DATA":{"division_idx":"DI17647205538493077","device_idx":"DE17560868094789999","door_state":"CLOSE","result_cd":"S","result_msg":"Door is closed"}}
+```
+
 
 **IF11-Product List**
 ```
@@ -104,136 +116,136 @@ Edge Environment setting for CHAI project - main server(js)
       {
         division_idx: 'DI17647205538493077',
         device_idx: 'DE17683631997086480',
-        product_idx: 'P17355176364813008',
-        product_name: '페리에 330ml',
+        product_idx: 'P17431239734403436',
+        product_name: '롯데 핫식스더킹러쉬355ml',
+        product_eng_name: 'CAN_LOTTE_HOT6_THE_KING_RUSH_355ML',
         category_idx: null,
-        supply_price: 2000,
-        sale_price: 1985,
-        stock_qty: 12,
+        supply_price: 1150,
+        sale_price: 1300,
+        stock_qty: 1,
         expired_date: null,
         reference_id: null,
         provider: null,
         status: null,
-        is_new: null,
+        is_new: '1',
+        training_status: '0',
         product_width: null,
         product_height: null,
-        product_weight: '550',
+        product_weight: '355',
         storage_type: null,
         has_loadcell: null
       },
       {
         division_idx: 'DI17647205538493077',
         device_idx: 'DE17683631997086480',
-        product_idx: 'P17355176391055026',
-        product_name: '하겐다즈 그린티&아몬드 80ml',
+        product_idx: 'P17355177560736307',
+        product_name: '롯데) 트레비 500ML',
+        product_eng_name: 'BOTTLE_LOTTE_TREVI_LEMON_500ML',
         category_idx: null,
-        supply_price: 4300,
-        sale_price: 4300,
-        stock_qty: 10,
+        supply_price: 770,
+        sale_price: 1600,
+        stock_qty: 1,
         expired_date: null,
         reference_id: null,
         provider: null,
         status: null,
-        is_new: null,
+        is_new: '1',
+        training_status: '0',
         product_width: null,
         product_height: null,
-        product_weight: '77',
+        product_weight: '532',
         storage_type: null,
         has_loadcell: null
       },
       {
         division_idx: 'DI17647205538493077',
-        device_idx: 'DE17683631997086480',
-        product_idx: 'P17355176388041427',
-        product_name: '하겐다즈 딸기 80ml',
+        device_idx: 'DE17560868094789999',
+        product_idx: 'P17412473966477576',
+        product_name: '한입피자 콤비네이션',
+        product_eng_name: 'BAG_SAJO_PIZZA_COMBINATION_80G',
         category_idx: null,
-        supply_price: 4300,
-        sale_price: 4300,
-        stock_qty: 15,
+        supply_price: 1180,
+        sale_price: 1700,
+        stock_qty: 1,
         expired_date: null,
         reference_id: null,
         provider: null,
         status: null,
-        is_new: null,
+        is_new: '1',
+        training_status: '0',
         product_width: null,
         product_height: null,
-        product_weight: '75',
+        product_weight: '80',
         storage_type: null,
         has_loadcell: null
       },
       {
         division_idx: 'DI17647205538493077',
-        device_idx: 'DE17683631997086480',
-        product_idx: 'P17355176392597310',
-        product_name: '하겐다즈 바닐라 카라멜 아몬드 80ml',
+        device_idx: 'DE17560868094789999',
+        product_idx: 'P17399215507038132',
+        product_name: '홈런볼',
+        product_eng_name: 'BAG_HAITAI_HOME_RUN_BALL_41G',
         category_idx: null,
-        supply_price: 4300,
-        sale_price: 4300,
-        stock_qty: 10,
+        supply_price: 1200,
+        sale_price: 1200,
+        stock_qty: 5,
         expired_date: null,
         reference_id: null,
         provider: null,
         status: null,
-        is_new: null,
+        is_new: '1',
+        training_status: '0',
         product_width: null,
         product_height: null,
-        product_weight: '75',
+        product_weight: '41',
         storage_type: null,
         has_loadcell: null
-      },
-      {
-        division_idx: 'DI17647205538493077',
-        device_idx: 'DE17683631997086480',
-        product_idx: 'P17355176389520600',
-        product_name: '하겐다즈 쿠키&크림 80ml',
-        category_idx: null,
-        supply_price: 4300,
-        sale_price: 4300,
-        stock_qty: 11,
-        expired_date: null,
-        reference_id: null,
-        provider: null,
-        status: null,
-        is_new: null,
-        product_width: null,
-        product_height: null,
-        product_weight: '76',
-        storage_type: null,
-        has_loadcell: null
-      },
-      {
-        division_idx: 'DI17647205538493077',
-        device_idx: 'DE17683631997086480',
-        product_idx: 'P17355176370426534',
-        product_name: '해태) 홈런볼 41g',
-        category_idx: null,
-        supply_price: 200,
-        sale_price: 2000,
-        stock_qty: 12,
-        expired_date: null,
-        reference_id: null,
-        provider: null,
-        status: null,
-        is_new: null,
-        product_width: null,
-        product_height: null,
-        product_weight: '50',
-        storage_type: null,
-        has_loadcell: null
-      }
+      }, 
+      { ... },
     ]
   }
 }
 ```
 
-**IF03-Door Manual**
+**IF13-ModelBrunchCheck**
 ```
-[MQTT] topic=chai/device/DE17683631997086480/cmd/door/manual payload={"HEADER":{"IF_ID":"IF_03","IF_SYSID":"41523224-79bb-48a5-b6cc-db10b4dbc45a","IF_HOST":"PNT","IF_DATE":"20260119113540"},"DATA":{"division_idx":"DI17647205538493077","device_idx":"DE17683631997086480","door_state":"OPEN"}}
-[DOOR] cmd received. IF_SYSID= 41523224-79bb-48a5-b6cc-db10b4dbc45a doorState= OPEN
-[DOOR] ack published: chai/device/DE17683631997086480/ack/door/manual IF_SYSID= 41523224-79bb-48a5-b6cc-db10b4dbc45a
-
-//Response to PNT
-{"HEADER":{"IF_ID":"IF_03","IF_SYSID":"c8297fe7-bd9f-46de-9501-de3a27f6d36f","IF_HOST":"CHAI","IF_DATE":"1768386459953"},"DATA":{"division_idx":"DI17647205538493077","device_idx":"DE17560868094789999","door_state":"CLOSE","result_cd":"S","result_msg":"Door is closed"}}
+HEADER: {
+  IF_ID: 'IF_13',
+  IF_SYSID: '5c4383eb-114b-4118-b87c-a0b695a1d3c0',
+  IF_HOST: 'CHAI',
+  IF_DATE: '1769667197269'
+},
+DATA: {
+  result_cd: 'S',
+  result_msg: '조회 성공',
+  device_list: [
+    {
+      provider: 'chai',
+      division_idx: 'DI17647205538493077',
+      device_idx: 'DE17560868094789999',
+      storage_type: 'C',
+      has_loadcell: 'Y',
+      payment_type: 'CARD',
+      requires_adult_auth: 'N',
+      brunch_name: 'CHAI-BR-01',
+      brunch_update_date: '2025-12-30T12:00:00',
+      model_version: 'v1.0.4',
+      model_update_date: '2025-12-30T12:00:00'
+    }, 
+    {
+      provider: 'chai',
+      division_idx: 'DI17647205538493077',
+      device_idx: 'DE17683631997086480',
+      storage_type: 'C',
+      has_loadcell: 'Y',
+      payment_type: 'CARD',
+      requires_adult_auth: 'N',
+      brunch_name: null,
+      brunch_update_date: null,
+      model_version: null,
+      model_update_date: null
+    }]
+}
 ```
 
 

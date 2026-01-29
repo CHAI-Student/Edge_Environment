@@ -8,6 +8,9 @@ const divisionUploadSchema = mongoose.Schema({
     divisionIdx: {
         type: String,
     },
+    deviceIdx: {
+        type: [String]
+    },
     //배포 모델 버전 (매장별)
     modelVersion: {
         type: String
@@ -17,10 +20,10 @@ const divisionUploadSchema = mongoose.Schema({
         type: String
     },
     //PNT에 등록된 매장별 신규 상품 리스트
-    products: {
+    products: [{
         type: Schema.Types.ObjectId,
         ref: "ProductUpload",
-    },
+    }],
     //모델 학습 상태 정보 (매장별)
     //학습 상태 여부
     /**
@@ -40,17 +43,18 @@ const divisionUploadSchema = mongoose.Schema({
     //학습 시작일
     trainingDate: {
         type: Date,
-        default: Date.now
     },
     //재학습 시작일
     retrainingDate: {
         type: Date,
-        default: Date.now
+        default: null
     },
-})
+    }, { versionKey: false }
+)
+
+divisionUploadSchema.index({ divisionIdx: 1 }, { unique: true });
 
 // const ProductUpload = mongoose.model('ProductUpload', productUploadSchema);
 const DivisionUpload = mongoose.model('DivisionUpload', divisionUploadSchema, 'DivisionList');
-
 
 module.exports = { DivisionUpload }

@@ -115,14 +115,14 @@ async function DeadboltStatusAPI() {
   } catch (error) {
     // deatbolt timeout
     if (error.code === "ECONNABORTED") {
-      DeadboltState = "30"
+      DeadboltState = "10"
       console.log(`[DEADBOLT] Deadbolt connect timeout: ${DeadboltState}`);
     } else if (error.response) {
       // 서버가 4xx, 5xx 에러를 보낸 경우
-      DeadboltState = "30"
+      DeadboltState = "10"
       throw new Error(`[DEADBOLT] Server Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
     } else {
-      DeadboltState = "30"
+      DeadboltState = "10"
       throw new Error(error.message);
     } return DeadboltState
   }
