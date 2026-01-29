@@ -18,6 +18,7 @@ const { record } = require("zod");
 const { sendToPNT } = require("./PaymentStore");
 const { send } = require("process");
 
+const closedStates = ["LOCK", "LOCKED", "CLOSE", "CLOSED"];
 
 function makeTimestampFolderName(d = new Date()) {
   const yyyy = d.getFullYear();
@@ -163,21 +164,20 @@ async function init() {
 
 function waitForDeadboltClose() {
     return new Promise((resolve) => {
+        // [수정] 문서에 명시된 SSE 스트림 엔드포인트 사용
         const deadboltSource = new EventSource(`${config.ioboardApi}/sse?streams=doors`);
 
         const statusHandler = (event) => {
             if (!event.data) return;
             try {
                 const data = JSON.parse(event.data);
+                const currentState = data.deadbolt ? data.deadbolt.toUpperCase() : "";
+                console.log(`Current Deadbolt State: ${currentState}`)
                 
-                if (data.deadbolt === "CLOSE" || data.deadbolt === "LOCKED") { 
-                    console.log(`[Door] Event Received: CLOSE.`);
-                    
+                if (closedStates.includes(currentState)) { 
                     deadboltSource.close(); // 리스너 해제 및 연결 종료
-                    
                     resolve({ 
-                        state: "CLOSE", 
-                        logPath: data.log_path || null // io_board_docs에는 구현되어 있지 않지만, 여기서 log path를 받아야함
+                        state: currentState, 
                     });
                 }
             } catch (err) {
@@ -319,7 +319,6 @@ async function Payments(token, CardMethod) {
     // [8] 로드셀 무게 변화 감지
 
     // [9] 데드볼트 상태 (close) (sensor → node) + (상단 카메라 off + folder snapshot) 저장 (node → camera python)
-    let receivedLogPath = null;
     try {
         // 1. 문이 닫히고 로그 경로가 올 때까지 대기
         const closeEventData = await waitForDeadboltClose();
@@ -329,8 +328,7 @@ async function Payments(token, CardMethod) {
           console.error("녹화 종료 실패:", error);
         }
 
-        if (closeEventData.state === "CLOSE") {
-            receivedLogPath = closeEventData.logPath; // 경로 저장
+        if (closedStates.includes(closeEventData.state)) {
             await requestCameraOFF();
         }
     } catch (error) {
