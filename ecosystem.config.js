@@ -60,9 +60,8 @@ module.exports = {
     {
       name: "io-board",
       cwd: "./services/io_board",
-      script: "python",
-      args: "main.py",
-      interpreter: "none",
+      script: "main.py",
+      interpreter: "/home/chai/Edge_Environment/.venv/bin/python",
       env: {
         PYTHONUNBUFFERED: "1",
         // API 설정
@@ -86,9 +85,8 @@ module.exports = {
     {
       name: "card-terminal",
       cwd: "./services/card_terminal",
-      script: "python",
-      args: "main.py",
-      interpreter: "none",
+      script: "main.py",
+      interpreter: "/home/chai/Edge_Environment/.venv/bin/python",
       env: {
         PYTHONUNBUFFERED: "1",
         // API 설정
@@ -112,21 +110,18 @@ module.exports = {
     {
       name: "model",
       cwd: "./services/model",
-      script: "python",
-      args: "main.py",
-      interpreter: "none",
+      script: "main.py",
+      interpreter: "/home/chai/Edge_Environment/.venv/bin/python",
       env: {
         PYTHONUNBUFFERED: "1",
         // API 설정
         MODEL__API__HOST: "0.0.0.0",
         MODEL__API__PORT: "8002",
         MODEL__API__LOG_LEVEL: "info",
-        // Vision 설정 (상대 경로 사용 - 자동 fallback 지원)
-        // Windows 개발: models/siyeon_best.pt
-        // Jetson 배포: models/siyeon_best.engine (CUDA 감지 시 자동 사용)
-        MODEL__VISION__YOLO_MODEL_PATH: "models/siyeon_best.pt",
+        // Vision 설정 (절대 경로 사용)
+        MODEL__VISION__YOLO_MODEL_PATH: "/home/chai/Edge_Environment/models/siyeon_best.engine",
         // Node.js 연동
-        MODEL__NODEJS_URL: "http://localhost:8889",
+        MODEL__NODEJS_URL: "http://localhost:8888",
       },
       // Jetson 배포 환경 (pm2 start ecosystem.config.js --env production)
       env_production: {
@@ -134,9 +129,8 @@ module.exports = {
         MODEL__API__HOST: "0.0.0.0",
         MODEL__API__PORT: "8002",
         MODEL__API__LOG_LEVEL: "info",
-        // Jetson: TensorRT 엔진 사용 (절대 경로 또는 상대 경로)
-        MODEL__VISION__YOLO_MODEL_PATH: "models/siyeon_best.engine",
-        MODEL__NODEJS_URL: "http://localhost:8889",
+        MODEL__VISION__YOLO_MODEL_PATH: "/home/chai/Edge_Environment/models/siyeon_best.engine",
+        MODEL__NODEJS_URL: "http://localhost:8888",
       },
       watch: false,
       autorestart: true,
@@ -148,9 +142,8 @@ module.exports = {
     {
       name: "camera-driver",
       cwd: "./services/camera_driver",
-      script: "python",
-      args: "main.py",
-      interpreter: "none",
+      script: "main.py",
+      interpreter: "/home/chai/Edge_Environment/.venv/bin/python",
       env: {
         PYTHONUNBUFFERED: "1",
         // API 설정
@@ -163,7 +156,7 @@ module.exports = {
         CAMERA__FPS: "30",
         // 서비스 연동
         CAMERA__IO_BOARD_URL: "http://localhost:8000",
-        CAMERA__NODEJS_CALLBACK_URL: "http://localhost:8889",
+        CAMERA__NODEJS_CALLBACK_URL: "http://localhost:8888",
       },
       watch: false,
       autorestart: true,
@@ -175,9 +168,8 @@ module.exports = {
     {
       name: "mqtt-client",
       cwd: "./services/mqtt_client",
-      script: "python",
-      args: "main.py",
-      interpreter: "none",
+      script: "main.py",
+      interpreter: "/home/chai/Edge_Environment/.venv/bin/python",
       env: {
         PYTHONUNBUFFERED: "1",
         // API 설정

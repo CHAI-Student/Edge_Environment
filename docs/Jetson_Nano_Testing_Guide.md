@@ -206,7 +206,7 @@ pm2 start ecosystem.config.js
 **실행되는 서비스:**
 | 서비스 | 포트 | 설명 |
 |--------|------|------|
-| orchestrator | 8889 | Node.js 오케스트레이터 |
+| orchestrator | 8888 | Node.js 오케스트레이터 |
 | client | 3000 | React 대시보드 |
 | io-board | 8001 | 로드셀 + 데드볼트 |
 | model | 8002 | AI 상품 판단 |
@@ -240,7 +240,7 @@ curl http://localhost:8001/health         # IO Board
 curl http://localhost:8002/api/health     # Model
 curl http://localhost:8003/api/health     # Camera Driver
 curl http://localhost:8006/health         # MQTT
-curl http://localhost:8889/health         # Node.js
+curl http://localhost:8888/health         # Node.js
 curl http://localhost:5000/status         # Card Terminal
 
 # 전체 헬스 체크 스크립트
@@ -248,7 +248,7 @@ echo "=== Service Health Check ===" && \
 curl -s http://localhost:8001/health && echo " - io-board" && \
 curl -s http://localhost:8002/api/health && echo " - model" && \
 curl -s http://localhost:8003/api/health && echo " - camera-driver" && \
-curl -s http://localhost:8889/health && echo " - orchestrator"
+curl -s http://localhost:8888/health && echo " - orchestrator"
 
 # GPU 사용량 모니터링
 nvidia-smi
@@ -435,7 +435,7 @@ curl -X POST http://localhost:5000/payment/samsung-pay/approve \
   }'
 ```
 
-### 4.5 Node.js 서버 테스트 (포트 8889)
+### 4.5 Node.js 서버 테스트 (포트 8888)
 
 ```bash
 cd ~/ai-vending/Edge_Environment
@@ -450,13 +450,13 @@ npm run dev
 **다른 터미널에서:**
 ```bash
 # 헬스 체크
-curl http://localhost:8889/health
+curl http://localhost:8888/health
 
 # 통합 상태 조회
-curl http://localhost:8889/api/dashboard/status
+curl http://localhost:8888/api/dashboard/status
 
 # SSE 이벤트 스트림
-curl -N http://localhost:8889/sse/events
+curl -N http://localhost:8888/sse/events
 ```
 
 ### 4.6 React 클라이언트 테스트 (포트 3000)
@@ -494,7 +494,7 @@ curl -s http://localhost:8001/health && echo " - io-board OK"
 curl -s http://localhost:8002/api/health && echo " - model OK"
 curl -s http://localhost:8003/api/health && echo " - camera-driver OK"
 curl -s http://localhost:8006/health && echo " - mqtt-client OK"
-curl -s http://localhost:8889/health && echo " - orchestrator OK"
+curl -s http://localhost:8888/health && echo " - orchestrator OK"
 curl -s http://localhost:5000/status && echo " - card-terminal OK"
 ```
 
@@ -502,7 +502,7 @@ curl -s http://localhost:5000/status && echo " - card-terminal OK"
 
 ```bash
 # Zone 0에서 상품 판단 (Node.js 경유)
-curl -X POST http://localhost:8889/api/model/judge \
+curl -X POST http://localhost:8888/api/model/judge \
   -H "Content-Type: application/json" \
   -d '{
     "zone_id": 0,
@@ -519,15 +519,15 @@ curl -X POST http://localhost:8889/api/model/judge \
 
 ```bash
 # 서비스 상태 확인
-curl http://localhost:8889/api/camera/test/status
+curl http://localhost:8888/api/camera/test/status
 
 # Zone 0 스냅샷 + 판단
-curl -X POST http://localhost:8889/api/camera/test/snapshot-and-judge \
+curl -X POST http://localhost:8888/api/camera/test/snapshot-and-judge \
   -H "Content-Type: application/json" \
   -d '{"zone_id": 0, "include_top": true}'
 
 # 녹화 + 판단 (3초)
-curl -X POST http://localhost:8889/api/camera/test/record-and-judge \
+curl -X POST http://localhost:8888/api/camera/test/record-and-judge \
   -H "Content-Type: application/json" \
   -d '{"zone_id": 0, "include_top": true, "duration_ms": 3000}'
 ```
@@ -540,7 +540,7 @@ curl -X POST http://localhost:8889/api/camera/test/record-and-judge \
 curl -N "http://localhost:8001/sse?streams=loadcells,doors"
 
 # 또는 Node.js 통합 SSE
-curl -N http://localhost:8889/sse/events
+curl -N http://localhost:8888/sse/events
 ```
 
 **터미널 2 (이벤트 트리거):**
@@ -654,7 +654,7 @@ npm start
 
 ```bash
 # 사용 중인 포트 확인
-sudo netstat -tlnp | grep -E "8001|8002|8003|8006|8889|5000|3000"
+sudo netstat -tlnp | grep -E "8001|8002|8003|8006|8888|5000|3000"
 
 # 특정 포트 프로세스 확인
 sudo lsof -i :8002
@@ -739,7 +739,7 @@ npm start
 | camera-driver | 8003 | 카메라 관리 |
 | card-terminal | 5000/5001 | 결제 터미널 API/CAT |
 | mqtt-client | 8006 | MQTT IF01-04 |
-| orchestrator | 8889 | Node.js 오케스트레이터 |
+| orchestrator | 8888 | Node.js 오케스트레이터 |
 | client | 3000 | React 대시보드 |
 
 ---
@@ -801,7 +801,7 @@ POST /payment/samsung-pay/approve  # 삼성페이 승인
 POST /payment/samsung-pay/cancel   # 삼성페이 취소
 ```
 
-### Node.js Orchestrator (8889)
+### Node.js Orchestrator (8888)
 ```
 GET  /health                  # 헬스 체크
 GET  /api/dashboard/status    # 통합 상태

@@ -10,7 +10,7 @@ Node.js 중심의 마이크로서비스 아키텍처. **Event-Driven Architectur
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                  Node.js Orchestrator (8889)                         │
+│                  Node.js Orchestrator (8888)                         │
 │   - IO Board SSE 구독 (loadcell.change, door.update)                 │
 │   - Camera Driver 스냅샷/녹화 요청                                   │
 │   - Model 서비스에 판단 요청 (weight_data + media_paths)             │
@@ -48,7 +48,7 @@ Node.js 중심의 마이크로서비스 아키텍처. **Event-Driven Architectur
 | Model | 8002 | YOLO 추론 + 상품 판단 (stateless) |
 | Camera Driver | 8003 | 6대 카메라 스냅샷/녹화 (Nvidia 지원) |
 | MQTT Client | 8006 | CHAI IF01-04 프로토콜 |
-| Node.js | 8889 | 오케스트레이터 + API |
+| Node.js | 8888 | 오케스트레이터 + API |
 | React Client | 3000 | 웹 대시보드 UI |
 | Card Terminal CAT | 5001 | CAT 디바이스 TCP 서버 |
 
@@ -89,7 +89,7 @@ npm start
 pm2 start ecosystem.config.js
 
 # 서비스 목록:
-# - orchestrator (Node.js :8889)
+# - orchestrator (Node.js :8888)
 # - client (React :3000)
 # - io-board (:8000)
 # - model (:8002)
@@ -125,7 +125,7 @@ npm run dev
 ### 5. 대시보드
 ```
 http://localhost:3000        # React 개발 서버
-http://localhost:8889        # Node.js 정적 파일 서빙 (production)
+http://localhost:8888        # Node.js 정적 파일 서빙 (production)
 ```
 
 ## 테스트 명령어
@@ -136,7 +136,7 @@ curl http://localhost:8000/health    # IO Board
 curl http://localhost:8002/api/health # Model
 curl http://localhost:8003/api/health # Camera
 curl http://localhost:8006/health    # MQTT
-curl http://localhost:8889/health    # Node.js
+curl http://localhost:8888/health    # Node.js
 ```
 
 ### SSE 스트림
@@ -145,7 +145,7 @@ curl http://localhost:8889/health    # Node.js
 curl -N "http://localhost:8000/sse?streams=loadcells,doors&loadcell_interval=0.5"
 
 # Node.js 통합 SSE
-curl -N http://localhost:8889/sse/events
+curl -N http://localhost:8888/sse/events
 ```
 
 ### 상품 판단 테스트
@@ -176,8 +176,8 @@ curl -X POST http://localhost:8002/api/judge \
 ### 카메라 제어
 ```bash
 # Zone 활성화/비활성화
-curl -X POST http://localhost:8889/api/camera/zone/0/activate
-curl -X POST http://localhost:8889/api/camera/zone/0/deactivate
+curl -X POST http://localhost:8888/api/camera/zone/0/activate
+curl -X POST http://localhost:8888/api/camera/zone/0/deactivate
 
 # 스냅샷 (Camera Driver 직접)
 curl -X POST http://localhost:8003/api/zone/0/snapshot \
@@ -199,15 +199,15 @@ curl -X POST http://localhost:8000/deadbolt -d '{"action": "OPEN"}'
 
 ```bash
 # 서비스 상태 확인
-curl http://localhost:8889/api/camera/test/status
+curl http://localhost:8888/api/camera/test/status
 
 # Zone 0 카메라 테스트 (스냅샷 + 판단)
-curl -X POST http://localhost:8889/api/camera/test/snapshot-and-judge \
+curl -X POST http://localhost:8888/api/camera/test/snapshot-and-judge \
   -H "Content-Type: application/json" \
   -d '{"zone_id": 0, "include_top": true}'
 
 # 기존 이미지로 판단
-curl -X POST http://localhost:8889/api/camera/test/judge-from-folder \
+curl -X POST http://localhost:8888/api/camera/test/judge-from-folder \
   -H "Content-Type: application/json" \
   -d '{"zone_id": 0, "image_folder": "/data/snapshots/260126143025"}'
 
@@ -251,11 +251,11 @@ python scripts/test_camera_only.py --zone 0
 ### Node.js
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
-| PORT | 8889 | 서버 포트 |
+| PORT | 8888 | 서버 포트 |
 | IO_BOARD_URL | http://localhost:8000 | IO Board URL |
 | CAMERA_DRIVER_URL | http://localhost:8003 | Camera URL |
 | PRODUCT_JUDGE_URL | http://localhost:8002 | Model URL |
-| NODEJS_URL | http://localhost:8889 | 자체 URL |
+| NODEJS_URL | http://localhost:8888 | 자체 URL |
 
 ### MQTT
 | 변수 | 기본값 | 설명 |
@@ -490,7 +490,7 @@ POST /api/recording/stop         # 녹화 중지
 POST /api/recording/snapshot     # 녹화 중 스냅샷
 ```
 
-### Node.js (8889)
+### Node.js (8888)
 ```
 GET  /health                     # 헬스 체크
 GET  /api/dashboard/status       # 통합 상태 (모든 서비스)
@@ -622,11 +622,11 @@ curl http://localhost:8000/health      # IO Board
 curl http://localhost:8002/api/health  # Model
 curl http://localhost:8003/api/health  # Camera
 curl http://localhost:8006/health      # MQTT
-curl http://localhost:8889/health      # Node.js
+curl http://localhost:8888/health      # Node.js
 curl http://localhost:5000/status      # Card Terminal
 
 # 통합 상태 (Node.js)
-curl http://localhost:8889/api/dashboard/status
+curl http://localhost:8888/api/dashboard/status
 ```
 
 ## Card Terminal 테스트

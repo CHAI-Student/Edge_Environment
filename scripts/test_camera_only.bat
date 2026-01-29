@@ -14,8 +14,8 @@ echo Testing Zone %ZONE% with camera only...
 echo.
 
 REM Node.js 서버를 통한 테스트
-echo [1] Testing via Node.js server (localhost:8889)
-curl -s -X POST http://localhost:8889/api/camera/test/snapshot-and-judge ^
+echo [1] Testing via Node.js server (localhost:8888)
+curl -s -X POST http://localhost:8888/api/camera/test/snapshot-and-judge ^
     -H "Content-Type: application/json" ^
     -d "{\"zone_id\": %ZONE%, \"include_top\": true}" | python -m json.tool
 

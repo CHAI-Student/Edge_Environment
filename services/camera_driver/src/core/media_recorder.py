@@ -141,6 +141,7 @@ class MediaRecorder:
         self,
         cameras: List[int],
         session_id: Optional[str] = None,
+        use_base_path_directly: bool = False,
     ) -> str:
         """
         녹화 세션 생성
@@ -148,15 +149,26 @@ class MediaRecorder:
         Args:
             cameras: 녹화할 카메라 ID 목록 (0=Top, 1-5=Zone)
             session_id: 세션 ID (없으면 자동 생성)
+            use_base_path_directly: True면 config.base_path를 직접 세션 경로로 사용
+                                    (Node.js가 전체 경로를 지정한 경우)
 
         Returns:
             세션 ID (예: "20251106_141029", KST 기준)
         """
         if session_id is None:
-            session_id = datetime.now(KST).strftime("%Y%m%d_%H%M%S")
+            if use_base_path_directly:
+                # base_path에서 세션 ID 추출 (마지막 폴더 이름)
+                session_id = Path(self.config.base_path).name
+            else:
+                session_id = datetime.now(KST).strftime("%Y%m%d_%H%M%S")
 
         # 기본 경로 생성
-        base_path = Path(self.config.base_path) / session_id
+        if use_base_path_directly:
+            # Node.js가 전체 경로를 지정한 경우: 그대로 사용
+            base_path = Path(self.config.base_path)
+        else:
+            # 기본 동작: base_path + session_id
+            base_path = Path(self.config.base_path) / session_id
         images_path = base_path / "images"
         videos_path = base_path / "videos"
 

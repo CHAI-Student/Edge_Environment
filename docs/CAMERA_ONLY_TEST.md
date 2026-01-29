@@ -12,7 +12,7 @@
 |--------|------|------|------|
 | Camera Driver | 8003 | O | 카메라 스냅샷/녹화 |
 | Model Service | 8002 | O | AI 상품 판단 |
-| Node.js Server | 8889 | O | 오케스트레이터 |
+| Node.js Server | 8888 | O | 오케스트레이터 |
 | IO Board | 8000 | X | 불필요 (카메라 전용 모드) |
 
 ## 빠른 시작
@@ -51,7 +51,7 @@ npm run start:server
 ### 서비스 상태 확인
 
 ```bash
-curl http://localhost:8889/api/camera/test/status
+curl http://localhost:8888/api/camera/test/status
 ```
 
 응답 예시:
@@ -71,12 +71,12 @@ curl http://localhost:8889/api/camera/test/status
 
 ```bash
 # Zone 0 카메라 테스트 (스냅샷)
-curl -X POST http://localhost:8889/api/camera/test/snapshot-and-judge \
+curl -X POST http://localhost:8888/api/camera/test/snapshot-and-judge \
   -H "Content-Type: application/json" \
   -d '{"zone_id": 0, "include_top": true}'
 
 # Zone 0 카메라 테스트 (녹화 3초)
-curl -X POST http://localhost:8889/api/camera/test/record-and-judge \
+curl -X POST http://localhost:8888/api/camera/test/record-and-judge \
   -H "Content-Type: application/json" \
   -d '{"zone_id": 0, "include_top": true, "duration_ms": 3000, "fps": 30, "top_k": 5}'
 ```
@@ -320,7 +320,7 @@ pm2 logs model --lines 50
 
 ```bash
 # 헬스 체크
-curl http://localhost:8889/health
+curl http://localhost:8888/health
 
 # PM2 로그 확인
 pm2 logs orchestrator --lines 50

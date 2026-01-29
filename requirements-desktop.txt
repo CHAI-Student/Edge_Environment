@@ -1,0 +1,53 @@
+# AI Smart Vending Machine - Desktop/Development Dependencies
+#
+# For development on non-Jetson systems (Windows, Linux x86, macOS)
+# This includes torch CPU version - for CUDA, install torch separately
+#
+# Setup Instructions:
+# 1. Create standard venv:
+#    python3 -m venv .venv
+#
+# 2. Activate venv:
+#    source .venv/bin/activate  # Linux/macOS
+#    .venv\Scripts\activate     # Windows
+#
+# 3. Install dependencies:
+#    pip install -r requirements-desktop.txt
+#
+# For CUDA support on desktop, install torch separately:
+#    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# Web Framework
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# HTTP Clients
+httpx>=0.24.0
+aiohttp>=3.8.0
+httpx-sse>=0.3.0
+
+# Image Processing
+pillow>=10.0.0
+numpy>=1.24.0,<2.0.0
+opencv-python-headless>=4.8.0,<4.11.0
+
+# Serial Communication
+pyserial>=3.5
+pyserial-asyncio>=0.6
+
+# Data Parsing
+construct>=2.10.70
+pyyaml>=6.0.0
+
+# File Upload
+python-multipart>=0.0.6
+
+# AI/ML (CPU version - for CUDA, install torch separately before this)
+ultralytics>=8.0.0
+torch>=2.0.0
+torchvision>=0.15.0
+
+# MQTT
+aiomqtt>=2.0.0

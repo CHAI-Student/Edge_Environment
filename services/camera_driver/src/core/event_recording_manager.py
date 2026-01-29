@@ -80,7 +80,7 @@ class EventRecordingManager:
         post_buffer_seconds: float = 2.5,
         save_images: bool = True,
         save_videos: bool = True,
-        nodejs_callback_url: str = "http://localhost:8889",
+        nodejs_callback_url: str = "http://localhost:8888",
         media_base_path: Optional[str] = None,
     ):
         """
@@ -104,10 +104,11 @@ class EventRecordingManager:
 
         # 미디어 저장 경로 설정
         if media_base_path:
-            self._media_base_path = Path(media_base_path)
+            # Resolve to absolute path to avoid relative-path surprises
+            self._media_base_path = Path(media_base_path).resolve()
         else:
             # 기본: Edge_Environment/
-            self._media_base_path = Path(__file__).parent.parent.parent.parent
+            self._media_base_path = Path(__file__).parent.parent.parent.parent.resolve()
 
         # 대기 중인 녹화
         self._pending_recordings: Dict[int, PendingRecording] = {}
@@ -366,7 +367,7 @@ class EventRecordingManager:
         side_cam_id = zone_id + 1
         camera_ids = [top_cam_id, side_cam_id]
 
-        logger.info(f"Zone {zone_id}: Timed capture started - cameras={camera_ids}, duration={self._timed_capture_duration}s")
+        logger.info(f"Zone {zone_id}: Timed capture started - cameras={camera_ids}, duration={self._timed_capture_duration}s, session_path={session_path}")
 
         try:
             import cv2
@@ -389,6 +390,14 @@ class EventRecordingManager:
                     fps = side_camera.config.fps if hasattr(side_camera, 'config') else 30
                     side_video_writer = cv2.VideoWriter(str(side_video_path), fourcc, fps, (width, height))
 
+            # Log cameras availability for debugging
+            for cam_id in camera_ids:
+                cam = self._camera_manager.get_camera(cam_id)
+                if cam is None:
+                    logger.warning(f"Zone {zone_id}: Camera {cam_id} not found (will skip frames)")
+                else:
+                    logger.debug(f"Zone {zone_id}: Camera {cam_id} ready, buffer_size={getattr(cam, 'buffer_size', 'n/a')}")
+
             # 프레임 카운터
             frame_counts = {cam_id: 0 for cam_id in camera_ids}
 
@@ -401,6 +410,7 @@ class EventRecordingManager:
 
                     frame = camera.get_frame()
                     if frame is None:
+                        logger.debug(f"Zone {zone_id}: Camera {cam_id} returned no frame at capture loop")
                         continue
 
                     # 이미지 저장

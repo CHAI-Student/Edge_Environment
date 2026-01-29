@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10,<3.12"
 license = { text = "MIT" }
 
+# Core dependencies (torch, numpy, opencv are provided by system on Jetson)
 dependencies = [
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.23.0",
@@ -18,8 +19,6 @@ dependencies = [
     "httpx>=0.24.0",
     "aiohttp>=3.8.0",
     "httpx-sse>=0.3.0",
-    "numpy>=1.24.0",
-    "opencv-python-headless>=4.8.0",
     "pillow>=10.0.0",
     "pyserial>=3.5",
     "pyserial-asyncio>=0.6",
@@ -29,10 +28,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Jetson Orin Nano: torch/torchvision/numpy are pre-installed system packages
+# Use: python3 -m venv --system-site-packages .venv
 ai = [
+    "ultralytics>=8.0.0",
+    # torch and torchvision should come from system on Jetson (CUDA support)
+    # On non-Jetson systems, install manually: pip install torch torchvision
+]
+# For non-Jetson development (CPU-only or x86 CUDA)
+ai-desktop = [
     "ultralytics>=8.0.0",
     "torch>=2.0.0",
     "torchvision>=0.15.0",
+    "numpy>=1.24.0,<2.0.0",
+    "opencv-python-headless>=4.8.0,<4.11.0",
 ]
 mqtt = [
     "aiomqtt>=2.0.0",
@@ -55,7 +64,9 @@ where = ["."]
 include = ["services*"]
 
 [tool.uv]
-python = "3.11"
+python = "3.10"
+# Jetson uses system packages for torch/numpy/opencv
+system-packages = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

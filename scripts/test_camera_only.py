@@ -17,7 +17,7 @@ Camera-Only Testing Script
 필요 서비스:
     - Camera Driver (8003)
     - Model Service (8002)
-    - Node.js Server (8889) - nodejs 모드 사용 시
+    - Node.js Server (8888) - nodejs 모드 사용 시
 """
 
 import argparse
@@ -33,7 +33,7 @@ def test_via_nodejs(zone_id: int, include_top: bool = True):
     print(f"Zone: {zone_id}, Include Top: {include_top}")
     print("-" * 50)
 
-    url = "http://localhost:8889/api/camera/test/snapshot-and-judge"
+    url = "http://localhost:8888/api/camera/test/snapshot-and-judge"
     payload = {
         "zone_id": zone_id,
         "include_top": include_top
@@ -81,7 +81,7 @@ def test_via_nodejs(zone_id: int, include_top: bool = True):
         return result
 
     except requests.exceptions.ConnectionError:
-        print(f"\n[ERROR] Cannot connect to Node.js server at localhost:8889")
+        print(f"\n[ERROR] Cannot connect to Node.js server at localhost:8888")
         print("Make sure the Node.js server is running: npm run start")
         return None
     except Exception as e:
@@ -147,7 +147,7 @@ def check_services():
     services = {
         "Camera Driver": "http://localhost:8003/api/health",
         "Model Service": "http://localhost:8002/api/health",
-        "Node.js Server": "http://localhost:8889/health"
+        "Node.js Server": "http://localhost:8888/health"
     }
 
     all_healthy = True

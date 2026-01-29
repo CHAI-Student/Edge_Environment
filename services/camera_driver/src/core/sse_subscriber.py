@@ -181,6 +181,7 @@ class IOBoardSSESubscriber:
             except asyncio.CancelledError:
                 break
             except Exception as e:
+                print(f"[SSE_LOOP] Subscription loop error: {e}", flush=True)
                 logger.error(f"SSE subscription error: {e}")
 
             if not self._running:
@@ -199,6 +200,7 @@ class IOBoardSSESubscriber:
                 self._reconnect_attempts = 0
                 delay = self._max_reconnect_delay
 
+            print(f"[SSE_LOOP] Reconnecting in {delay:.1f}s (attempt {self._reconnect_attempts})", flush=True)
             logger.info(f"Reconnecting in {delay:.1f}s (attempt {self._reconnect_attempts})")
             await asyncio.sleep(delay)
 
@@ -212,15 +214,19 @@ class IOBoardSSESubscriber:
             self._session = aiohttp.ClientSession()
             session_created_here = True
 
+        print(f"[SSE_CONNECT] Attempting to connect to {sse_url}", flush=True)
         logger.info(f"Connecting to SSE: {sse_url}")
 
         try:
             async with self._session.get(sse_url) as response:
                 if response.status != 200:
-                    raise ConnectionError(f"SSE connection failed: HTTP {response.status}")
+                    error_msg = f"SSE connection failed: HTTP {response.status}"
+                    print(f"[SSE_CONNECT] ERROR: {error_msg}", flush=True)
+                    raise ConnectionError(error_msg)
 
                 self._connected = True
                 self._reconnect_attempts = 0  # 연결 성공 시 리셋
+                print(f"[SSE_CONNECT] Successfully connected, listening for events...", flush=True)
                 logger.info("SSE connected successfully")
 
                 # SSE 이벤트 파싱
@@ -248,6 +254,15 @@ class IOBoardSSESubscriber:
                     logger.debug("Processing incomplete event at stream end")
                     await self._process_event(event_type, event_data)
 
+        except asyncio.CancelledError:
+            print(f"[SSE_CONNECT] Subscription cancelled", flush=True)
+            logger.info("SSE subscription cancelled")
+            raise
+        except Exception as e:
+            self._connected = False
+            print(f"[SSE_CONNECT] ERROR: {type(e).__name__}: {e}", flush=True)
+            logger.error(f"SSE subscription error: {e}")
+            # 재연결은 _subscribe_loop()에서 자동으로 처리됨
         finally:
             self._connected = False
             # 세션 정리 조건 개선:
@@ -324,48 +339,102 @@ class IOBoardSSESubscriber:
                     logger.error(f"Door change callback error: {e}")
 
     async def _handle_loadcell_change(self, data: Dict[str, Any]):
-        """loadcell.change 이벤트 처리"""
-        # Zone ID 결정
-        zone_id = data.get("zone_id")
-        channels = data.get("channels", [])
+        """
+        loadcell.change 이벤트 처리
 
-        if zone_id is None and channels:
-            # 채널에서 Zone 추론
-            zone_id = self._zone_mapping.get(channels[0], 0)
+        SSE 이벤트 형식:
+        {
+            "timestamp": "2026-01-29T15:24:23.406406Z",
+            "changed_indices": [0, 9],
+            "old_values": [-13.0, -1.0],
+            "new_values": [13.0, 1.0],
+            "deltas": [26.0, 2.0],
+            "threshold": 0.0,
+            "threshold_scope": "filtered"
+        }
+        """
+        # changed_indices에서 채널 정보 추출
+        changed_indices = data.get("changed_indices", [])
+        if not changed_indices:
+            logger.warning("No changed_indices in loadcell event, skipping")
+            return
 
-        if zone_id is None:
-            zone_id = 0
+        # 각 변화된 채널에 대해 Zone 결정 및 이벤트 생성
+        # Zone별로 그룹화 (여러 채널이 같은 Zone에 속할 수 있음)
+        zone_events: Dict[int, Dict[str, Any]] = {}
 
-        # 이벤트 객체 생성
-        event = WeightChangeEvent(
-            zone_id=zone_id,
-            channels=channels,
-            delta=data.get("delta", 0),
-            current=data.get("current", []),
-            previous=data.get("previous", []),
-            timestamp=data.get("timestamp", ""),
-            raw_data=data,
-        )
+        old_values = data.get("old_values", [])
+        new_values = data.get("new_values", [])
+        deltas = data.get("deltas", [])
+        timestamp = data.get("timestamp", "")
 
-        logger.info(f"Weight change detected: Zone {zone_id}, delta={event.delta}g")
+        for idx, channel in enumerate(changed_indices):
+            # 채널에서 Zone ID 결정
+            zone_id = self._zone_mapping.get(channel)
+            if zone_id is None:
+                logger.warning(f"Channel {channel} not mapped to any zone, skipping")
+                continue
 
-        # 콜백 호출
-        if self._on_weight_change:
-            try:
-                result = self._on_weight_change(event)
-                # 코루틴인 경우 await (별도 try-except로 비동기 오류 구분)
-                if asyncio.iscoroutine(result):
-                    try:
-                        await result
-                    except asyncio.CancelledError:
-                        logger.debug(f"Weight change callback cancelled for zone {zone_id}")
-                        raise  # CancelledError는 상위로 전파
-                    except Exception as async_error:
-                        logger.error(f"Weight change async callback error: {async_error}")
-            except asyncio.CancelledError:
-                raise  # CancelledError는 전파
-            except Exception as e:
-                logger.error(f"Weight change callback error: {e}")
+            # Zone별 데이터 누적
+            if zone_id not in zone_events:
+                zone_events[zone_id] = {
+                    "channels": [],
+                    "old_values": [],
+                    "new_values": [],
+                    "deltas": [],
+                }
+
+            zone_events[zone_id]["channels"].append(channel)
+            if idx < len(old_values):
+                zone_events[zone_id]["old_values"].append(old_values[idx])
+            if idx < len(new_values):
+                zone_events[zone_id]["new_values"].append(new_values[idx])
+            if idx < len(deltas):
+                zone_events[zone_id]["deltas"].append(deltas[idx])
+
+        # 각 Zone에 대해 이벤트 처리
+        for zone_id, zone_data in zone_events.items():
+            channels = zone_data["channels"]
+            zone_old_values = zone_data["old_values"]
+            zone_new_values = zone_data["new_values"]
+            zone_deltas = zone_data["deltas"]
+
+            # 총 무게 변화량 계산 (deltas 합산)
+            total_delta = sum(zone_deltas)
+
+            # 이벤트 객체 생성
+            event = WeightChangeEvent(
+                zone_id=zone_id,
+                channels=channels,
+                delta=total_delta,
+                current=zone_new_values,
+                previous=zone_old_values,
+                timestamp=timestamp,
+                raw_data=data,
+            )
+
+            logger.info(
+                f"Weight change detected: Zone {zone_id}, "
+                f"channels={channels}, delta={total_delta:.1f}g"
+            )
+
+            # 콜백 호출
+            if self._on_weight_change:
+                try:
+                    result = self._on_weight_change(event)
+                    # 코루틴인 경우 await (별도 try-except로 비동기 오류 구분)
+                    if asyncio.iscoroutine(result):
+                        try:
+                            await result
+                        except asyncio.CancelledError:
+                            logger.debug(f"Weight change callback cancelled for zone {zone_id}")
+                            raise  # CancelledError는 상위로 전파
+                        except Exception as async_error:
+                            logger.error(f"Weight change async callback error: {async_error}")
+                except asyncio.CancelledError:
+                    raise  # CancelledError는 전파
+                except Exception as e:
+                    logger.error(f"Weight change callback error: {e}")
 
     def get_status(self) -> Dict[str, Any]:
         """상태 조회"""

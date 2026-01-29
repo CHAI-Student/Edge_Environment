@@ -31,46 +31,66 @@ _event_recording_manager = None
 # ============================================================================
 
 
-def _init_event_driven_components():
+async def _init_event_driven_components():
     """Initialize event-driven components (SSE subscriber + Event recording manager)"""
     global _sse_subscriber, _event_recording_manager
 
     from core import IOBoardSSESubscriber, EventRecordingManager
     from api.routes import get_manager, init_sse_components
 
-    # Get camera manager and auto-initialize cameras
+    # Get camera manager
     manager = get_manager()
 
-    # Auto-initialize all cameras on startup
+    # Auto-initialize all cameras on startup (별도 스레드에서 실행하여 블로킹 방지)
     logger.info("Auto-initializing cameras...")
-    status = manager.initialize_all()
-    connected = sum(status.values())
-    total = len(status)
-    logger.info(f"Cameras initialized: {connected}/{total} connected")
+    try:
+        status = await asyncio.to_thread(manager.initialize_all)
+        connected = sum(status.values())
+        total = len(status)
+        logger.info(f"Cameras initialized: {connected}/{total} connected")
 
-    # Start streaming
-    manager.start_streaming()
-    logger.info("Camera streaming started")
+        # Start streaming (별도 스레드에서 실행)
+        await asyncio.to_thread(manager.start_streaming)
+        logger.info("Camera streaming started")
+    except Exception as e:
+        logger.error(f"Camera initialization failed: {e}", exc_info=True)
 
     # Create SSE subscriber
-    _sse_subscriber = IOBoardSSESubscriber(
-        io_board_url=settings.io_board_url,
-    )
+    logger.info(f"Creating IOBoardSSESubscriber with io_board_url={settings.io_board_url}")
+    try:
+        _sse_subscriber = IOBoardSSESubscriber(
+            io_board_url=settings.io_board_url,
+        )
+    except Exception as e:
+        logger.error(f"Failed to create IOBoardSSESubscriber: {e}", exc_info=True)
+        _sse_subscriber = None
 
     # Create event recording manager
-    _event_recording_manager = EventRecordingManager(
-        camera_manager=manager,
-        pre_buffer_seconds=settings.pre_buffer_seconds,
-        post_buffer_seconds=settings.post_buffer_seconds,
-        save_images=settings.save_images,
-        save_videos=settings.save_videos,
-        nodejs_callback_url=settings.nodejs_callback_url,
-        media_base_path=settings.media_base_path if settings.media_base_path else None,
-    )
+    logger.info("Creating EventRecordingManager")
+    try:
+        _event_recording_manager = EventRecordingManager(
+            camera_manager=manager,
+            pre_buffer_seconds=settings.pre_buffer_seconds,
+            post_buffer_seconds=settings.post_buffer_seconds,
+            save_images=settings.save_images,
+            save_videos=settings.save_videos,
+            nodejs_callback_url=settings.nodejs_callback_url,
+            media_base_path=settings.media_base_path if settings.media_base_path else None,
+        )
+    except Exception as e:
+        logger.error(f"Failed to create EventRecordingManager: {e}", exc_info=True)
+        _event_recording_manager = None
 
-    # Connect SSE events to recording manager
-    _sse_subscriber.set_on_weight_change(_event_recording_manager.on_weight_change)
-    _sse_subscriber.set_on_door_change(_event_recording_manager.on_door_change)
+    # Connect SSE events to recording manager (if both initialized)
+    if _sse_subscriber and _event_recording_manager:
+        _sse_subscriber.set_on_weight_change(_event_recording_manager.on_weight_change)
+        _sse_subscriber.set_on_door_change(_event_recording_manager.on_door_change)
+        logger.info("SSE subscriber callbacks linked to EventRecordingManager")
+        print("[INIT] SSE callbacks linked to EventRecordingManager", flush=True)
+    else:
+        error_msg = f"SSE subscriber or EventRecordingManager not initialized; _sse_subscriber={_sse_subscriber}, _event_recording_manager={_event_recording_manager}"
+        logger.warning(error_msg)
+        print(f"[INIT] CRITICAL WARNING: {error_msg}", flush=True)
 
     # Register with routes module
     init_sse_components(_sse_subscriber, _event_recording_manager)
@@ -83,8 +103,17 @@ async def _start_event_driven_services():
     global _sse_subscriber
 
     if _sse_subscriber:
-        await _sse_subscriber.start()
-        logger.info(f"SSE subscriber started: {settings.io_board_url}")
+        try:
+            await _sse_subscriber.start()
+            logger.info(f"SSE subscriber started: {settings.io_board_url}")
+            print(f"[SSE] SSE subscriber successfully started on {settings.io_board_url}", flush=True)
+        except Exception as e:
+            logger.error(f"Failed to start SSE subscriber: {e}", exc_info=True)
+            print(f"[SSE] ERROR: Failed to start SSE subscriber: {e}", flush=True)
+            raise
+    else:
+        logger.warning("SSE subscriber is None, cannot start")
+        print("[SSE] WARNING: SSE subscriber is None, cannot start", flush=True)
 
 
 async def _stop_event_driven_services():
@@ -111,13 +140,37 @@ def create_lifespan():
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """FastAPI lifespan handler"""
-        # Startup
-        _init_event_driven_components()
-        await _start_event_driven_services()
+        # Startup - 카메라 초기화를 백그라운드로 처리하여 서버가 먼저 시작되도록 함
+        async def init_cameras_background():
+            """백그라운드에서 카메라 초기화"""
+            try:
+                print("[STARTUP] Waiting for server to start...", flush=True)
+                await asyncio.sleep(0.5)  # 서버 시작 대기
+                print("[STARTUP] Initializing event-driven components...", flush=True)
+                await _init_event_driven_components()
+                print("[STARTUP] Starting event-driven services (SSE subscriber)...", flush=True)
+                await _start_event_driven_services()
+                print("[STARTUP] Event-driven services started successfully", flush=True)
+            except Exception as e:
+                logger.error(f"Failed to initialize cameras in background: {e}", exc_info=True)
+                print(f"[STARTUP] CRITICAL ERROR: {e}", flush=True)
+                import traceback
+                print(traceback.format_exc(), flush=True)
+
+        # 백그라운드 태스크로 카메라 초기화 시작
+        init_task = asyncio.create_task(init_cameras_background())
 
         yield
 
         # Shutdown
+        # 백그라운드 초기화가 아직 진행 중이면 취소
+        if not init_task.done():
+            init_task.cancel()
+            try:
+                await init_task
+            except asyncio.CancelledError:
+                pass
+
         await _stop_event_driven_services()
 
         # Cleanup camera manager

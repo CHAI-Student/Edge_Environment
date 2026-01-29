@@ -293,7 +293,19 @@ def _test_image_save(manager) -> dict:
 
 @router.get("/health")
 async def health_check() -> CameraHealthResponse:
-    """Health check endpoint (IO Board 형식 호환)."""
+    """Health check endpoint (빠른 응답을 위해 단순화)."""
+    # 저장 경로 쓰기 테스트만 수행 (블로킹 없음)
+    storage_ok = _test_storage_writable()
+
+    return CameraHealthResponse(
+        cameras="HEALTHY",  # 서버가 실행 중이면 HEALTHY
+        storage="HEALTHY" if storage_ok else "UNHEALTHY",
+    )
+
+
+@router.get("/health/detailed")
+async def health_check_detailed() -> CameraHealthResponse:
+    """Detailed health check (카메라 프레임 캡처 테스트 포함, 느릴 수 있음)."""
     manager = get_manager()
 
     # 1. 카메라 상태 확인 (기존 health_check() 메서드 활용)
@@ -550,40 +562,99 @@ class RecordingStartRequest(BaseModel):
     session_id: Optional[str] = None  # 세션 ID (없으면 자동 생성)
     top_only: bool = False  # Top 카메라만 녹화 (데드볼트 열림 시)
     duration: Optional[float] = None  # 촬영 시간 (초, None이면 수동 중지)
-    save_images: bool = False  # 이미지도 저장할지 여부
+    save_images: bool = True  # 이미지도 저장할지 여부
     camera_ids: Optional[list] = None  # 특정 카메라 ID 목록
 
 
 @router.post("/recording/start")
-async def start_recording(request: RecordingStartRequest) -> dict:
+async def start_recording(
+    request: RecordingStartRequest = None,
+    # Query parameters for Node.js compatibility
+    zone_id: Optional[int] = None,
+    include_top: bool = True,
+    record_video: bool = True,
+    base_path: Optional[str] = None,
+    session_id: Optional[str] = None,
+    top_only: bool = False,
+    duration: Optional[float] = None,
+    save_images: bool = True,
+    camera_ids: Optional[str] = None,  # comma-separated for query params
+) -> dict:
     """
     녹화 시작.
 
-    Args:
-        request: 녹화 요청 설정
-            - zone_id: Zone ID (0-4, None이면 전체)
-            - include_top: Top 카메라 포함 여부
-            - record_video: 영상 녹화 여부
-            - base_path: 저장 기본 경로
-            - session_id: 세션 ID (없으면 자동 생성)
-            - top_only: Top 카메라만 녹화 (데드볼트 열림 시)
-            - duration: 촬영 시간 (초, None이면 수동 중지)
-            - save_images: 이미지도 저장할지 여부
-            - camera_ids: 특정 카메라 ID 목록
+    Query parameters 또는 JSON body 모두 지원합니다.
+    Node.js는 query parameters로 보내므로 이를 우선 처리합니다.
+
+    Query Params (Node.js 형식):
+        - zone_id: Zone ID (0-4, None이면 전체)
+        - include_top: Top 카메라 포함 여부
+        - record_video: 영상 녹화 여부
+        - base_path: 저장 기본 경로 (Node.js가 지정하는 전체 경로)
+        - session_id: 세션 ID (없으면 자동 생성)
+        - top_only: Top 카메라만 녹화 (데드볼트 열림 시)
+
+    JSON Body (RecordingStartRequest):
+        위와 동일한 필드를 JSON으로 전달
 
     Returns:
         세션 ID 및 경로 정보
     """
     manager = get_manager()
 
-    if request.base_path:
-        manager.init_media_recorder(base_path=request.base_path)
+    # Query params가 우선, 없으면 JSON body 사용
+    effective_zone_id = zone_id
+    effective_include_top = include_top
+    effective_record_video = record_video
+    effective_base_path = base_path
+    effective_session_id = session_id
+    effective_top_only = top_only
+    effective_duration = duration
+    effective_save_images = save_images
+    effective_camera_ids = None
+
+    # Parse camera_ids from comma-separated string (query param)
+    if camera_ids:
+        try:
+            effective_camera_ids = [int(x.strip()) for x in camera_ids.split(",")]
+        except ValueError:
+            pass
+
+    # JSON body 값 사용 (query param이 기본값인 경우)
+    if request:
+        if zone_id is None:
+            effective_zone_id = request.zone_id
+        if include_top is True and request.include_top is False:
+            effective_include_top = request.include_top
+        if record_video is True and request.record_video is False:
+            effective_record_video = request.record_video
+        if base_path is None:
+            effective_base_path = request.base_path
+        if session_id is None:
+            effective_session_id = request.session_id
+        if top_only is False and request.top_only is True:
+            effective_top_only = request.top_only
+        if duration is None:
+            effective_duration = request.duration
+        if save_images is False and request.save_images is True:
+            effective_save_images = request.save_images
+        if effective_camera_ids is None:
+            effective_camera_ids = request.camera_ids
+
+    logger.info(f"Recording start - base_path: {effective_base_path}, zone_id: {effective_zone_id}, include_top: {effective_include_top}")
+
+    # base_path가 Node.js에서 지정한 전체 경로면 그대로 사용
+    # 예: /home/chai/Documents/Edge_Environment/20260129_234150
+    if effective_base_path:
+        # base_path가 세션 폴더까지 포함된 전체 경로인 경우
+        # 이미지는 base_path/images/cam{N}/ 에 저장
+        manager.init_media_recorder(base_path=effective_base_path)
     elif not manager._media_recorder:
         manager.init_media_recorder()
 
     # Top 카메라만 녹화 모드 (데드볼트 열림 시)
-    if request.top_only:
-        result = manager.start_top_video_only(session_id=request.session_id)
+    if effective_top_only:
+        result = manager.start_top_video_only(session_id=effective_session_id)
         return {
             "success": True,
             "mode": "top_only",
@@ -592,13 +663,13 @@ async def start_recording(request: RecordingStartRequest) -> dict:
         }
 
     # 시간 제한 촬영 모드 (무게 변화 시)
-    if request.duration is not None and request.camera_ids:
+    if effective_duration is not None and effective_camera_ids:
         result = manager.start_timed_capture(
-            session_id=request.session_id,
-            camera_ids=request.camera_ids,
-            duration=request.duration,
-            save_images=request.save_images,
-            save_side_video=request.record_video,
+            session_id=effective_session_id,
+            camera_ids=effective_camera_ids,
+            duration=effective_duration,
+            save_images=effective_save_images,
+            save_side_video=effective_record_video,
         )
         return {
             "success": True,
@@ -607,24 +678,61 @@ async def start_recording(request: RecordingStartRequest) -> dict:
             "timestamp": time.time(),
         }
 
-    # 일반 녹화 모드
-    session_id = manager.start_recording(
-        zone_id=request.zone_id,
-        include_top=request.include_top,
-        record_video=request.record_video,
+    # Node.js가 base_path를 지정한 경우: 연속 촬영 모드 (이미지 + 영상 동시 저장)
+    # 이렇게 해야 Model 서비스가 이미지를 사용할 수 있음
+    if effective_base_path:
+        # 카메라 목록 결정
+        camera_ids = []
+        if effective_include_top:
+            camera_ids.append(TOP_CAMERA_ID)  # 0 = Top camera
+        if effective_zone_id is not None:
+            camera_ids.append(effective_zone_id + 1)  # Zone 0 → cam_1
+
+        # 세션 ID는 base_path의 마지막 폴더 이름
+        from pathlib import Path
+        session_id_from_path = Path(effective_base_path).name
+
+        result = manager.start_continuous_capture(
+            session_id=session_id_from_path,
+            camera_ids=camera_ids,
+            interval=0.5,  # 0.5초 간격으로 이미지 캡처
+            include_video=effective_record_video,
+            use_base_path_directly=True,  # Node.js 경로 직접 사용
+        )
+
+        return {
+            "success": True,
+            "mode": "continuous",
+            "session_id": result.get("session_id"),
+            "zone_id": effective_zone_id,
+            "record_video": effective_record_video,
+            "base_path": effective_base_path,
+            "cameras": camera_ids,
+            "interval": result.get("interval"),
+            "paths": result.get("paths", {}),
+            "timestamp": time.time(),
+        }
+
+    # 일반 녹화 모드 (base_path 없을 때)
+    result_session_id = manager.start_recording(
+        zone_id=effective_zone_id,
+        include_top=effective_include_top,
+        record_video=effective_record_video,
+        use_base_path_directly=False,
     )
 
-    if not session_id:
+    if not result_session_id:
         raise HTTPException(status_code=500, detail="Failed to start recording")
 
-    paths = manager.get_recording_paths(session_id)
+    paths = manager.get_recording_paths(result_session_id)
 
     return {
         "success": True,
         "mode": "normal",
-        "session_id": session_id,
-        "zone_id": request.zone_id,
-        "record_video": request.record_video,
+        "session_id": result_session_id,
+        "zone_id": effective_zone_id,
+        "record_video": effective_record_video,
+        "base_path": effective_base_path,
         "paths": paths,
     }
 
@@ -661,6 +769,16 @@ async def stop_recording(request: RecordingStopRequest = None) -> dict:
         return {
             "success": True,
             "mode": "top_only",
+            "session_info": result,
+            "timestamp": time.time(),
+        }
+
+    # 연속 촬영 중지 (Node.js 모드)
+    if manager.is_continuous_capture_active:
+        result = manager.stop_continuous_capture()
+        return {
+            "success": True,
+            "mode": "continuous",
             "session_info": result,
             "timestamp": time.time(),
         }

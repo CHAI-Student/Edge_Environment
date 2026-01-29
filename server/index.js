@@ -187,7 +187,7 @@ app.get('/api/dashboard/status', async (req, res) => {
                 io_board: { healthy: ioBoardHealthy, port: 8000 },
                 camera_driver: { healthy: cameraHealthy, port: 8003 },
                 model: { healthy: modelHealthy, port: 8002 },
-                node_server: { healthy: true, port: process.env.PORT || 8889 },
+                node_server: { healthy: true, port: process.env.PORT || 8888 },
                 mongodb: { connected: mongoose.connection.readyState === 1 }
             },
             io_board_sse: ioBoardSSE.getStatus(),
@@ -259,7 +259,7 @@ if (process.env.NODE_ENV === "production") {
 // ============================================
 // 서버 시작
 // ============================================
-const port = process.env.PORT || 8889
+const port = process.env.PORT || 8888
 
 app.listen(port, () => {
     console.log(`[APP] Server Listening on ${port}`)

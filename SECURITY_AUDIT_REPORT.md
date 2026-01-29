@@ -93,7 +93,7 @@ app.use(cors())  // 옵션 없음 - 모든 origin 허용!
 **권장 조치:**
 ```javascript
 app.use(cors({
-    origin: ['http://localhost:8889', 'https://your-production-domain.com'],
+    origin: ['http://localhost:8888', 'https://your-production-domain.com'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key']
@@ -162,9 +162,9 @@ if (process.env.NODE_ENV !== 'production') {
 
 | 서비스 | 포트 | 영향받는 엔드포인트 |
 |--------|------|-------------------|
-| Node.js | 8889 | /api/door/deadbolt/unlock, /api/door/deadbolt/lock |
-| Node.js | 8889 | /api/camera/zone/*/activate |
-| Node.js | 8889 | /api/model/test |
+| Node.js | 8888 | /api/door/deadbolt/unlock, /api/door/deadbolt/lock |
+| Node.js | 8888 | /api/camera/zone/*/activate |
+| Node.js | 8888 | /api/model/test |
 | model | 8002 | /api/judge, /api/products, /api/stats |
 | io_board | 8001 | /sse, /loadcells, /deadbolt |
 | camera_driver | 8003 | /frame/*, /api/zone/*/snapshot |
@@ -641,7 +641,7 @@ app.use(cors())
 
 // 수정 후 (안전)
 app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:8889'],
+    origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:8888'],
     credentials: true
 }));
 ```
@@ -687,7 +687,7 @@ JWT_SECRET=your-jwt-secret-here-minimum-32-characters
 # =============================================================================
 # 🌐 CORS Configuration
 # =============================================================================
-ALLOWED_ORIGINS=http://localhost:8889,https://your-production-domain.com
+ALLOWED_ORIGINS=http://localhost:8888,https://your-production-domain.com
 
 # =============================================================================
 # 📦 Database (프로덕션 환경)
@@ -721,7 +721,7 @@ MQTT_PASSWORD=
 IO_BOARD_URL=http://localhost:8001
 CAMERA_DRIVER_URL=http://localhost:8003
 PRODUCT_JUDGE_URL=http://localhost:8002
-NODEJS_URL=http://localhost:8889
+NODEJS_URL=http://localhost:8888
 
 # =============================================================================
 # ⚙️ API Configuration

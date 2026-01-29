@@ -284,7 +284,7 @@ curl http://localhost:5000/status
 curl -N http://localhost:5000/sse
 ```
 
-### 5.5 Node.js 서버 (포트 8889)
+### 5.5 Node.js 서버 (포트 8888)
 
 ```bash
 cd Edge_Environment
@@ -292,10 +292,10 @@ npm run start:server   # 서버만 실행
 npm run dev            # 서버 + React 동시 실행
 
 # 헬스 체크
-curl http://localhost:8889/health
+curl http://localhost:8888/health
 
 # 통합 상태 조회
-curl http://localhost:8889/api/dashboard/status
+curl http://localhost:8888/api/dashboard/status
 ```
 
 ---
@@ -318,7 +318,7 @@ npm start
 curl http://localhost:8000/health      # io_board
 curl http://localhost:8002/api/health  # model
 curl http://localhost:8003/api/health  # camera_driver
-curl http://localhost:8889/health      # node.js
+curl http://localhost:8888/health      # node.js
 ```
 
 ### 6.2 Pytest 실행
@@ -441,7 +441,7 @@ POST /payment/token/approve        # 토큰 결제 승인
 POST /payment/samsung-pay/approve  # 삼성페이 승인
 ```
 
-### Node.js (8889)
+### Node.js (8888)
 ```
 GET  /health                  # 헬스 체크
 GET  /api/dashboard/status    # 통합 상태

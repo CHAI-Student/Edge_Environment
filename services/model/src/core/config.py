@@ -336,7 +336,7 @@ class Settings(BaseSettings):
 
     # Node.js Orchestrator settings
     nodejs_url: str = Field(
-        default="http://localhost:8889",
+        default="http://localhost:8888",
         description="Node.js orchestrator URL",
     )
     nodejs_judgment_endpoint: str = Field(

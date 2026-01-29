@@ -27,6 +27,9 @@ from core.config import (
     DEVICE_PHYSICAL_MAP,
     load_device_map,
     get_physical_device_index,
+    # Time utilities
+    get_kst_now,
+    generate_session_id,
 )
 
 __all__ = [
@@ -48,4 +51,6 @@ __all__ = [
     "DEVICE_PHYSICAL_MAP",
     "load_device_map",
     "get_physical_device_index",
+    "get_kst_now",
+    "generate_session_id",
 ]

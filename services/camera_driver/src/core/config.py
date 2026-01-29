@@ -352,7 +352,7 @@ class Settings(BaseSettings):
 
     # IO Board SSE 구독 설정 (Event-Driven Architecture)
     io_board_url: str = Field(default="http://localhost:8000", description="IO Board 서비스 URL")
-    nodejs_callback_url: str = Field(default="http://localhost:8889", description="Node.js 오케스트레이터 콜백 URL")
+    nodejs_callback_url: str = Field(default="http://localhost:8888", description="Node.js 오케스트레이터 콜백 URL")
 
     # 이벤트 기반 녹화 설정
     pre_buffer_seconds: float = Field(default=0.5, description="이벤트 발생 전 버퍼 시간 (초)")

@@ -7,7 +7,7 @@ DEPRECATED: 이 모듈은 더 이상 사용되지 않습니다.
 현재 아키텍처에서는 Node.js Orchestrator가 SSE를 구독하고
 Model 서비스를 stateless하게 호출합니다.
 
-테스트는 Node.js 대시보드(http://localhost:8889/dashboard.html)를 통해 수행하세요.
+테스트는 Node.js 대시보드(http://localhost:8888/dashboard.html)를 통해 수행하세요.
 """
 
 import asyncio

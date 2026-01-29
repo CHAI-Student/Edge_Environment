@@ -12,7 +12,7 @@ module.exports = function(app) {
     app.use(
         '/api',
         createProxyMiddleware({
-            target: 'http://localhost:8889',
+            target: 'http://localhost:8888',
             changeOrigin: true,
         })
     );
@@ -21,7 +21,7 @@ module.exports = function(app) {
     app.use(
         '/sse',
         createProxyMiddleware({
-            target: 'http://localhost:8889',
+            target: 'http://localhost:8888',
             changeOrigin: true,
             // Disable response buffering for SSE
             onProxyRes: (proxyRes, req, res) => {
@@ -36,7 +36,7 @@ module.exports = function(app) {
     app.use(
         '/health',
         createProxyMiddleware({
-            target: 'http://localhost:8889',
+            target: 'http://localhost:8888',
             changeOrigin: true,
         })
     );

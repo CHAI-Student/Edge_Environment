@@ -42,7 +42,7 @@ Edge_Environment/
 │   ├── camera_driver/     # 6대 카메라 관리 (포트 8003)
 │   ├── mqtt_client/       # MQTT CHAI IF01-04 (포트 8006)
 │   └── card_terminal/     # 결제 터미널 (포트 5000)
-├── server/                # Node.js 오케스트레이터 (포트 8889)
+├── server/                # Node.js 오케스트레이터 (포트 8888)
 │   ├── services/          # 핵심 서비스 모듈
 │   └── routes/            # API 라우트
 ├── client/                # React 대시보드 (포트 3000)
@@ -276,7 +276,7 @@ python -m pytest src/tests/ -v
   - `src/sse_client/` 폴더 삭제 (SSE 구독 → Node.js로 이전)
   - `src/api/node_client.py` 삭제 (결과 푸시 → 동기 응답)
 - **새로운 API 형식**: `weight_data` + `media_paths`
-- **Node.js 포트 변경**: 8888 → 8889
+- **Node.js 포트 변경**: 8888 → 8888
 - **Door Payment 모듈 추가**: `src/door_payment/`
 - **Advanced 엔진 모듈 추가**: `src/engine/advanced/`
   - `baseline_manager.py` - 베이스라인 드리프트 보정
@@ -339,7 +339,7 @@ pm2 start ecosystem.config.js
 
 | 서비스명 | 포트 | 설명 |
 |---------|------|------|
-| orchestrator | **8889** | Node.js 오케스트레이터 (SSE 구독 + 스냅샷 요청) ★ |
+| orchestrator | **8888** | Node.js 오케스트레이터 (SSE 구독 + 스냅샷 요청) ★ |
 | io-board | 8001 | IO Board SSE 스트림 (로드셀+데드볼트) |
 | model | 8002 | AI 상품 판단 (Stateless) |
 | camera-driver | 8003 | 6대 카메라 관리 + 스냅샷 저장 |
@@ -463,7 +463,7 @@ python -m src.tests.test_hardware_integration \
 curl http://localhost:8002/api/health    # Model
 curl http://localhost:8001/health        # IO Board
 curl http://localhost:8003/api/health    # Camera Driver
-curl http://localhost:8889/health        # Node.js Orchestrator
+curl http://localhost:8888/health        # Node.js Orchestrator
 curl http://localhost:8006/health        # MQTT Client
 ```
 

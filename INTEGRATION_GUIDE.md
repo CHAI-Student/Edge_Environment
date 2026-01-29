@@ -49,7 +49,7 @@
 │   └──────┬──────┘     └──────┬──────┘     └──────┬──────┘               │
 │          │                   │                   │                       │
 │   ┌──────┴───────────────────┴───────────────────┴──────────────────┐   │
-│   │              Node.js Orchestrator :8889 ★                        │   │
+│   │              Node.js Orchestrator :8888 ★                        │   │
 │   │                                                                  │   │
 │   │   ┌─────────────────────────────────────────────────────────┐   │   │
 │   │   │ IOBoardSSESubscriber                                     │   │   │
@@ -90,7 +90,7 @@
 
 | 서비스 | 포트 | 언어 | 역할 |
 |--------|------|------|------|
-| **orchestrator** | 8889 | Node.js | SSE 구독 + 세션 관리 + 판단 흐름 제어 ★ |
+| **orchestrator** | 8888 | Node.js | SSE 구독 + 세션 관리 + 판단 흐름 제어 ★ |
 | **client** | 3000 | React | 웹 대시보드 UI |
 | **io_board** | 8001 | Python | 로드셀 10채널 + 데드볼트 SSE 스트림 |
 | **model** | 8002 | Python | AI 상품 판단 (Stateless, Vision + Weight) |
@@ -107,7 +107,7 @@
 ```
 Edge_Environment/
 ├── server/                         # Node.js Orchestrator
-│   ├── index.js                    # Express 진입점 (포트 8889)
+│   ├── index.js                    # Express 진입점 (포트 8888)
 │   ├── config/
 │   │   ├── key.js                  # 환경 설정 라우터
 │   │   ├── dev.js                  # 개발 환경
@@ -1390,7 +1390,7 @@ npm start   # pm2 start ecosystem.config.js
 **서비스 목록 (ecosystem.config.js):**
 | 서비스 | 포트 | 설명 |
 |--------|------|------|
-| orchestrator | 8889 | Node.js 오케스트레이터 |
+| orchestrator | 8888 | Node.js 오케스트레이터 |
 | client | 3000 | React 대시보드 |
 | io-board | 8001 | 로드셀 + 데드볼트 |
 | model | 8002 | AI 상품 판단 |

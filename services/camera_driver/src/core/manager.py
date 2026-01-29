@@ -16,7 +16,7 @@ import logging
 import threading
 import time
 
-from config import (
+from core.config import (
     settings,
     ZONE_CAMERA_MAP,
     TOP_CAMERA_ID,
@@ -595,6 +595,7 @@ class CameraManager:
         cameras: Optional[List[int]] = None,
         include_top: bool = True,
         record_video: bool = True,
+        use_base_path_directly: bool = False,
     ) -> Optional[str]:
         """
         녹화 시작.
@@ -604,6 +605,8 @@ class CameraManager:
             cameras: 카메라 ID 목록 (직접 지정)
             include_top: Top 카메라 포함 여부
             record_video: 영상 녹화 여부
+            use_base_path_directly: True면 Node.js가 전체 경로를 지정한 경우
+                                    (base_path를 직접 세션 경로로 사용)
 
         Returns:
             세션 ID
@@ -611,7 +614,9 @@ class CameraManager:
         if not self._media_recorder:
             self.init_media_recorder()
 
-        if self._event_recorder and zone_id is not None:
+        # Node.js가 직접 경로를 지정한 경우 EventRecorder 우회
+        # (EventRecorder는 use_base_path_directly를 지원하지 않음)
+        if self._event_recorder and zone_id is not None and not use_base_path_directly:
             return self._event_recorder.start_event_recording(
                 zone_id=zone_id,
                 include_top=include_top,
@@ -628,7 +633,10 @@ class CameraManager:
             else:
                 cameras.extend(ZONE_CAMERA_IDS)
 
-        session_id = self._media_recorder.create_session(cameras)
+        session_id = self._media_recorder.create_session(
+            cameras,
+            use_base_path_directly=use_base_path_directly,
+        )
 
         if record_video:
             self._media_recorder.start_video_recording(session_id)
@@ -767,6 +775,7 @@ class CameraManager:
         camera_ids: Optional[List[int]] = None,
         interval: float = 0.5,
         include_video: bool = True,
+        use_base_path_directly: bool = False,
     ) -> Dict[str, Any]:
         """
         연속 촬영 시작.
@@ -778,6 +787,7 @@ class CameraManager:
             camera_ids: 촬영할 카메라 ID 목록 (기본: [0] = Top 카메라)
             interval: 촬영 간격 (초, 기본: 0.5초)
             include_video: 영상도 함께 녹화할지 여부
+            use_base_path_directly: True면 Node.js가 전체 경로를 지정한 경우
 
         Returns:
             {
@@ -810,8 +820,13 @@ class CameraManager:
         self._continuous_capture_session_id = session_id
         self._continuous_capture_interval = interval
 
-        # 세션 생성
-        self._media_recorder.create_session(camera_ids, session_id)
+        # 세션 생성 (Node.js 경로 사용 시 직접 사용)
+        # init_media_recorder에서 이미 base_path 설정됨
+        self._media_recorder.create_session(
+            camera_ids,
+            session_id,
+            use_base_path_directly=use_base_path_directly,
+        )
 
         # 영상 녹화도 시작
         if include_video:
