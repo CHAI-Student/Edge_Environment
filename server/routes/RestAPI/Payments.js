@@ -3,16 +3,13 @@ const axios = require("axios");
 const config = require("../../config/key");
 const express = require("express");
 const router = express.Router();
-const { CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI } = require('../Mqtt/HealthMqtt')
+const { CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI, CameraStatusAPI } = require('../Mqtt/HealthMqtt')
 const { ProductList } = require("./ProductList");
 const fs = require("fs");
 const path = require("path");
 const { callApiToControlDeadbolt } = require('../Mqtt/DeadboltApiService'); // [추가] 도어 제어 함수 임포트 가정
 const { EventSource } = require('eventsource');
-const { model } = require("mongoose");
-const { record } = require("zod");
 const { sendToPNT } = require("./PaymentStore");
-const { send } = require("process");
 
 const closedStates = ["LOCK", "LOCKED", "CLOSE", "CLOSED"];
 
@@ -35,35 +32,35 @@ function MakeCameraFolder({ localRoot } = {}) {
   return { folderName, folderPath };
 }
 
-async function requestTopCameraCapture({ action }) {
-  try {
-    let url;
-    if (action === 'ON') {
-      url = `${config.cameraApi}/api/zone/0/activate`; 
-      // 상단카메라 키는 함수여서 카메라 인덱스 0으로 고정
-    } else if (action === 'OFF') {
-      url = `${config.cameraApi}/api/zone/${zoneId}/deactivate`;
-    } else {
-      throw new Error("Invalid action. Use 'ON' or 'OFF'.");
-    }
+// async function requestTopCameraCapture({ action }) {
+//   try {
+//     let url;
+//     if (action === 'ON') {
+//       url = `${config.cameraApi}/api/zone/0/activate`; 
+//       // 상단카메라 키는 함수여서 카메라 인덱스 0으로 고정
+//     } else if (action === 'OFF') {
+//       url = `${config.cameraApi}/api/zone/${zoneId}/deactivate`;
+//     } else {
+//       throw new Error("Invalid action. Use 'ON' or 'OFF'.");
+//     }
 
-    // 2. 스냅샷 경로와 같이 요청 전송
-    const response = await axios.post(url);
+//     // 2. 스냅샷 경로와 같이 요청 전송
+//     const response = await axios.post(url);
 
-    if (response.status === 200) {
-      console.log(`Camera Zone 0 ${action} Success:`, response.data);
-      return true;
-    }
+//     if (response.status === 200) {
+//       console.log(`Camera Zone 0 ${action} Success:`, response.data);
+//       return true;
+//     }
 
-  } catch (error) {
-    if (error.response) {
-      console.error(`API Error (${action}):`, error.response.data);
-    } else {
-      console.error(`Request Error (${action}):`, error.message);
-    }
-    return false;
-  }
-}
+//   } catch (error) {
+//     if (error.response) {
+//       console.error(`API Error (${action}):`, error.response.data);
+//     } else {
+//       console.error(`Request Error (${action}):`, error.message);
+//     }
+//     return false;
+//   }
+// }
 
 async function requestTopCameraON({ include_top, record_video, folderPath }) {
   try {
@@ -76,19 +73,16 @@ async function requestTopCameraON({ include_top, record_video, folderPath }) {
         base_path: folderPath
       }
     });
-
     // 성공 시 응답 데이터 반환
     if (response.status === 200) {
         console.log("Recording Started with Path:", response.data);
         return response.data;
     }
-
   } catch (error) {
-    const errorContext = "requestTopCameraON"; 
     if (error.response) {
-      console.error(`API Error (${errorContext}):`, error.response.data);
+      console.error(`API Error (requestTopCameraON):`, error.response.data);
     } else {
-      console.error(`Request Error (${errorContext}):`, error.message);
+      console.error(`Request Error (requestTopCameraON):`, error.message);
     }
     return false;
   }
@@ -99,16 +93,9 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function requestCameraOFF() {
   try {
     const CameraStopApi =  `${config.cameraApi}/api/recording/stop`;
-    // 잠시 대기 후 정지 요청을 보냅니다. 카메라 API는 zone_id 파라미터를 요구할 수 있습니다.
     await delay(5000);
-    // const response = await axios.post(CameraStopApi, null, {
-    //   params: {
-    //     zone_id: 0
-    //   }
-    // });
     const response = await axios.post(CameraStopApi);
-    if (response && response.status === 200) {
-      // console.log("Recording Stopped. File Saved at:", response.data);
+    if (response && response.status === 200) {;
       return response.data; // 저장된 파일 경로 정보 반환 
     } else {
       console.error("Stop Recording Unexpected Response:", response && response.data);
@@ -208,7 +195,7 @@ function waitForDeadboltClose() {
 
 // --- 2. 프로세스 시작 및 상태 체크 ---
 async function startProcess(token, CardMethod) {
-    const CameraStatus = '09'
+    const CameraStatus = await CameraStatusAPI()
     const CardTerminalStatus = await CardTerminalStatusAPI()
     const DeadboltStatus = await DeadboltStatusAPI()
     const LoadcellStatus = await LoadcellStatusAPI()
@@ -291,29 +278,27 @@ async function cancelPayment(paymentResult, originalToken, amount, CardMethod) {
 
 // --- 3. 결제 및 제어 로직 ---
 async function Payments(token, CardMethod) {
-    const deviceIdx = config.deviceIdx;
     const divisionIdx = config.divisionIdx;
     
     // [3] 상품정보 조회
     const productData = await ProductList({
         division_idx: divisionIdx,
-        device_idx: deviceIdx
+        device_idx: null
     });
     console.log("[ProductList] Data Loading Complete:", productData);
 
     // [4] 카메라 폴더 생성
     const LOCAL_ROOT = path.resolve(process.cwd()); 
-    const { folderName, folderPath } = ensureCaptureFolder({ localRoot: LOCAL_ROOT });
+    const { folderName, folderPath } = MakeCameraFolder({ localRoot: LOCAL_ROOT });
 
-    //여기서부터 내일 테스트
     // [5] 문 열기 (OPEN)
     const openResult = await callApiToControlDeadbolt("OPEN");
     if (openResult !== "OPEN" && openResult !== 'UNLOCK') throw new Error(`Failed to open door. Status: ${openResult}`)
     console.log("로드셀 제어까지 완료")
 
     // await requestTopCameraCapture({ folderPath: folderPath, action: 'ON' });
-
-    const CameraSaveInfo = await requestTopCameraON({ 
+    // ------- 우진님 코드에 따라 변경 -------
+    await requestTopCameraON({ 
         zone_id: 0, 
         include_top: true, 
         record_video: true,   // [중요] 영상 녹화를 하려면 true여야 합니다 
@@ -321,7 +306,8 @@ async function Payments(token, CardMethod) {
     });
 
     try {
-      const LoadcellStartRes = await axios.post(`${config.ioboardApi}/recording/start`, {}); 
+      await axios.post(`${config.ioboardApi}/recording/start`, {}); 
+      console.log("녹화 시작 성공");
     } catch (error) {
       console.error("녹화 시작 실패:", error);
     }
@@ -335,7 +321,9 @@ async function Payments(token, CardMethod) {
         // 1. 문이 닫히고 로그 경로가 올 때까지 대기
         const closeEventData = await waitForDeadboltClose();
         try {
-          const LoadcellStopRes = await axios.post(`${config.ioboardApi}/recording/stop`, {}); 
+          await axios.post(`${config.ioboardApi}/recording/stop`, {}); 
+          await delay(5000);
+          console.log("녹화 종료 성공");
         } catch (error) {
           console.error("녹화 종료 실패:", error);
         }
@@ -347,6 +335,7 @@ async function Payments(token, CardMethod) {
         console.error("[Process Error] Door/Camera Sequence:", error);
         return; // 에러 시 중단
     }
+    // ------- 우진님 코드에 따라 변경 -------
 
     let LoadcellData = null
     try {
@@ -363,7 +352,7 @@ async function Payments(token, CardMethod) {
         } // 여기까지는 확인 완료 --> 0129
     try {
         console.log("[Model] Sending data for inference...");
-        
+        // req
         const inferencePayload = {
             ProductList     : productData,
             ImageFolder     : folderName,
@@ -372,6 +361,8 @@ async function Payments(token, CardMethod) {
 
         // 모델 서버 요청 (POST)
         const modelRes = await axios.post(`${config.modelApi}/api/judge/multi-zone`, inferencePayload);
+        // 모델이 추론 결과를 보낼때 까지 계속 10초 간격으로 post(만약 추론이 안 끝났으면 모델은 아직 안 끝났다는 response를 보내야 함.)
+        setInterval(() => {modelRes}, 10000);
         const inferenceResult = modelRes.data;
         console.log("[Model] Inference Result:", inferenceResult);
 
@@ -401,7 +392,7 @@ async function Payments(token, CardMethod) {
         // 결제 결과 처리
         let payTime = null
         if (paymentResponse && paymentResponse.status === 200) {
-            // console.log("[PAYMENT] Success:", paymentResponse.data);
+            console.log("[PAYMENT] Success:", paymentResponse.data);
             const currentDate = new Date();
             payTime = makeTimestampFolderName(currentDate);
             sendToPNT(

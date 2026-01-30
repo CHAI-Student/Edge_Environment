@@ -37,5 +37,7 @@ module.exports = {
     modelApi: "http://localhost:8002",
 
     // 임베딩 모델 버전
-    modelVersion: "v1.0.0",
+    get modelVersion() {
+        return process.env.MODEL_VERSION;
+    }
 }
