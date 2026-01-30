@@ -2,7 +2,7 @@
 const axios = require("axios");
 const config = require("../../config/key");
 
-const API_HOST = config.deadboltApi; // 기본값 설정
+const API_HOST = config.ioboardApi; // 기본값 설정
 const API_ENDPOINT = "/deadbolt"; // 상세 경로
 
 /**
@@ -18,10 +18,11 @@ async function callApiToControlDeadbolt(targetState) {
 
     // POST 요청 전송
     const response = await axios.post(DEADBOLT_API_URL, {
-      state: targetState 
+      action: targetState 
     }, {
       timeout: 5000 // 5초 타임아웃
     });
+    // console.log(response)
 
     // API 응답 확인
     const finalState = response.data.state;
