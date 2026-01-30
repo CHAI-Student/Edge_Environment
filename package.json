@@ -16,7 +16,11 @@
     "start:server:dev": "nodemon server/index.js",
     "start:frontend": "npm run start --prefix client",
     "dev": "concurrently \"npm run start:server:dev\" \"npm run start:frontend\"",
-    "test": "node server/test/MqttReboot.js"
+    "test": "node server/test/MqttReboot.js",
+    "client": "npm run start --prefix client",
+    "services": "pm2 start ecosystem.config.js --only camera-driver,model",
+    "services:stop": "pm2 stop camera-driver model",
+    "all": "pm2 start ecosystem.config.js --only camera-driver,model,client"
   },
   "repository": {
     "type": "git",
