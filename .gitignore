@@ -69,8 +69,9 @@ nul
 *.temp
 
 # =============================================================================
-# Archive / Deprecated (통합되어 더 이상 사용하지 않는 서비스)
+# Archive / Deprecated (다른 레포로 이관된 서비스)
 # =============================================================================
+_archive/
 services/_archive/
 services/deadbolt_driver/
 services/loadcell_driver/

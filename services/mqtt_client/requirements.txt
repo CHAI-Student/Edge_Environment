@@ -1,6 +1,0 @@
-# MQTT Client Service Dependencies
-fastapi>=0.100.0
-uvicorn>=0.22.0
-pydantic>=2.0
-pydantic-settings>=2.0
-aiomqtt>=2.0
