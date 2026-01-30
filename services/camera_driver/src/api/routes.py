@@ -700,6 +700,17 @@ async def start_recording(
         # base_path가 세션 폴더까지 포함된 전체 경로인 경우
         # 이미지는 base_path/images/cam{N}/ 에 저장
         manager.init_media_recorder(base_path=effective_base_path)
+
+        # EventRecordingManager의 base_path도 업데이트 (SSE 이벤트 시에도 같은 경로 사용)
+        event_mgr = get_event_recording_manager()
+        if event_mgr:
+            from pathlib import Path
+            # base_path의 부모 디렉토리를 media_base_path로 설정
+            # 예: /home/chai/.../20260130_123456 → /home/chai/.../
+            event_mgr._media_base_path = Path(effective_base_path).parent.resolve()
+            # 현재 세션 ID도 설정 (SSE 이벤트에서 이 세션에 저장하도록)
+            event_mgr._top_video_session_id = Path(effective_base_path).name
+            logger.info(f"EventRecordingManager base_path updated: {event_mgr._media_base_path}, session_id: {event_mgr._top_video_session_id}")
     elif not manager._media_recorder:
         manager.init_media_recorder()
 
