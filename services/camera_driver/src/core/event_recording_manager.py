@@ -705,11 +705,9 @@ class EventRecordingManager:
         media_paths: MediaPaths,
     ):
         """
-        Model 서비스에 판단 요청 후 Node.js에 결과 전달.
+        Model 서비스에 판단 요청.
 
-        플로우:
-        1. Model 서비스 (/api/judge)에 판단 요청
-        2. 판단 결과를 Node.js (/api/camera/judge-result)에 전달
+        Note: Node.js 알림은 제거됨. Node.js는 자체적으로 Model을 호출함.
 
         Args:
             zone_id: Zone ID
@@ -723,9 +721,7 @@ class EventRecordingManager:
                 self._http_session = aiohttp.ClientSession()
                 session_created_here = True
 
-            # =========================================================================
-            # 1. Model 서비스에 판단 요청
-            # =========================================================================
+            # Model 서비스에 판단 요청
             model_url = f"{self._model_service_url}/api/judge"
 
             judge_payload = {
@@ -739,7 +735,6 @@ class EventRecordingManager:
 
             logger.info(f"Requesting Model judge: zone={zone_id}, image_folder={judge_payload['media_paths']['image_folder']}")
 
-            judge_result = None
             try:
                 async with self._http_session.post(
                     model_url,
@@ -758,43 +753,9 @@ class EventRecordingManager:
                         error_text = await response.text()
                         logger.error(f"Model judge failed: HTTP {response.status}, {error_text}")
             except aiohttp.ClientError as e:
-                logger.error(f"Failed to call Model service: {e}")
+                logger.warning(f"Model service not available: {e}")
             except Exception as e:
                 logger.error(f"Unexpected error calling Model service: {e}")
-
-            # =========================================================================
-            # 2. Node.js에 결과 전달
-            # =========================================================================
-            nodejs_url = f"{self._nodejs_callback_url}/api/camera/judge-result"
-
-            result_payload = {
-                "zone_id": zone_id,
-                "session_id": media_paths.session_id,
-                "weight_data": weight_data,
-                "media_paths": {
-                    "base_path": media_paths.base_path,
-                    "images": media_paths.images,
-                    "videos": media_paths.videos,
-                },
-                "judge_result": judge_result,
-                "timestamp": time.time(),
-            }
-
-            try:
-                async with self._http_session.post(
-                    nodejs_url,
-                    json=result_payload,
-                    timeout=aiohttp.ClientTimeout(total=5),
-                ) as response:
-                    if response.status == 200:
-                        logger.info(f"Node.js notified with judge result: Zone {zone_id}")
-                    else:
-                        # 404는 예상 가능 (Node.js에 엔드포인트 없을 수 있음)
-                        logger.warning(f"Node.js notification failed: HTTP {response.status}")
-            except aiohttp.ClientError as e:
-                logger.warning(f"Failed to notify Node.js (non-critical): {e}")
-            except Exception as e:
-                logger.warning(f"Unexpected error notifying Node.js: {e}")
 
         except Exception as e:
             logger.error(f"Error in _notify_nodejs: {e}")
@@ -849,7 +810,7 @@ class EventRecordingManager:
             "post_buffer_seconds": self._post_buffer_seconds,
             "save_images": self._save_images,
             "save_videos": self._save_videos,
-            "nodejs_callback_url": self._nodejs_callback_url,
+            "model_service_url": self._model_service_url,
             "media_base_path": str(self._media_base_path),
             "top_video_recording": self._top_video_session_id is not None,
             "top_video_session_id": self._top_video_session_id,
