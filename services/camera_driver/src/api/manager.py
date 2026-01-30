@@ -75,6 +75,7 @@ async def _init_event_driven_components():
             save_images=settings.save_images,
             save_videos=settings.save_videos,
             nodejs_callback_url=settings.nodejs_callback_url,
+            model_service_url=settings.model_service_url,
             media_base_path=settings.media_base_path if settings.media_base_path else None,
         )
     except Exception as e:
@@ -146,8 +147,9 @@ def create_lifespan():
         async def init_cameras_background():
             """백그라운드에서 카메라 초기화"""
             try:
-                print("[STARTUP] Waiting for server to start...", flush=True)
-                await asyncio.sleep(0.5)  # 서버 시작 대기
+                print("[STARTUP] Initializing cameras immediately...", flush=True)
+                # 서버 시작과 동시에 카메라 초기화 시작 (대기 시간 최소화)
+                await asyncio.sleep(0.1)  # 최소 대기
                 print("[STARTUP] Initializing event-driven components...", flush=True)
                 await _init_event_driven_components()
                 print("[STARTUP] Starting event-driven services (SSE subscriber)...", flush=True)

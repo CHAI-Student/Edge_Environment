@@ -13,8 +13,14 @@ class HealthResponse(BaseModel):
 
 class CameraHealthResponse(BaseModel):
     """Camera health response with storage status."""
-    cameras: str  # "HEALTHY" or "UNHEALTHY"
+    cameras: str  # "HEALTHY", "UNHEALTHY", or "INITIALIZING"
     storage: str  # "HEALTHY" or "UNHEALTHY"
+    # Optional detailed status fields
+    cameras_initialized: Optional[bool] = None
+    cameras_connected: Optional[int] = None
+    event_ready: Optional[bool] = None
+    image_save: Optional[str] = None
+    image_save_details: Optional[dict] = None
 
 
 class CameraStatus(BaseModel):

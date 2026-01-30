@@ -81,6 +81,7 @@ class EventRecordingManager:
         save_images: bool = True,
         save_videos: bool = True,
         nodejs_callback_url: str = "http://localhost:8888",
+        model_service_url: str = "http://localhost:8002",
         media_base_path: Optional[str] = None,
     ):
         """
@@ -93,6 +94,7 @@ class EventRecordingManager:
             save_images: 이미지 저장 여부
             save_videos: 영상 저장 여부
             nodejs_callback_url: Node.js 콜백 URL
+            model_service_url: Model 서비스 URL (상품 판단)
             media_base_path: 미디어 저장 기본 경로
         """
         self._camera_manager = camera_manager
@@ -101,6 +103,7 @@ class EventRecordingManager:
         self._save_images = save_images
         self._save_videos = save_videos
         self._nodejs_callback_url = nodejs_callback_url
+        self._model_service_url = model_service_url
 
         # 미디어 저장 경로 설정
         if media_base_path:
@@ -372,6 +375,19 @@ class EventRecordingManager:
         try:
             import cv2
 
+            # 카메라 초기화 완료 대기 (최대 5초)
+            wait_time = 0.0
+            max_wait = 5.0
+            while not self._camera_manager.is_initialized and wait_time < max_wait:
+                if wait_time == 0:
+                    logger.info(f"Zone {zone_id}: Waiting for camera initialization...")
+                await asyncio.sleep(0.3)
+                wait_time += 0.3
+
+            if not self._camera_manager.is_initialized:
+                logger.error(f"Zone {zone_id}: Camera manager not initialized after {max_wait}s, aborting capture")
+                return
+
             # 카메라별 이미지 폴더 생성
             for cam_id in camera_ids:
                 (images_path / f"cam_{cam_id}").mkdir(exist_ok=True)
@@ -391,12 +407,18 @@ class EventRecordingManager:
                     side_video_writer = cv2.VideoWriter(str(side_video_path), fourcc, fps, (width, height))
 
             # Log cameras availability for debugging
+            cameras_found = 0
             for cam_id in camera_ids:
                 cam = self._camera_manager.get_camera(cam_id)
                 if cam is None:
-                    logger.warning(f"Zone {zone_id}: Camera {cam_id} not found (will skip frames)")
+                    logger.warning(f"Zone {zone_id}: Camera {cam_id} not found in manager (available: {list(self._camera_manager._cameras.keys())})")
                 else:
-                    logger.debug(f"Zone {zone_id}: Camera {cam_id} ready, buffer_size={getattr(cam, 'buffer_size', 'n/a')}")
+                    cameras_found += 1
+                    logger.debug(f"Zone {zone_id}: Camera {cam_id} ready, connected={cam.is_connected}")
+
+            if cameras_found == 0:
+                logger.error(f"Zone {zone_id}: No cameras available, aborting timed capture")
+                return
 
             # 프레임 카운터
             frame_counts = {cam_id: 0 for cam_id in camera_ids}
@@ -683,27 +705,17 @@ class EventRecordingManager:
         media_paths: MediaPaths,
     ):
         """
-        Node.js 오케스트레이터에 알림
+        Model 서비스에 판단 요청 후 Node.js에 결과 전달.
+
+        플로우:
+        1. Model 서비스 (/api/judge)에 판단 요청
+        2. 판단 결과를 Node.js (/api/camera/judge-result)에 전달
 
         Args:
             zone_id: Zone ID
             weight_data: 무게 데이터
             media_paths: 미디어 파일 경로
         """
-        callback_url = f"{self._nodejs_callback_url}/api/camera/media-ready"
-
-        payload = {
-            "zone_id": zone_id,
-            "session_id": media_paths.session_id,
-            "weight_data": weight_data,
-            "media_paths": {
-                "base_path": media_paths.base_path,
-                "images": media_paths.images,
-                "videos": media_paths.videos,
-            },
-            "timestamp": time.time(),
-        }
-
         session_created_here = False
         try:
             # 세션 가져오기 또는 생성
@@ -711,18 +723,81 @@ class EventRecordingManager:
                 self._http_session = aiohttp.ClientSession()
                 session_created_here = True
 
-            async with self._http_session.post(
-                callback_url,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=5),
-            ) as response:
-                if response.status == 200:
-                    logger.info(f"Node.js notified: Zone {zone_id}, session={media_paths.session_id}")
-                else:
-                    logger.warning(f"Node.js notification failed: HTTP {response.status}")
+            # =========================================================================
+            # 1. Model 서비스에 판단 요청
+            # =========================================================================
+            model_url = f"{self._model_service_url}/api/judge"
 
-        except aiohttp.ClientError as e:
-            logger.error(f"Failed to notify Node.js: {e}")
+            judge_payload = {
+                "zone_id": zone_id,
+                "weight_data": weight_data,
+                "media_paths": {
+                    "image_folder": str(Path(media_paths.base_path) / "images"),
+                },
+                "timestamp": time.time(),
+            }
+
+            logger.info(f"Requesting Model judge: zone={zone_id}, image_folder={judge_payload['media_paths']['image_folder']}")
+
+            judge_result = None
+            try:
+                async with self._http_session.post(
+                    model_url,
+                    json=judge_payload,
+                    timeout=aiohttp.ClientTimeout(total=30),  # Vision 추론은 시간이 걸릴 수 있음
+                ) as response:
+                    if response.status == 200:
+                        judge_result = await response.json()
+                        logger.info(
+                            f"Model judge result: zone={zone_id}, "
+                            f"success={judge_result.get('success')}, "
+                            f"products={len(judge_result.get('products', []))}, "
+                            f"totalPrice={judge_result.get('totalPrice', 0)}"
+                        )
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Model judge failed: HTTP {response.status}, {error_text}")
+            except aiohttp.ClientError as e:
+                logger.error(f"Failed to call Model service: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error calling Model service: {e}")
+
+            # =========================================================================
+            # 2. Node.js에 결과 전달
+            # =========================================================================
+            nodejs_url = f"{self._nodejs_callback_url}/api/camera/judge-result"
+
+            result_payload = {
+                "zone_id": zone_id,
+                "session_id": media_paths.session_id,
+                "weight_data": weight_data,
+                "media_paths": {
+                    "base_path": media_paths.base_path,
+                    "images": media_paths.images,
+                    "videos": media_paths.videos,
+                },
+                "judge_result": judge_result,
+                "timestamp": time.time(),
+            }
+
+            try:
+                async with self._http_session.post(
+                    nodejs_url,
+                    json=result_payload,
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as response:
+                    if response.status == 200:
+                        logger.info(f"Node.js notified with judge result: Zone {zone_id}")
+                    else:
+                        # 404는 예상 가능 (Node.js에 엔드포인트 없을 수 있음)
+                        logger.warning(f"Node.js notification failed: HTTP {response.status}")
+            except aiohttp.ClientError as e:
+                logger.warning(f"Failed to notify Node.js (non-critical): {e}")
+            except Exception as e:
+                logger.warning(f"Unexpected error notifying Node.js: {e}")
+
+        except Exception as e:
+            logger.error(f"Error in _notify_nodejs: {e}")
             # 연결 오류 시 세션 리셋
             if session_created_here and self._http_session:
                 try:
@@ -730,8 +805,6 @@ class EventRecordingManager:
                 except Exception:
                     pass
                 self._http_session = None
-        except Exception as e:
-            logger.error(f"Unexpected error notifying Node.js: {e}")
 
     async def close(self):
         """리소스 정리"""

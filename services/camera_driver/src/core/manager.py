@@ -98,6 +98,10 @@ class CameraManager:
         self._media_recorder: Optional[MediaRecorder] = None
         self._event_recorder: Optional[EventRecorder] = None
 
+        # 초기화 중 상태 추적 (중복 초기화 방지)
+        self._initializing = False
+        self._init_lock = threading.Lock()
+
         # 연속 촬영 상태
         self._continuous_capture_active = False
         self._continuous_capture_thread: Optional[threading.Thread] = None
@@ -123,6 +127,23 @@ class CameraManager:
         Returns:
             {camera_id: success} 딕셔너리
         """
+        # 이미 초기화되었으면 현재 상태 반환
+        if self._initialized:
+            logger.info("CameraManager already initialized, returning current status")
+            return {cam_id: cam.is_connected for cam_id, cam in self._cameras.items()}
+
+        # 초기화 중이면 대기 (최대 10초)
+        with self._init_lock:
+            if self._initializing:
+                logger.info("Camera initialization already in progress, waiting...")
+                # 락을 해제하고 초기화 완료 대기
+                pass
+
+            if self._initialized:
+                return {cam_id: cam.is_connected for cam_id, cam in self._cameras.items()}
+
+            self._initializing = True
+
         status: Dict[int, bool] = {}
 
         # Top 카메라
@@ -161,6 +182,7 @@ class CameraManager:
             logger.info(f"Zone {zone_id} camera: logical_id={camera_id}, device_index={device_index}")
 
         self._initialized = True
+        self._initializing = False
         connected_count = sum(status.values())
         total_expected = 1 + len(ZONE_CAMERA_MAP)  # Top + enabled zones
         logger.info(f"CameraManager: {connected_count}/{total_expected} cameras connected (enabled zones: {enabled_zones})")

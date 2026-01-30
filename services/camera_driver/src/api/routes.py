@@ -293,14 +293,30 @@ def _test_image_save(manager) -> dict:
 
 
 @router.get("/health")
-async def health_check() -> CameraHealthResponse:
-    """Health check endpoint (빠른 응답을 위해 단순화)."""
+async def health_check(request: Request = None) -> CameraHealthResponse:
+    """Health check endpoint (카메라 초기화 상태 포함)."""
     # 저장 경로 쓰기 테스트만 수행 (블로킹 없음)
     storage_ok = _test_storage_writable()
 
+    # 카메라 초기화 상태 확인
+    manager = get_manager()
+    cameras_initialized = manager.is_initialized
+    cameras_connected = manager.connected_count
+
+    # event_ready 상태 확인 (SSE 구독 및 이벤트 매니저 준비 완료)
+    event_ready = False
+    if request and hasattr(request.app, "state"):
+        event_ready = getattr(request.app.state, "event_ready", False)
+
+    # 카메라가 초기화되고 최소 1개 이상 연결되어야 HEALTHY
+    cameras_healthy = cameras_initialized and cameras_connected > 0
+
     return CameraHealthResponse(
-        cameras="HEALTHY",  # 서버가 실행 중이면 HEALTHY
+        cameras="HEALTHY" if cameras_healthy else "INITIALIZING",
         storage="HEALTHY" if storage_ok else "UNHEALTHY",
+        cameras_initialized=cameras_initialized,
+        cameras_connected=cameras_connected,
+        event_ready=event_ready,
     )
 
 
@@ -604,102 +620,38 @@ async def start_recording(
     """
     manager = get_manager()
 
-    # If event-driven components are not ready, attempt to start them now
-    # (client convenience: auto-start SSE and event manager when /recording/start called).
-    try:
-        if not getattr(request_obj.app.state, "event_ready", False):
-            logger.info("Event-driven components not ready - attempting to start from /recording/start")
+    # =========================================================================
+    # 카메라 초기화 완료 대기 (최대 10초)
+    # =========================================================================
+    max_wait_seconds = 10.0
+    wait_step = 0.3
+    waited = 0.0
 
-            sse_sub = get_sse_subscriber()
-            event_mgr = get_event_recording_manager()
+    while not manager.is_initialized and waited < max_wait_seconds:
+        if waited == 0:
+            logger.info("Waiting for camera initialization to complete...")
+        await asyncio.sleep(wait_step)
+        waited += wait_step
 
-            # Lazy-create SSE subscriber if missing
-            if sse_sub is None:
-                try:
-                    from core import IOBoardSSESubscriber, EventRecordingManager
-
-                    sse_sub = IOBoardSSESubscriber(io_board_url=settings.io_board_url)
-
-                    # If event manager missing, create one tied to current camera manager
-                    if event_mgr is None:
-                        try:
-                            event_mgr = EventRecordingManager(
-                                camera_manager=manager,
-                                pre_buffer_seconds=settings.pre_buffer_seconds,
-                                post_buffer_seconds=settings.post_buffer_seconds,
-                                save_images=settings.save_images,
-                                save_videos=settings.save_videos,
-                                nodejs_callback_url=settings.nodejs_callback_url,
-                                media_base_path=settings.media_base_path if settings.media_base_path else None,
-                            )
-                        except Exception as e:
-                            logger.error(f"Failed to create EventRecordingManager on-demand: {e}")
-
-                except Exception as e:
-                    logger.error(f"Failed to lazy-create SSE subscriber: {e}")
-
-            # Link callbacks if possible
+    if not manager.is_initialized:
+        logger.warning(f"Camera initialization not complete after {max_wait_seconds}s, proceeding anyway")
+    else:
+        # 카메라가 초기화되었으면 스트리밍도 확인
+        if not manager.is_streaming:
+            logger.info("Cameras initialized but not streaming, starting streaming...")
             try:
-                if sse_sub and event_mgr:
-                    sse_sub.set_on_weight_change(event_mgr.on_weight_change)
-                    sse_sub.set_on_door_change(event_mgr.on_door_change)
+                await asyncio.to_thread(manager.start_streaming)
             except Exception as e:
-                logger.warning(f"Failed linking SSE callbacks: {e}")
+                logger.error(f"Failed to start streaming: {e}")
 
-            # Register components in this module's globals
-            try:
-                init_sse_components(sse_sub, event_mgr)
-            except Exception:
-                # init_sse_components should be available in this module
-                pass
+        # 추가로 카메라 연결 확인 (최대 3초)
+        camera_wait = 0.0
+        while manager.connected_count == 0 and camera_wait < 3.0:
+            await asyncio.sleep(0.2)
+            camera_wait += 0.2
 
-            # Start SSE subscriber (non-blocking start then wait briefly for connected)
-            if sse_sub:
-                try:
-                    if not getattr(sse_sub, "_running", False):
-                        await sse_sub.start()
-
-                    # Wait up to `start_wait` seconds for connection
-                    start_wait = 3.0
-                    step = 0.2
-                    waited = 0.0
-                    while waited < start_wait:
-                        try:
-                            status = sse_sub.get_status()
-                            if status.get("connected"):
-                                break
-                        except Exception:
-                            pass
-                        await asyncio.sleep(step)
-                        waited += step
-
-                    # Mark app as ready even if not fully connected - we've triggered startup
-                    request_obj.app.state.event_ready = True
-                    logger.info("Event-driven components triggered from /recording/start")
-
-                    # If cameras are not yet initialized, start initialization in background
-                    try:
-                        if not getattr(manager, "is_initialized", False):
-                            async def _lazy_init_cameras():
-                                try:
-                                    logger.info("Lazy initializing cameras triggered by /recording/start")
-                                    await asyncio.to_thread(manager.initialize_all)
-                                    # small delay to allow device handles to settle
-                                    await asyncio.sleep(0.1)
-                                    await asyncio.to_thread(manager.start_streaming)
-                                    logger.info("Lazy camera initialization completed")
-                                except Exception as e:
-                                    logger.error(f"Lazy camera initialization failed: {e}")
-
-                            asyncio.create_task(_lazy_init_cameras())
-                    except Exception as e:
-                        logger.warning(f"Failed to schedule lazy camera init: {e}")
-
-                except Exception as e:
-                    logger.error(f"Failed to start SSE subscriber on-demand: {e}")
-                    # fallthrough - we will still attempt to proceed but log the issue
-    except Exception as e:
-        logger.error(f"Error while attempting to ensure event-driven readiness: {e}")
+        if manager.connected_count > 0:
+            logger.info(f"Cameras ready: {manager.connected_count} connected after {waited:.1f}s wait")
 
     # Query params가 우선, 없으면 JSON body 사용
     effective_zone_id = zone_id
