@@ -186,8 +186,9 @@ def _test_storage_writable() -> bool:
     """저장 경로 쓰기 가능 여부 테스트."""
     try:
         # 프로젝트 루트 기준: Edge_Environment/{날짜시간}/images/cam0~cam5
-        # camera_driver/api/routes.py 기준 상위 4단계가 프로젝트 루트
-        project_root = Path(__file__).parent.parent.parent.parent
+        # camera_driver/src/api/routes.py 기준 상위 5단계가 프로젝트 루트
+        # __file__ = services/camera_driver/src/api/routes.py
+        project_root = Path(__file__).parent.parent.parent.parent.parent
         test_session = get_kst_now().strftime("%Y%m%d_%H%M%S_healthcheck")
         test_path = project_root / test_session / "images"
 
@@ -225,7 +226,8 @@ def _test_image_save(manager) -> dict:
     import cv2
     import os
 
-    project_root = Path(__file__).parent.parent.parent.parent
+    # __file__ = services/camera_driver/src/api/routes.py → 5 parents = Edge_Environment/
+    project_root = Path(__file__).parent.parent.parent.parent.parent
     test_session = get_kst_now().strftime("%Y%m%d_%H%M%S_imgtest")
     test_path = project_root / test_session / "images"
 

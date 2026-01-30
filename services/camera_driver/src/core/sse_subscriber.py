@@ -106,7 +106,8 @@ class IOBoardSSESubscriber:
 
         if config_path is None:
             # 기본 경로: Edge_Environment/config/zone_mapping.json
-            base_dir = Path(__file__).parent.parent.parent.parent
+            # __file__ = services/camera_driver/src/core/sse_subscriber.py → 5 parents = Edge_Environment/
+            base_dir = Path(__file__).parent.parent.parent.parent.parent
             config_path = str(base_dir / "config" / "zone_mapping.json")
 
         if os.path.exists(config_path):

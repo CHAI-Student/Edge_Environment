@@ -111,7 +111,9 @@ class EventRecordingManager:
             self._media_base_path = Path(media_base_path).resolve()
         else:
             # 기본: Edge_Environment/
-            self._media_base_path = Path(__file__).parent.parent.parent.parent.resolve()
+            # __file__ = services/camera_driver/src/core/event_recording_manager.py
+            # .parent x5 = Edge_Environment/
+            self._media_base_path = Path(__file__).parent.parent.parent.parent.parent.resolve()
 
         # 대기 중인 녹화
         self._pending_recordings: Dict[int, PendingRecording] = {}
