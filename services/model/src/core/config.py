@@ -299,6 +299,19 @@ class WeightModel(BaseModel):
     )
 
 
+class BufferModel(BaseModel):
+    """Frame buffer configuration settings."""
+
+    ttl_seconds: float = Field(
+        default=30.0,
+        description="Session TTL in seconds",
+    )
+    max_sessions: int = Field(
+        default=100,
+        description="Maximum concurrent sessions",
+    )
+
+
 class Settings(BaseSettings):
     """
     Global application settings.
@@ -319,6 +332,7 @@ class Settings(BaseSettings):
     api: APIModel = APIModel()
     vision: VisionModel = VisionModel()
     weight: WeightModel = WeightModel()
+    buffer: BufferModel = BufferModel()
 
     # Snapshot settings
     snapshot_base_path: str = Field(

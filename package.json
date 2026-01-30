@@ -1,7 +1,7 @@
 {
   "name": "edge_environment_lite",
-  "version": "1.0.0",
-  "description": "Camera Driver + Model 서비스 (경량화 버전) - Node.js/IO Board/Payment는 다른 레포에서 관리",
+  "version": "3.0.0",
+  "description": "Model 서비스 (v3.0 Frame Buffer API) - Node.js/IO Board/Payment/Camera는 다른 레포에서 관리",
   "scripts": {
     "start": "pm2 start ecosystem.config.js",
     "stop": "pm2 stop all",
@@ -10,8 +10,8 @@
     "status": "pm2 status",
     "delete": "pm2 delete all",
     "client": "npm run start --prefix client",
-    "services": "pm2 start ecosystem.config.js --only camera-driver,model",
-    "services:stop": "pm2 stop camera-driver model",
+    "services": "pm2 start ecosystem.config.js --only model",
+    "services:stop": "pm2 stop model",
     "all": "pm2 start ecosystem.config.js",
     "build:client": "npm run build --prefix client",
     "start:prod": "npm run build:client && pm2 start ecosystem.config.js --env production"

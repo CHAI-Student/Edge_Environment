@@ -13,25 +13,6 @@ from .models import (
     ProductInfo,
 )
 from .decision_engine import ProductDecisionEngine
-from .event_tracker import EventTracker, EventDirection, WeightEvent
-
-# Advanced modules (Scenarios 4-8)
-from .advanced import (
-    # Return Detection
-    ReturnDetector,
-    PickupEvent,
-    ReturnResult,
-    # Cross-Zone Detection
-    CrossZoneDetector,
-    MovementResult,
-    # Baseline Management
-    BaselineManager,
-    ZoneBaseline,
-    # Rapid Pickup
-    RapidPickupHandler,
-    BufferedWeightEvent,
-    RapidPickupResult,
-)
 
 __all__ = [
     # Core models
@@ -43,19 +24,4 @@ __all__ = [
     "ProductInfo",
     # Decision engine
     "ProductDecisionEngine",
-    # Event tracking
-    "EventTracker",
-    "EventDirection",
-    "WeightEvent",
-    # Advanced modules (Scenarios 4-8)
-    "ReturnDetector",
-    "PickupEvent",
-    "ReturnResult",
-    "CrossZoneDetector",
-    "MovementResult",
-    "BaselineManager",
-    "ZoneBaseline",
-    "RapidPickupHandler",
-    "BufferedWeightEvent",
-    "RapidPickupResult",
 ]

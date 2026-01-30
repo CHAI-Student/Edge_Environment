@@ -62,6 +62,29 @@ class MultiViewEnsemble:
         if self.use_motion_tracking:
             self._motion_filter = get_motion_filter()
 
+    def combine(
+        self,
+        top_detections: List[YOLODetection],
+        side_detections: List[YOLODetection],
+        motion_bonus_map: Optional[Dict[int, float]] = None,
+    ) -> List[EnsembleResult]:
+        """
+        Shortcut method for ensemble().
+
+        Args:
+            top_detections: Top 카메라 감지 결과
+            side_detections: Side 카메라 감지 결과
+            motion_bonus_map: Motion bonus 맵
+
+        Returns:
+            EnsembleResult 리스트
+        """
+        return self.ensemble(
+            top_candidates=top_detections,
+            side_candidates=side_detections,
+            motion_bonus_map=motion_bonus_map,
+        )
+
     def ensemble(
         self,
         top_candidates: List[YOLODetection],

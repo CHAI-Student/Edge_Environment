@@ -1,3 +1,0 @@
-"""
-Camera Driver Tests Package.
-"""

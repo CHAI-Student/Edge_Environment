@@ -1,24 +1,19 @@
 """
 Model Service - FastAPI Entry Point.
 
-AI 상품 판단 서비스 (경량화 버전).
+AI 상품 판단 서비스 (v3.0 - Frame Buffer API).
 
 실행 방법:
-    # 일반 모드 (FastAPI 서버)
     python main.py
 
-    # 테스트 모드 (콘솔 대시보드)
-    python main.py --test
-
 기능:
-    - Node.js로부터 무게 데이터 + 이미지 경로 수신
-    - YOLO 추론 (Hand-Proximity ROI 필터링)
-    - 무게 기반 개수 검증
-    - 판단 결과 반환 (stateless)
+    - POST /api/frame: 이미지 프레임 수신 (메모리 버퍼 저장)
+    - POST /api/judge: 상품 판단 (버퍼에서 이미지 조회)
+    - GET /api/products: 상품 목록
 
 Note:
-    SSE 구독과 카메라 직접 호출이 제거되었습니다.
-    모든 데이터는 Node.js 오케스트레이터가 수집하여 전달합니다.
+    카메라에서 직접 이미지를 수신하여 버퍼에 저장합니다.
+    Node.js는 무게 데이터와 세션 ID만 전달합니다.
 """
 
 import argparse
@@ -30,20 +25,6 @@ from core.config import Settings
 from core.logging_config import get_logger, setup_logging
 
 
-async def run_test_mode(logger):
-    """테스트 모드 실행."""
-    from monitor import TestModeHandler
-
-    handler = TestModeHandler()
-
-    try:
-        await handler.run()
-    except KeyboardInterrupt:
-        logger.info("Test mode interrupted")
-    finally:
-        await handler.stop()
-
-
 def main():
     """메인 진입점."""
     # Load settings
@@ -53,12 +34,7 @@ def main():
     setup_logging(settings.log_level.upper())
     logger = get_logger(__name__)
 
-    parser = argparse.ArgumentParser(description="Model Service (Lightweight)")
-    parser.add_argument(
-        "--test",
-        action="store_true",
-        help="Run in test mode with console dashboard",
-    )
+    parser = argparse.ArgumentParser(description="Model Service (v3.0 Frame Buffer)")
     parser.add_argument(
         "--host",
         type=str,
@@ -71,31 +47,18 @@ def main():
         default=settings.port,
         help="Server port (default: 8002)",
     )
-    parser.add_argument(
-        "--node-url",
-        type=str,
-        default=settings.nodejs_url,
-        help="Node.js orchestrator URL",
-    )
 
     args = parser.parse_args()
 
-    # Update settings from CLI args (for backward compatibility)
+    # Update settings from CLI args
     if args.host != settings.host:
         settings.api.host = args.host
     if args.port != settings.port:
         settings.api.port = args.port
-    if args.node_url != settings.nodejs_url:
-        settings.nodejs_url = args.node_url
 
-    if args.test:
-        # 테스트 모드
-        logger.info("Starting test mode...")
-        asyncio.run(run_test_mode(logger))
-    else:
-        # 서버 모드
-        logger.info(f"Starting Model Service on {settings.host}:{settings.port}")
-        asyncio.run(serve_api(settings))
+    # 서버 시작
+    logger.info(f"Starting Model Service v3.0 on {settings.host}:{settings.port}")
+    asyncio.run(serve_api(settings))
 
 
 def run():
