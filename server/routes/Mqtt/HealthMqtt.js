@@ -3,6 +3,7 @@ const { getClient, subscribe } = require("./MqttClient");
 const { v4: uuidv4 } = require("uuid");
 const axios = require("axios"); // ✅ API 통신을 위한 라이브러리
 const { devAutoLogin } = require("../../routes/auth");
+
 async function CardTerminalStatusAPI() {
   let CardTerminalState = '39'
   try {
@@ -216,6 +217,36 @@ async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
   }
 }
 
+async function CameraStatusAPI() {
+  //camera status check
+  let CameraState = ''
+  try {
+    console.log(`[CAMERA] Sending Request to ${config.cameraApi}`);
+    const CameraRes = await axios.get(`${config.cameraApi}/health`, { timeout: 5000 });
+    console.log(CameraRes.data)
+    if (CameraRes.data) {
+      CameraState = '09'
+      console.log('[CAMERA] camera connect success')
+    } else {
+      CameraState = '00'
+      console.log('[CAMERA] camera unconnected')
+    }
+  } catch (error) {
+    // camera timeout
+    if (error.code === "ECONNABORTED") {
+      CameraState = "00"
+      console.log(`[CAMERA] Camera connect timeout: ${CameraState}`);
+    } else if (error.response) {
+      // 서버가 4xx, 5xx 에러를 보낸 경우
+      CameraState = "00"
+      throw new Error(`[CAMERA] Server Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
+    } else {
+      CameraState = "00"
+      throw new Error(error.message);
+    } return CameraState
+  }
+}
+
 
 async function HealthMqtt() {
   // divisionIdx 기준으로 토픽 네이밍 예시
@@ -239,10 +270,13 @@ async function HealthMqtt() {
       const LoadcellStatus = await LoadcellStatusAPI();
       const CameraStatus = await CameraStatusAPI();
       const EdgePCStatus = await EdgePCStatusAPI(DeadboltStatus, LoadcellStatus);
-      // const [CardTerminalStatus, DeadboltStatus, LoadcellStatus,] = await Promise.all([
       //   CardTerminalStatusAPI(),
       //   DeadboltStatusAPI(),
       //   LoadcellStatusAPI(),
+      //   CameraStatusAPI()
+      // ]);
+      // const [CardTerminalStatus] = await Promise.all([
+      //   CardTerminalStatusAPI()
       // ]);
 
       const timestamp = Date.now();
@@ -270,9 +304,11 @@ async function HealthMqtt() {
         if (e) console.error("[MQTT] publish error:", e.message);
       });
     };
-    publishOnce(); // ✅ 연결 직후 1회
+    // publishOnce(); // ✅ 연결 직후 1회
     setInterval(publishOnce, 30000); // ✅ 이후 주기
   });
 }
 
 module.exports = { HealthMqtt, CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI, CameraStatusAPI, EdgePCStatusAPI };
+module.exports = { HealthMqtt, CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI };
+// module.exports = { HealthMqtt };

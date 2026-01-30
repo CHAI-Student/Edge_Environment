@@ -1,16 +1,12 @@
 require("dotenv").config();
 const axios = require("axios");
 const config = require("../../config/key");
-const { v4: uuidv4 } = require("uuid");
-const { devAutoLogin } = require("../auth");
 const express = require("express");
 const router = express.Router();
-// const { HealthMqtt } = require("../Mqtt/HealthMqtt");
 const { CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI } = require('../Mqtt/HealthMqtt')
 const { ProductList } = require("./ProductList");
 const fs = require("fs");
 const path = require("path");
-const { ManualDeadbolt } = require("../Mqtt/ManualDeadbolt");
 const { callApiToControlDeadbolt } = require('../Mqtt/DeadboltApiService'); // [추가] 도어 제어 함수 임포트 가정
 const { EventSource } = require('eventsource');
 const { model } = require("mongoose");
@@ -30,7 +26,7 @@ function makeTimestampFolderName(d = new Date()) {
   return `${yyyy}${mm}${dd}_${HH}${MM}${SS}`;
 }
 
-function ensureCaptureFolder({ localRoot } = {}) {
+function MakeCameraFolder({ localRoot } = {}) {
   if (!localRoot) throw new Error("localRoot is required");
   const folderName = makeTimestampFolderName();
   // const folderPath = path.join(localRoot, folderName);
