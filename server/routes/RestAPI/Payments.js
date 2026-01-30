@@ -33,7 +33,8 @@ function makeTimestampFolderName(d = new Date()) {
 function ensureCaptureFolder({ localRoot } = {}) {
   if (!localRoot) throw new Error("localRoot is required");
   const folderName = makeTimestampFolderName();
-  const folderPath = path.join(localRoot, folderName);
+  // const folderPath = path.join(localRoot, folderName);
+  const folderPath = path.join(process.cwd(), `${folderName}`)
   fs.mkdirSync(folderPath, { recursive: true });
   return { folderName, folderPath };
 }
@@ -70,10 +71,10 @@ async function requestTopCameraCapture({ action }) {
 
 async function requestTopCameraON({ include_top, record_video, folderPath }) {
   try {
-    const CameraSaveDirApi =  `${config.cameraApi}/recording/start`;
+    const CameraSaveDirApi =  `${config.cameraApi}/api/recording/start`;
     const response = await axios.post(CameraSaveDirApi, null, {
       params: {
-        zone_id: 0,
+        zone_id: null,
         include_top: include_top,
         record_video: record_video,
         base_path: folderPath
@@ -97,17 +98,32 @@ async function requestTopCameraON({ include_top, record_video, folderPath }) {
   }
 }
 
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 async function requestCameraOFF() {
   try {
-    const CameraStopApi =  `${config.cameraApi}/recording/stop`;
+    const CameraStopApi =  `${config.cameraApi}/api/recording/stop`;
+    // 잠시 대기 후 정지 요청을 보냅니다. 카메라 API는 zone_id 파라미터를 요구할 수 있습니다.
+    await delay(5000);
+    // const response = await axios.post(CameraStopApi, null, {
+    //   params: {
+    //     zone_id: 0
+    //   }
+    // });
     const response = await axios.post(CameraStopApi);
-
-  if (response.status === 200) {
-        // console.log("Recording Stopped. File Saved at:", response.data);
-        return response.data; // 저장된 파일 경로 정보 반환 
+    if (response && response.status === 200) {
+      // console.log("Recording Stopped. File Saved at:", response.data);
+      return response.data; // 저장된 파일 경로 정보 반환 
+    } else {
+      console.error("Stop Recording Unexpected Response:", response && response.data);
+      return false;
     }
   } catch (error) {
-    console.error("Stop Recording Error:", error.message);
+    if (error.response) {
+      console.error("Stop Recording API Error:", error.response.data);
+    } else {
+      console.error("Stop Recording Request Error:", error.message);
+    }
     return false;
   }
 }
@@ -296,7 +312,7 @@ async function Payments(token, CardMethod) {
     //여기서부터 내일 테스트
     // [5] 문 열기 (OPEN)
     const openResult = await callApiToControlDeadbolt("OPEN");
-    if (openResult !== "OPEN") throw new Error(`Failed to open door. Status: ${openResult}`);
+    if (openResult !== "OPEN" && openResult !== 'UNLOCK') throw new Error(`Failed to open door. Status: ${openResult}`)
     console.log("로드셀 제어까지 완료")
 
     // await requestTopCameraCapture({ folderPath: folderPath, action: 'ON' });
@@ -305,7 +321,7 @@ async function Payments(token, CardMethod) {
         zone_id: 0, 
         include_top: true, 
         record_video: true,   // [중요] 영상 녹화를 하려면 true여야 합니다 
-        folderPath: folderName
+        folderPath: folderPath
     });
 
     try {
@@ -338,10 +354,17 @@ async function Payments(token, CardMethod) {
 
     let LoadcellData = null
     try {
-          LoadcellData = await axios.post(`${config.ioboardApi}/recording/data`, {}); 
+          const resp = await axios.get(`${config.ioboardApi}/recording/data`, {});
+          // Use only the data payload (avoid passing axios response object which contains circular refs)
+          LoadcellData = resp.data;
+          // console.log('[LoadcellData]', LoadcellData.logs, { depth: null })
         } catch (error) {
-          console.error("로드셀 데이터 갖고오기 실패:", error);
-        } 
+          if (error.response) {
+            console.error("로드셀 데이터 갖고오기 실패:", error.response.data);
+          } else {
+            console.error("로드셀 데이터 갖고오기 실패:", error.message);
+          }
+        } // 여기까지는 확인 완료 --> 0129
     try {
         console.log("[Model] Sending data for inference...");
         
@@ -352,7 +375,7 @@ async function Payments(token, CardMethod) {
         };
 
         // 모델 서버 요청 (POST)
-        const modelRes = await axios.post(`${config.modelApi}/judge/multi-zone`, inferencePayload);
+        const modelRes = await axios.post(`${config.modelApi}/api/judge/multi-zone`, inferencePayload);
         const inferenceResult = modelRes.data;
         console.log("[Model] Inference Result:", inferenceResult);
 
