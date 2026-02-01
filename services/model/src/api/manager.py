@@ -1,10 +1,15 @@
 """
-FastAPI application manager for Model service.
+FastAPI application manager for Model service (v4.0).
 
 This module provides:
 - FastAPI application configuration
 - Uvicorn server with graceful shutdown
 - Lifespan management for AI components
+
+v4.0 변경사항:
+- FrameBuffer 제거
+- SessionStore 추가
+- Frame Buffer API 제거, AVI Trigger만 사용
 """
 
 import asyncio
@@ -20,13 +25,13 @@ from core.logging_config import get_logger
 from database.product_db import ProductDatabase
 from engine import ProductDecisionEngine
 from vision import YOLOWrapper
-from buffer import FrameBuffer
+from session import SessionStore
 from api.deps import init_dependencies, cleanup_dependencies
 from api.routes import (
     health_router,
-    frame_router,
-    judge_router,
     products_router,
+    trigger_router,
+    multi_zone_router,
 )
 
 logger = get_logger(__name__)
@@ -118,8 +123,8 @@ def create_lifespan(settings: Settings):
         """FastAPI 애플리케이션 수명 주기 관리."""
         logger.info("Model service starting...")
 
-        # 1. FrameBuffer 초기화
-        frame_buffer = FrameBuffer(
+        # 1. SessionStore 초기화
+        session_store = SessionStore(
             ttl_seconds=settings.buffer.ttl_seconds,
             max_sessions=settings.buffer.max_sessions,
         )
@@ -144,7 +149,7 @@ def create_lifespan(settings: Settings):
 
         # 7. 의존성 주입 초기화
         init_dependencies(
-            frame_buffer=frame_buffer,
+            session_store=session_store,
             yolo=yolo,
             engine=decision_engine,
             product_db=product_db,
@@ -156,7 +161,7 @@ def create_lifespan(settings: Settings):
             f"YOLO classes synced: {yolo_synced}, mappings loaded: {mapping_loaded}"
         )
         logger.info(
-            f"FrameBuffer: ttl={settings.buffer.ttl_seconds}s, "
+            f"SessionStore: ttl={settings.buffer.ttl_seconds}s, "
             f"max_sessions={settings.buffer.max_sessions}"
         )
 
@@ -187,24 +192,24 @@ def create_app(settings: Settings) -> FastAPI:
     """
     app = FastAPI(
         title="Model Service",
-        description="AI 상품 판단 서비스 - Frame Buffer + Vision + Weight Fusion",
-        version="3.0.0",
+        description="AI 상품 판단 서비스 - AVI Trigger + Vision + Weight Fusion (v4.0)",
+        version="4.0.0",
         lifespan=create_lifespan(settings),
     )
 
     # 라우터 등록
     app.include_router(health_router)
-    app.include_router(frame_router)
-    app.include_router(judge_router)
     app.include_router(products_router)
+    app.include_router(trigger_router)
+    app.include_router(multi_zone_router)
 
     @app.get("/")
     async def root():
         """루트 엔드포인트."""
         return {
             "service": "model",
-            "version": "3.0.0",
-            "description": "AI 상품 판단 서비스 (Frame Buffer API)",
+            "version": "4.0.0",
+            "description": "AI 상품 판단 서비스 (AVI Trigger API)",
         }
 
     return app

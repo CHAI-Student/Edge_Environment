@@ -1,27 +1,52 @@
 # Edge Environment Lite - Model 서비스
 
-AI 스마트 자판기 시스템의 Model 서비스 (v3.0 Frame Buffer API)
+AI 스마트 자판기 시스템의 Model 서비스 (v4.0 AVI Trigger API)
+**Jetson Orin Nano 4GB (JetPack 6.2) TensorRT 전용**
 
-> **최종 업데이트**: 2026-01-30
+> **최종 업데이트**: 2026-02-01
 
 ## 개요
 
 이 레포는 **Model** 서비스만 관리합니다.
+**TensorRT 엔진(.engine)** 파일만 지원하며, **CUDA가 필수**입니다.
 Node.js, IO Board, Payment, Camera Driver는 별도 레포에서 관리됩니다.
 
-## 아키텍처 (v3.0)
+### v4.0 변경사항
+
+- **Frame Buffer 제거**: AVI Trigger 방식만 사용
+- **API 단순화**: 2개 API로 통합
+  - `POST /trigger` - Camera에서 호출, 즉시 YOLO 추론
+  - `POST /api/judge/multi-zone` - Node.js 10초 폴링
+- **SessionStore 추가**: 추론 결과 저장 (TTL 기반 자동 정리)
+- **Jetson 4GB 최적화**: 480x480 입력, FP16, max_det=20
+
+### Jetson Orin Nano 4GB 최적화
+
+| 항목 | 설정 | 효과 |
+|------|------|------|
+| 입력 크기 | 480x480 (640x480에서 오른쪽 160px 크롭) | 메모리 44% 감소 |
+| FP16 추론 | `half=True` | 메모리 50% 감소 |
+| 최대 탐지 | `max_det=20` | 후처리 부하 감소 |
+| FFmpeg 코덱 | `-c:v mjpeg` | AVI MJPEG 최적화 |
+| 배치 크기 | 1 (고정) | 4GB 메모리 제약 |
+| GPU 워밍업 | 서비스 시작 시 더미 추론 2회 | 첫 요청 지연 제거 |
+
+## 아키텍처 (v4.0)
 
 ```
 다른 레포                                 이 레포
 ┌─────────────────────────────┐          ┌─────────────────────────────┐
 │ Node.js Orchestrator (8888) │          │ React Client (3000)         │
-│ Camera Driver (8003)        │─────────►│   - setupProxy → 8888       │
-│   - POST /api/frame 전송    │          ├─────────────────────────────┤
-│ IO Board (8000)             │          │ Model Service (8002)        │
-│ Payment (5000/5001)         │          │   - FrameBuffer             │
-│ MQTT Client (8006)          │          │   - YOLO 추론               │
-└─────────────────────────────┘          │   - 상품 판단               │
-                                         └─────────────────────────────┘
+│   - 10초 간격 폴링          │          │   - setupProxy → 8888       │
+├─────────────────────────────┤          ├─────────────────────────────┤
+│ Camera Driver (8003)        │─────────►│ Model Service (8002)        │
+│   - POST /trigger 호출      │          │   - SessionStore            │
+│   - AVI 녹화 완료 시        │          │   - YOLO 추론               │
+├─────────────────────────────┤          │   - 상품 판단               │
+│ IO Board (8000)             │          └─────────────────────────────┘
+│ Payment (5000/5001)         │
+│ MQTT Client (8006)          │
+└─────────────────────────────┘
 ```
 
 ## 서비스 포트
@@ -31,9 +56,63 @@ Node.js, IO Board, Payment, Camera Driver는 별도 레포에서 관리됩니다
 | Model | 8002 | YOLO 추론 + 상품 판단 | **이 레포** |
 | React Client | 3000 | 웹 대시보드 UI | **이 레포** |
 | Node.js | 8888 | 오케스트레이터 | 다른 레포 |
-| Camera Driver | 8003 | 카메라 + Frame 전송 | 다른 레포 |
+| Camera Driver | 8003 | 카메라 + AVI 녹화 | 다른 레포 |
 | IO Board | 8000 | 로드셀 + 데드볼트 | 다른 레포 |
 | Payment | 5000 | 결제 터미널 | 다른 레포 |
+
+## Jetson Orin Nano 환경 설정
+
+### 요구사항
+
+| 항목 | 버전 | 비고 |
+|------|------|------|
+| 하드웨어 | Jetson Orin Nano Developer Kit | **4GB 모델** |
+| OS | JetPack 6.2 (Ubuntu 22.04) | |
+| Python | 3.10.x | JetPack 포함 |
+| CUDA | 12.x | JetPack 포함 |
+| cuDNN | 9.x | JetPack 포함 |
+| TensorRT | 10.x | JetPack 포함 |
+| FFmpeg | 4.x 이상 | `apt install ffmpeg` |
+
+### Python 환경 설정 (중요)
+
+```bash
+# 반드시 --system-site-packages 옵션 사용!
+# torch, numpy, opencv는 시스템 패키지 사용
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+
+# 의존성 설치
+pip install -e ".[ai]"
+```
+
+### TensorRT 엔진 변환
+
+```bash
+# .pt → .engine 변환 (Jetson에서만 가능, GPU 아키텍처 종속)
+yolo export model=models/siyeon_best.pt format=engine device=0 half=True imgsz=480
+
+# 결과 확인
+ls -la models/siyeon_best.engine
+```
+
+### 환경 검증
+
+```bash
+# 1. CUDA 확인
+python3 -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+# 기대: CUDA available: True
+
+# 2. GPU 정보
+python3 -c "import torch; print(torch.cuda.get_device_name(0))"
+# 기대: Orin (또는 유사한 Jetson GPU 이름)
+
+# 3. TensorRT 버전
+python3 -c "import tensorrt; print(f'TensorRT: {tensorrt.__version__}')"
+
+# 4. 서비스 시작 후 헬스 체크
+curl http://localhost:8002/api/health
+```
 
 ## 빠른 시작
 
@@ -41,83 +120,102 @@ Node.js, IO Board, Payment, Camera Driver는 별도 레포에서 관리됩니다
 ```bash
 cp .env.example .env
 
-# .env 주요 설정
-MODEL__VISION__YOLO_MODEL_PATH=./models/siyeon_best.pt
-MODEL__BUFFER__TTL_SECONDS=30
+# .env 주요 설정 (TensorRT 전용)
+MODEL__VISION__YOLO_MODEL_PATH=models/siyeon_best.engine
+MODEL__BUFFER__TTL_SECONDS=300
 MODEL__BUFFER__MAX_SESSIONS=100
 ```
 
 ### 2. 의존성 설치
 ```bash
-# Python (uv 권장)
-uv sync --extra ai
-
-# 또는 pip
-pip install -e ".[ai,dev]"
-
-# Node.js (PM2용)
-npm install
+# Jetson: 시스템 패키지 사용 venv
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+pip install -e ".[ai]"
 ```
 
 ### 3. 서비스 실행
 
 ```bash
-# Model 서비스 (PM2)
-npm run services
-
-# React Client만 실행
-npm run client
-
-# 전체 실행 (client + model)
-npm run all
-
-# 개별 실행 (개발용)
+# Model 서비스 직접 실행
 cd services/model && python main.py
 ```
 
-### 4. 서비스 중지
-```bash
-npm run services:stop
-# 또는
-pm2 stop all
-```
+## API 엔드포인트 (v4.0)
 
-## API 엔드포인트 (v3.0)
+### 1. POST /trigger (Camera → Model)
 
-### Frame 수신 (신규)
+Camera에서 녹화 완료 시 호출. 즉시 YOLO 추론 실행.
 
-```bash
-# 프레임 전송 (Camera Driver에서 호출)
-curl -X POST http://localhost:8002/api/frame \
-  -F "zone_id=0" \
-  -F "camera_id=0" \
-  -F "image=@snapshot.jpg" \
-  -F "format=bgr" \
-  -F "width=640" \
-  -F "height=480" \
-  -F "session_id=sess_123"
-
-# 버퍼 상태 조회
-curl http://localhost:8002/api/frame/stats
-```
-
-### 상품 판단
-
-```bash
-# 헬스 체크
-curl http://localhost:8002/api/health
-
-# 상품 판단 (Node.js에서 호출)
-curl -X POST http://localhost:8002/api/judge \
-  -H "Content-Type: application/json" \
-  -d '{
-    "zone_id": 0,
-    "session_id": "sess_123",
-    "weight_data": {
-      "delta_weight": -520.0,
-      "channels": [0, 1]
+**Request:**
+```json
+{
+  "zone": 1,
+  "loadcells": [
+    {
+      "timestamp": "2026-02-01T14:30:25.123Z",
+      "raw_value": ["+12345", "+12345"],
+      "filtered_value": ["+12344", "+12346"],
+      "filter_method": "none"
     }
-  }'
+  ],
+  "videos": {
+    "top": "/data/videos/top.avi",
+    "side": "/data/videos/side.avi"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "session_id": "zone_1_260201_143025",
+  "message": "추론 완료"
+}
+```
+
+### 2. POST /api/judge/multi-zone (Node.js → Model)
+
+데드볼트 문 열리면 10초 간격으로 폴링.
+
+**Request:**
+```json
+{
+  "session_id": "zone_1_260201_143025",
+  "products": [
+    {"product_idx": "26", "product_name": "치킨마요", "sale_price": 3500, "product_weight": "365"}
+  ]
+}
+```
+
+**Response 1: 판단 안됨**
+```json
+{
+  "status": "processing",
+  "message": "YOLO 추론 대기 중"
+}
+```
+
+**Response 2: 판단 완료**
+```json
+{
+  "status": "complete",
+  "products": [
+    {"productId": 26, "name": "치킨마요", "count": 1, "price": 3500}
+  ],
+  "totalPrice": 3500
+}
+```
+
+### 헬스 체크
+
+```bash
+curl http://localhost:8002/api/health
+# {"model": "HEALTHY", "status": "ok", "yolo_loaded": true, "session_store_ready": true}
+
+curl http://localhost:8002/api/health/detailed
+# 상세 정보 포함
 ```
 
 ### 상품 관리
@@ -138,94 +236,199 @@ curl -X POST http://localhost:8002/api/products/sync \
 
 ## 환경 변수
 
-### Model
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | MODEL__API__HOST | 0.0.0.0 | 서버 호스트 |
 | MODEL__API__PORT | 8002 | 서버 포트 |
 | MODEL__API__LOG_LEVEL | info | 로그 레벨 |
-| MODEL__BUFFER__TTL_SECONDS | 30 | 세션 TTL (초) |
+| MODEL__BUFFER__TTL_SECONDS | 300 | 세션 TTL (초) |
 | MODEL__BUFFER__MAX_SESSIONS | 100 | 최대 세션 수 |
-| MODEL__VISION__YOLO_MODEL_PATH | - | 모델 경로 |
+| MODEL__VISION__YOLO_MODEL_PATH | models/siyeon_best.engine | TensorRT 엔진 경로 |
+| MODEL__VISION__TOP_WEIGHT | 0.5 | Top 카메라 가중치 |
+| MODEL__VISION__SIDE_WEIGHT | 0.5 | Side 카메라 가중치 |
+| MODEL__VISION__COMMON_CLASS_BONUS | 0.2 | 양쪽 감지 시 보너스 |
 | MODEL__NODEJS_URL | http://localhost:8888 | Node.js URL |
 
 ## 프로젝트 구조
 
 ```
 Edge_Environment/
-├── services/
-│   └── model/                     # AI 상품 판단 (포트 8002)
-│       ├── main.py                # FastAPI 진입점
-│       └── src/
-│           ├── api/
-│           │   ├── routes/        # 분리된 라우터
-│           │   │   ├── health.py  # GET /api/health
-│           │   │   ├── frame.py   # POST /api/frame (신규)
-│           │   │   ├── judge.py   # POST /api/judge
-│           │   │   └── products.py
-│           │   ├── deps.py        # 의존성 주입
-│           │   └── manager.py     # FastAPI 앱 팩토리
-│           ├── buffer/            # 프레임 버퍼 (신규)
-│           │   └── frame_buffer.py
-│           ├── vision/            # YOLO 추론
-│           │   ├── yolo_wrapper.py
-│           │   ├── hand_filter.py
-│           │   └── multi_view_ensemble.py
-│           ├── weight/            # 무게 계산
-│           │   └── count_calculator.py
-│           ├── engine/            # 판단 엔진
-│           │   ├── decision_engine.py
-│           │   └── models.py
-│           └── database/          # 상품 DB
-│               └── product_db.py
-├── client/                        # React Frontend (포트 3000)
+├── .env.example                  # 환경변수 예제
+├── CLAUDE.md                     # 이 문서
+├── README.md                     # 기본 README
+├── pyproject.toml                # Python 프로젝트 설정
 ├── config/
-│   ├── zone_mapping.json          # Zone-Channel-Camera 매핑
-│   └── camera_device_map.json     # 카메라 디바이스 매핑
-├── _archive/                      # 아카이빙
-│   └── camera_driver/             # (이동됨)
-├── ecosystem.config.js            # PM2 설정
-├── package.json
-└── pyproject.toml
+│   └── yolo_product_mapping.json # YOLO 클래스-상품 매핑
+├── models/
+│   └── siyeon_best.engine        # TensorRT 엔진 (Jetson에서 생성)
+├── client/                       # React Frontend (포트 3000)
+└── services/
+    └── model/                    # AI 상품 판단 (포트 8002)
+        ├── main.py               # PM2 호환 진입점
+        └── src/
+            ├── api/
+            │   ├── routes/       # 분리된 라우터
+            │   │   ├── health.py     # GET /api/health
+            │   │   ├── trigger.py    # POST /trigger
+            │   │   ├── multi_zone.py # POST /api/judge/multi-zone
+            │   │   └── products.py   # 상품 관리
+            │   ├── deps.py       # 의존성 주입
+            │   └── manager.py    # FastAPI 앱 팩토리
+            ├── session/          # 세션 저장소
+            │   └── session_store.py
+            ├── video/            # AVI 비디오 처리
+            │   ├── video_processor.py
+            │   ├── voting_ensemble.py
+            │   └── frame_extractor.py
+            ├── vision/           # YOLO 추론
+            │   └── yolo_wrapper.py   # TensorRT 래퍼 (480x480, FP16)
+            ├── weight/           # 무게 계산
+            │   └── count_calculator.py
+            ├── engine/           # 판단 엔진
+            │   ├── decision_engine.py
+            │   └── models.py
+            ├── database/         # 상품 DB
+            │   └── product_db.py
+            └── core/             # 설정
+                ├── config.py
+                ├── exceptions.py
+                └── logging_config.py
 ```
 
-## 데이터 흐름
+## 데이터 흐름 (v4.0)
 
 ```
-[Camera Driver]
-    │
-    ▼
-POST /api/frame (여러 번 - top, side)
-    │
-    ▼
-[FrameBuffer] <── 메모리에 저장 (session_id 기준)
-    │
-    │──── [Node.js] POST /api/judge (session_id + weight_data)
-    │
-    ▼
-[버퍼에서 이미지 조회] → [YOLO 추론] → [Ensemble] → [무게 검증] → 결과
-    │
-    ▼
-[세션 정리] + 응답 반환
+┌─────────────────────────────────────────────────────────────┐
+│                      데드볼트 문 열림                        │
+└─────────────────────────────────────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        │                     │                     │
+        ▼                     ▼                     ▼
+   [Camera]             [Node.js]              [IO Board]
+   녹화 시작            폴링 시작              로드셀 모니터링
+        │                  │                        │
+        │                  │ POST /api/judge/multi-zone
+        │                  │ (10초 간격)
+        │                  ▼
+        │            ┌─────────────┐
+        │            │ Model 서비스 │
+        │            │ 세션 없음    │
+        │            │ → processing │
+        │            └─────────────┘
+        │
+        ▼ (녹화 완료)
+   POST /trigger
+   (zone, loadcells, videos)
+        │
+        ▼
+┌───────────────────────────────────────┐
+│ Model 서비스                           │
+│                                       │
+│ 1. VideoProcessor (AVI 처리)          │
+│    - FFmpeg -c:v mjpeg 프레임 추출    │
+│    - 480x480 크롭 (오른쪽 160px 제거) │
+│    - YOLO TensorRT 추론 (FP16)        │
+│    - VotingEnsemble                   │
+│                                       │
+│ 2. 로드셀 → delta_weight 계산         │
+│                                       │
+│ 3. Top-5 후보군 추출                  │
+│                                       │
+│ 4. 무게 기반 개수 계산                │
+│                                       │
+│ 5. SessionStore에 결과 저장           │
+└───────────────────────────────────────┘
+        │
+        ▼
+   [Node.js 다음 폴링]
+   POST /api/judge/multi-zone
+        │
+        ▼
+┌───────────────────────────────────────┐
+│ Model 서비스                           │
+│ SessionStore에서 결과 조회            │
+│ → {"status": "complete", ...}         │
+└───────────────────────────────────────┘
 ```
 
-## PM2 명령어
+## 가중치 계산 (v4.0)
+
+```
+상품 A: Top(0.8) + Side(0.7) 감지
+  = 0.8 × 0.5 + 0.7 × 0.5 + 0.2 = 0.95
+
+상품 B: Top(0.9) only
+  = 0.9 × 0.5 = 0.45
+
+상품 C: Side(0.85) only
+  = 0.85 × 0.5 = 0.425
+```
+
+## 에러 처리
+
+### HTTP 상태 코드
+
+| 코드 | 상황 | 에러 코드 |
+|------|------|-----------|
+| 400 | 비디오 파일 없음 | `VIDEO_FILE_NOT_FOUND` |
+| 400 | 잘못된 요청 | `VALIDATION_ERROR` |
+| 500 | 비디오 손상 | `VIDEO_CORRUPTED` |
+| 500 | FFmpeg 오류 | `FFMPEG_ERROR` |
+| 500 | YOLO GPU 오류 | `YOLO_GPU_ERROR` |
+| 503 | YOLO 모델 미로드 | `YOLO_MODEL_NOT_LOADED` |
+
+### 에러 응답 형식
+
+```json
+{
+  "detail": {
+    "error_code": "VIDEO_FILE_NOT_FOUND",
+    "message": "Video file not found: /path/to/video.avi",
+    "video_path": "/path/to/video.avi"
+  }
+}
+```
+
+## 트러블슈팅
+
+### CUDA 관련
 
 ```bash
-npm run start          # 전체 서비스 시작
-npm run services       # model만 시작
-npm run client         # React client만 시작
-npm run all            # 전체 (client + services)
-npm run stop           # 전체 중지
-npm run logs           # 로그 확인
-npm run status         # 상태 확인
+# CUDA 사용 불가
+# → JetPack 재설치 또는 CUDA 경로 확인
+export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+
+# TensorRT 버전 불일치
+# → Jetson에서 .engine 파일 재생성
+yolo export model=models/siyeon_best.pt format=engine device=0 half=True imgsz=480
 ```
 
-## 아카이빙된 서비스
+### 메모리 부족
 
-다음 서비스들은 `_archive/` 폴더로 이동되었으며, 다른 레포에서 관리됩니다:
-- `camera_driver/` → 다른 레포로 이관 (POST /api/frame 방식으로 연동)
-- `io_board/` → CRK-IO-BOARD 레포
-- `card_terminal/` → CRK-PAYMENT 레포
-- `mqtt_client/` → Edge_Environment 레포
-- `server/` → Edge_Environment 레포
+```bash
+# GPU 메모리 모니터링
+tegrastats
+
+# 성능 모드 설정 (MAXN)
+sudo nvpmodel -m 0
+sudo jetson_clocks
+```
+
+### FFmpeg 오류
+
+```bash
+# FFmpeg 설치 확인
+ffmpeg -version
+
+# MJPEG 코덱 지원 확인
+ffmpeg -codecs | grep mjpeg
+```
+
+## 삭제된 API (v3.0 → v4.0)
+
+| API | 대체 방법 |
+|-----|----------|
+| POST /api/frame | 제거 (AVI Trigger만 사용) |
+| POST /api/judge | POST /api/judge/multi-zone 사용 |
+| GET /api/frame/stats | GET /trigger/stats 사용 |

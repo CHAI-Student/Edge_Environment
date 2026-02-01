@@ -1,13 +1,14 @@
 """
 Model Service - AI Smart Vending Machine Product Judgment.
 
-v3.0 - Frame Buffer API
+v4.0 - AVI Trigger API (Jetson Orin Nano 4GB TensorRT)
 
 Features:
-- POST /api/frame: Image frame reception (memory buffer)
-- POST /api/judge: Product judgment
-- YOLOv8 inference with hand-proximity filtering
+- POST /trigger: AVI 트리거 (Camera → Model)
+- POST /api/judge/multi-zone: 상품 판단 폴링 (Node.js → Model)
+- YOLOv8 TensorRT 추론 (480x480, FP16, max_det=20)
+- VotingEnsemble 기반 다중 프레임 집계
 - Weight-based count validation
 """
 
-__version__ = "3.0.0"
+__version__ = "4.0.0"

@@ -1,5 +1,8 @@
 """
-YOLO Wrapper for Product Detection.
+YOLO Wrapper for Product Detection (TensorRT Only).
+
+Jetson Orin Nano (JetPack 6.2) 전용 TensorRT 엔진 래퍼.
+.engine 파일만 지원하며, CUDA가 필수입니다.
 
 실제 YOLO 출력 형식:
     det[0] xyxy=[258.72, 47.65, 315.12, 113.97] conf=0.788 cls=0 name=hand
@@ -7,13 +10,13 @@ YOLO Wrapper for Product Detection.
 
 파싱하여 YOLODetection 객체 리스트로 변환.
 
-CUDA/TensorRT 지원:
-    - Windows (개발): .pt 모델 + CPU/CUDA
-    - Jetson (배포): .engine 모델 + CUDA (TensorRT)
-    - 자동 fallback: .engine 요청 시 CUDA 없으면 .pt로 전환
+요구사항:
+    - Jetson Orin Nano + JetPack 6.2 (Ubuntu 22.04)
+    - CUDA, cuDNN, TensorRT (사전 설치됨)
+    - .engine 파일 (Jetson에서 직접 변환 필요)
 
 사용 예시:
-    wrapper = YOLOWrapper(model_path="best.pt")
+    wrapper = YOLOWrapper(model_path="models/siyeon_best.engine")
     detections = wrapper.detect(image)
 """
 
@@ -135,33 +138,38 @@ class YOLODetection:
 
 class YOLOWrapper:
     """
-    YOLO 모델 래퍼.
+    YOLO TensorRT 모델 래퍼 (Jetson Orin Nano 전용).
 
     YOLO 추론 결과를 YOLODetection 리스트로 변환.
-    PyTorch (.pt) 및 TensorRT (.engine) 모델 모두 지원.
+    TensorRT (.engine) 모델만 지원하며, CUDA가 필수입니다.
 
     Attributes:
         model: YOLO 모델 (ultralytics)
         conf_threshold: 최소 confidence (기본값 0.01, 매우 낮게)
-        device: 추론 디바이스 ("cuda", "cpu")
-        is_tensorrt: TensorRT 모델 여부
+        device: 추론 디바이스 (항상 "cuda")
+        is_tensorrt: TensorRT 모델 여부 (항상 True)
     """
 
     HAND_CLASS_ID = 0  # 손 클래스 ID
+
+    # Jetson Orin Nano 4GB 최적화 상수
+    INPUT_SIZE = 480  # 480x480 입력 크기
+    CROP_WIDTH = 480  # 640x480 AVI에서 오른쪽 160px 제거
+    MAX_DETECTIONS = 20  # 최대 탐지 개수 제한
 
     def __init__(
         self,
         model_path: Optional[str] = None,
         conf_threshold: float = 0.01,
-        device: str = "auto",  # auto: CUDA if available, else CPU
+        device: str = "cuda",  # Jetson: CUDA only
     ):
         """
-        YOLO 래퍼 초기화.
+        YOLO TensorRT 래퍼 초기화 (Jetson Orin Nano 전용).
 
         Args:
-            model_path: YOLO 모델 경로 (.pt 또는 .engine 파일)
+            model_path: YOLO TensorRT 엔진 경로 (.engine 파일)
             conf_threshold: 최소 confidence (기본값 0.01)
-            device: 추론 디바이스 (TensorRT는 항상 cuda)
+            device: 추론 디바이스 (Jetson에서는 항상 cuda)
         """
         self.model = None
         self.model_path = model_path or config.yolo_model_path
@@ -169,19 +177,15 @@ class YOLOWrapper:
         self.device = device
         self.class_names: dict = {}
         self._loaded = False
-        self.is_tensorrt = False  # load() 시 결정됨
-        self._cuda_available = False  # load() 시 결정됨
+        self.is_tensorrt = True  # Always TensorRT
+        self._cuda_available = False  # load() 시 검증됨
 
     def load(self) -> bool:
         """
-        YOLO 모델 로드 (CUDA/TensorRT 자동 감지).
+        YOLO TensorRT 엔진 로드 (Jetson Orin Nano 전용).
 
-        .pt (PyTorch) 또는 .engine (TensorRT) 파일을 로드합니다.
-        TensorRT 모델은 Jetson Orin Nano에서 최적화된 추론을 제공합니다.
-
-        자동 fallback 지원:
-            - .engine 요청 + CUDA 없음 → .pt로 자동 전환
-            - .pt 요청 + CUDA 있고 .engine 존재 → .engine 사용
+        .engine (TensorRT) 파일만 지원합니다.
+        CUDA가 없으면 서비스 시작이 실패합니다 (의도된 동작).
 
         Returns:
             성공 여부
@@ -191,53 +195,60 @@ class YOLOWrapper:
 
         try:
             from ultralytics import YOLO
-            import torch
 
-            # 1. CUDA 환경 체크 및 초기화
-            self._cuda_available = self._init_cuda()
+            # 1. CUDA 환경 필수 검증
+            self._cuda_available = self._verify_cuda()
+            if not self._cuda_available:
+                logger.error("CUDA is required for TensorRT inference on Jetson")
+                return False
 
-            # 2. 모델 경로 해석 (fallback 처리)
-            resolved_path = self._resolve_model_path(self._cuda_available)
-            self.is_tensorrt = resolved_path.endswith(".engine")
+            # 2. 모델 경로 해석
+            resolved_path = self._resolve_model_path()
 
-            # 3. Device 결정
-            if self.is_tensorrt:
-                if not self._cuda_available:
-                    logger.error("TensorRT requires CUDA but CUDA is not available")
-                    return False
-                self.device = "cuda"
-            else:
-                if self.device == "auto":
-                    self.device = "cuda" if self._cuda_available else "cpu"
-                logger.info(f"Auto-selected device: {self.device}")
+            # 3. .engine 파일 확인
+            if not resolved_path.endswith(".engine"):
+                logger.error(
+                    f"Only .engine files are supported. Got: {resolved_path}\n"
+                    "Convert your model on Jetson: yolo export model=best.pt format=engine device=0 half=True"
+                )
+                return False
 
-            # 4. 모델 로드
-            logger.info(f"Loading model: {resolved_path} (device={self.device})")
+            # 4. 파일 존재 확인
+            if not os.path.exists(resolved_path):
+                logger.error(
+                    f"TensorRT engine not found: {resolved_path}\n"
+                    "Generate the engine on Jetson: yolo export model=best.pt format=engine device=0 half=True"
+                )
+                return False
+
+            # 5. 모델 로드
+            self.device = "cuda"
+            logger.info(f"Loading TensorRT engine: {resolved_path}")
             self.model = YOLO(resolved_path)
-
-            # TensorRT가 아닌 경우에만 device 이동
-            # TensorRT 모델은 이미 GPU에 최적화되어 있음
-            if not self.is_tensorrt:
-                self.model.to(self.device)
 
             self.class_names = self.model.names
             self._loaded = True
 
-            model_type = "TensorRT" if self.is_tensorrt else "PyTorch"
             logger.info(
-                f"YOLO loaded ({model_type}): {len(self.class_names)} classes, device={self.device}"
+                f"YOLO TensorRT loaded: {len(self.class_names)} classes, device={self.device}"
             )
+
+            # GPU 워밍업 - 첫 추론 지연 방지
+            self._warmup()
+
             return True
         except ImportError:
-            logger.warning("ultralytics not installed. Use parse_results() for manual parsing.")
+            logger.error("ultralytics not installed. Run: pip install ultralytics")
             return False
         except Exception as e:
-            logger.error(f"Failed to load YOLO model: {e}", exc_info=True)
+            logger.error(f"Failed to load TensorRT engine: {e}", exc_info=True)
             return False
 
-    def _init_cuda(self) -> bool:
+    def _verify_cuda(self) -> bool:
         """
-        CUDA 환경 초기화 및 검증.
+        CUDA 환경 검증 (Jetson Orin Nano 전용).
+
+        Jetson 환경에서 CUDA, TensorRT가 정상인지 확인합니다.
 
         Returns:
             CUDA 사용 가능 여부
@@ -246,28 +257,77 @@ class YOLOWrapper:
             import torch
 
             if not torch.cuda.is_available():
-                logger.info("CUDA not available, using CPU")
+                logger.error(
+                    "CUDA not available. Jetson Orin Nano requires CUDA for TensorRT.\n"
+                    "Ensure JetPack 6.2 is installed and CUDA is configured."
+                )
                 return False
 
             # CUDA 컨텍스트 초기화 (lazy init 강제)
             torch.cuda.init()
             device_name = torch.cuda.get_device_name(0)
             cuda_version = torch.version.cuda
-            logger.info(f"CUDA initialized: {device_name} (CUDA {cuda_version})")
+
+            # Jetson 환경 확인
+            is_jetson = "orin" in device_name.lower() or "tegra" in device_name.lower()
+            if is_jetson:
+                logger.info(f"Jetson detected: {device_name} (CUDA {cuda_version})")
+            else:
+                logger.info(f"CUDA initialized: {device_name} (CUDA {cuda_version})")
+
+            # TensorRT 확인
+            try:
+                import tensorrt as trt
+                logger.info(f"TensorRT version: {trt.__version__}")
+            except ImportError:
+                logger.warning("TensorRT not found. Engine loading may fail.")
+
             return True
         except Exception as e:
-            logger.warning(f"CUDA init failed: {e}")
+            logger.error(f"CUDA verification failed: {e}")
             return False
 
-    def _resolve_model_path(self, cuda_available: bool) -> str:
+    def _warmup(self) -> None:
         """
-        모델 경로 해석 및 fallback 처리.
+        GPU 워밍업 (Jetson Orin Nano).
 
-        Args:
-            cuda_available: CUDA 사용 가능 여부
+        더미 추론으로 JIT 컴파일 완료 및 CUDA 컨텍스트 초기화.
+        첫 실제 추론 시 지연을 방지합니다.
+        """
+        try:
+            import torch
+
+            # 480x480 더미 이미지 생성 (검은색)
+            dummy_image = np.zeros((self.INPUT_SIZE, self.INPUT_SIZE, 3), dtype=np.uint8)
+
+            logger.info("GPU warmup: running dummy inference...")
+
+            # 더미 추론 실행 (2회 - 첫 번째는 JIT 컴파일, 두 번째는 캐시 활성화)
+            for i in range(2):
+                _ = self.model.predict(
+                    dummy_image,
+                    conf=0.5,
+                    verbose=False,
+                    imgsz=self.INPUT_SIZE,
+                    half=True,
+                    max_det=self.MAX_DETECTIONS,
+                    device=0,
+                )
+
+            # GPU 메모리 정리
+            torch.cuda.empty_cache()
+
+            logger.info("GPU warmup complete")
+
+        except Exception as e:
+            logger.warning(f"GPU warmup failed (non-critical): {e}")
+
+    def _resolve_model_path(self) -> str:
+        """
+        모델 경로 해석 (TensorRT 전용, fallback 없음).
 
         Returns:
-            실제 사용할 모델 경로
+            해석된 모델 경로
         """
         original_path = self.model_path
 
@@ -276,62 +336,27 @@ class YOLOWrapper:
         # 프로젝트 루트 (services/model -> Edge_Environment)
         project_root = os.path.dirname(os.path.dirname(service_dir))
 
-        # 1. 절대 경로이고 파일이 존재하면 그대로 사용
+        # 1. 절대 경로이면 그대로 반환
         if os.path.isabs(original_path):
-            if os.path.exists(original_path):
-                logger.debug(f"Using absolute path: {original_path}")
-                return original_path
-            # 절대 경로지만 파일이 없으면 fallback 시도
-            logger.warning(f"Absolute path not found: {original_path}")
-        else:
-            # 2. 상대 경로 해석 (프로젝트 루트 기준)
-            full_path = os.path.join(project_root, original_path)
-            if os.path.exists(full_path):
-                logger.debug(f"Resolved relative path: {original_path} -> {full_path}")
-                return full_path
-            logger.warning(f"Relative path not found: {full_path}")
-
-        # 3. Fallback: .engine -> .pt (CUDA 없을 경우)
-        if original_path.endswith(".engine") and not cuda_available:
-            pt_path = original_path.replace(".engine", ".pt")
-
-            # 절대 경로 fallback
-            if os.path.isabs(pt_path) and os.path.exists(pt_path):
-                logger.warning(f"Falling back to .pt (no CUDA): {pt_path}")
-                return pt_path
-
-            # 상대 경로 fallback
-            pt_full = os.path.join(project_root, pt_path)
-            if os.path.exists(pt_full):
-                logger.warning(f"Falling back to .pt (no CUDA): {pt_full}")
-                return pt_full
-
-        # 4. Fallback: .pt -> .engine (CUDA 있고 .engine 파일이 존재할 경우)
-        if original_path.endswith(".pt") and cuda_available:
-            engine_path = original_path.replace(".pt", ".engine")
-
-            # 절대 경로 fallback
-            if os.path.isabs(engine_path) and os.path.exists(engine_path):
-                logger.info(f"Using TensorRT engine (auto-detected): {engine_path}")
-                return engine_path
-
-            # 상대 경로 fallback
-            engine_full = os.path.join(project_root, engine_path)
-            if os.path.exists(engine_full):
-                logger.info(f"Using TensorRT engine (auto-detected): {engine_full}")
-                return engine_full
-
-        # 5. 원래 경로 반환 (에러는 YOLO 로드 시 발생)
-        if os.path.isabs(original_path):
+            logger.debug(f"Using absolute path: {original_path}")
             return original_path
-        return os.path.join(project_root, original_path)
+
+        # 2. 상대 경로 → 프로젝트 루트 기준으로 변환
+        full_path = os.path.join(project_root, original_path)
+        logger.debug(f"Resolved relative path: {original_path} -> {full_path}")
+        return full_path
 
     def detect(self, image: np.ndarray) -> List[YOLODetection]:
         """
         이미지에서 객체 감지.
 
+        Jetson Orin Nano 4GB 최적화:
+        - 입력: 640x480 → 480x480 (오른쪽 160px 크롭)
+        - FP16 추론 (half=True)
+        - 최대 탐지 개수 제한 (max_det=20)
+
         Args:
-            image: numpy array (BGR) 또는 이미지 경로
+            image: numpy array (BGR), 640x480 또는 480x480
 
         Returns:
             YOLODetection 리스트
@@ -345,10 +370,18 @@ class YOLOWrapper:
             return []
 
         try:
+            # 640x480 이미지 → 480x480 크롭 (오른쪽 160px 제거)
+            if image.shape[1] > self.CROP_WIDTH:
+                image = image[:, :self.CROP_WIDTH]
+
             results = self.model.predict(
                 image,
                 conf=self.conf_threshold,
                 verbose=False,
+                imgsz=self.INPUT_SIZE,  # 480x480 입력
+                half=True,  # FP16 추론
+                max_det=self.MAX_DETECTIONS,  # 최대 20개 탐지
+                device=0,  # GPU 명시
             )
             return self.parse_results(results[0], self.class_names)
         except Exception as e:

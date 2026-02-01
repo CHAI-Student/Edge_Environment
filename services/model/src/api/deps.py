@@ -1,17 +1,22 @@
 """
-API Dependencies for Dependency Injection.
+API Dependencies for Dependency Injection (v4.0).
 
 FastAPI Depends()를 위한 의존성 제공자.
 전역 변수 대신 이 모듈을 통해 인스턴스에 접근합니다.
+
+v4.0 변경사항:
+- FrameBuffer 제거
+- SessionStore 추가
 """
 
 import logging
 from typing import Optional
 
-from buffer import FrameBuffer
+from session import SessionStore
 from vision import YOLOWrapper
 from database.product_db import ProductDatabase
 from engine import ProductDecisionEngine
+from video import VideoProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -20,38 +25,47 @@ _instances: dict = {}
 
 
 def init_dependencies(
-    frame_buffer: FrameBuffer,
+    session_store: SessionStore,
     yolo: YOLOWrapper,
     engine: ProductDecisionEngine,
     product_db: ProductDatabase,
+    video_processor: Optional[VideoProcessor] = None,
 ):
     """
     의존성 초기화 (lifespan에서 호출).
 
     Args:
-        frame_buffer: FrameBuffer 인스턴스
+        session_store: SessionStore 인스턴스
         yolo: YOLOWrapper 인스턴스
         engine: ProductDecisionEngine 인스턴스
         product_db: ProductDatabase 인스턴스
+        video_processor: VideoProcessor 인스턴스 (선택)
     """
-    _instances["buffer"] = frame_buffer
+    _instances["session_store"] = session_store
     _instances["yolo"] = yolo
     _instances["engine"] = engine
     _instances["db"] = product_db
 
+    # VideoProcessor는 yolo를 공유
+    if video_processor is not None:
+        _instances["video_processor"] = video_processor
+    else:
+        _instances["video_processor"] = VideoProcessor(yolo=yolo)
+
     logger.info(
         f"Dependencies initialized: "
-        f"buffer={frame_buffer is not None}, "
+        f"session_store={session_store is not None}, "
         f"yolo={yolo is not None}, "
         f"engine={engine is not None}, "
-        f"db={product_db is not None}"
+        f"db={product_db is not None}, "
+        f"video_processor={_instances.get('video_processor') is not None}"
     )
 
 
 def cleanup_dependencies():
     """의존성 정리 (shutdown 시 호출)."""
-    if "buffer" in _instances:
-        _instances["buffer"].clear_all()
+    if "session_store" in _instances:
+        _instances["session_store"].clear_all()
 
     _instances.clear()
     logger.info("Dependencies cleaned up")
@@ -62,12 +76,12 @@ def cleanup_dependencies():
 # ============================================================================
 
 
-def get_frame_buffer() -> FrameBuffer:
-    """FrameBuffer 인스턴스 반환."""
-    buffer = _instances.get("buffer")
-    if buffer is None:
-        raise RuntimeError("FrameBuffer not initialized. Call init_dependencies() first.")
-    return buffer
+def get_session_store() -> SessionStore:
+    """SessionStore 인스턴스 반환."""
+    store = _instances.get("session_store")
+    if store is None:
+        raise RuntimeError("SessionStore not initialized. Call init_dependencies() first.")
+    return store
 
 
 def get_yolo() -> YOLOWrapper:
@@ -94,14 +108,22 @@ def get_product_db() -> ProductDatabase:
     return db
 
 
+def get_video_processor() -> VideoProcessor:
+    """VideoProcessor 인스턴스 반환."""
+    processor = _instances.get("video_processor")
+    if processor is None:
+        raise RuntimeError("VideoProcessor not initialized. Call init_dependencies() first.")
+    return processor
+
+
 # ============================================================================
 # Optional Getters (may return None)
 # ============================================================================
 
 
-def get_frame_buffer_optional() -> Optional[FrameBuffer]:
-    """FrameBuffer 인스턴스 반환 (None 허용)."""
-    return _instances.get("buffer")
+def get_session_store_optional() -> Optional[SessionStore]:
+    """SessionStore 인스턴스 반환 (None 허용)."""
+    return _instances.get("session_store")
 
 
 def get_yolo_optional() -> Optional[YOLOWrapper]:
@@ -119,6 +141,11 @@ def get_product_db_optional() -> Optional[ProductDatabase]:
     return _instances.get("db")
 
 
+def get_video_processor_optional() -> Optional[VideoProcessor]:
+    """VideoProcessor 인스턴스 반환 (None 허용)."""
+    return _instances.get("video_processor")
+
+
 # ============================================================================
 # Status Check
 # ============================================================================
@@ -126,7 +153,7 @@ def get_product_db_optional() -> Optional[ProductDatabase]:
 
 def is_initialized() -> bool:
     """의존성 초기화 상태 확인."""
-    required_keys = ["buffer", "yolo", "engine", "db"]
+    required_keys = ["session_store", "yolo", "engine", "db", "video_processor"]
     return all(key in _instances for key in required_keys)
 
 
@@ -134,8 +161,9 @@ def get_status() -> dict:
     """의존성 상태 반환."""
     return {
         "initialized": is_initialized(),
-        "buffer": _instances.get("buffer") is not None,
+        "session_store": _instances.get("session_store") is not None,
         "yolo": _instances.get("yolo") is not None,
         "engine": _instances.get("engine") is not None,
         "db": _instances.get("db") is not None,
+        "video_processor": _instances.get("video_processor") is not None,
     }

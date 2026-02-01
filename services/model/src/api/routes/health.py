@@ -1,5 +1,5 @@
 """
-Health Check API Routes.
+Health Check API Routes (v4.0).
 
 GET /api/health - 서비스 헬스 체크
 """
@@ -23,7 +23,7 @@ class HealthResponse(BaseModel):
     model: str  # "HEALTHY" | "UNHEALTHY"
     status: str = "ok"
     yolo_loaded: bool = False
-    buffer_ready: bool = False
+    session_store_ready: bool = False
     timestamp: float = 0.0
 
 
@@ -31,7 +31,7 @@ class DetailedHealthResponse(BaseModel):
     """상세 헬스 체크 응답."""
 
     service: str = "model"
-    version: str = "3.0.0"
+    version: str = "4.0.0"
     status: str = "ok"
     dependencies: dict = {}
     config: dict = {}
@@ -63,7 +63,7 @@ async def health_check():
         model="HEALTHY" if model_exists else "UNHEALTHY",
         status="ok" if is_initialized() else "initializing",
         yolo_loaded=deps_status.get("yolo", False),
-        buffer_ready=deps_status.get("buffer", False),
+        session_store_ready=deps_status.get("session_store", False),
         timestamp=time.time(),
     )
 
@@ -80,7 +80,7 @@ async def detailed_health_check():
 
     return DetailedHealthResponse(
         service="model",
-        version="3.0.0",
+        version="4.0.0",
         status="ok" if is_initialized() else "initializing",
         dependencies=deps_status,
         config={

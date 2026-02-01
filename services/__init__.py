@@ -1,10 +1,6 @@
-# AI Smart Vending Machine - Services Package
+# AI Smart Vending Machine - Model Service Package
 """
-Edge Environment Services
+Edge Environment Services (Jetson Orin Nano TensorRT only)
 
-- io_board: LoadCell + DeadBolt serial communication (port 8000)
-- model: AI product judgment with YOLO (port 8002)
-- camera_driver: 6-camera management (port 8003)
-- card_terminal: Payment terminal (port 8004, TCP 5000)
-- mqtt_client: CHAI MQTT interface (port 8006)
+- model: AI product judgment with YOLO TensorRT (port 8002)
 """

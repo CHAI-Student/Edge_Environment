@@ -1,19 +1,20 @@
 """
 Model Service - FastAPI Entry Point.
 
-AI 상품 판단 서비스 (v3.0 - Frame Buffer API).
+AI 상품 판단 서비스 (v4.0 - AVI Trigger API).
+Jetson Orin Nano TensorRT 전용.
 
 실행 방법:
     python main.py
 
 기능:
-    - POST /api/frame: 이미지 프레임 수신 (메모리 버퍼 저장)
-    - POST /api/judge: 상품 판단 (버퍼에서 이미지 조회)
+    - POST /trigger: Camera에서 AVI 녹화 완료 시 YOLO 추론
+    - POST /api/judge/multi-zone: Node.js 폴링용 결과 조회
     - GET /api/products: 상품 목록
 
 Note:
-    카메라에서 직접 이미지를 수신하여 버퍼에 저장합니다.
-    Node.js는 무게 데이터와 세션 ID만 전달합니다.
+    Camera에서 AVI 파일 녹화 후 /trigger 호출.
+    Node.js는 /api/judge/multi-zone으로 결과를 폴링합니다.
 """
 
 import argparse
@@ -34,7 +35,7 @@ def main():
     setup_logging(settings.log_level.upper())
     logger = get_logger(__name__)
 
-    parser = argparse.ArgumentParser(description="Model Service (v3.0 Frame Buffer)")
+    parser = argparse.ArgumentParser(description="Model Service (v4.0 AVI Trigger)")
     parser.add_argument(
         "--host",
         type=str,
@@ -57,7 +58,7 @@ def main():
         settings.api.port = args.port
 
     # 서버 시작
-    logger.info(f"Starting Model Service v3.0 on {settings.host}:{settings.port}")
+    logger.info(f"Starting Model Service v4.0 on {settings.host}:{settings.port}")
     asyncio.run(serve_api(settings))
 
 

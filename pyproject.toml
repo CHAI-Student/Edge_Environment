@@ -28,21 +28,30 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Jetson Orin Nano: torch/torchvision/numpy are pre-installed system packages
-# Use: python3 -m venv --system-site-packages .venv
+# =============================================================================
+# Jetson Orin Nano (JetPack 6.2) TensorRT 전용 환경
+# =============================================================================
+# torch/torchvision/numpy/opencv는 시스템 패키지로 사전 설치됨
+# 반드시 --system-site-packages 옵션으로 venv 생성:
+#   python3 -m venv --system-site-packages .venv
+#   source .venv/bin/activate
+#   pip install -e ".[ai]"
 ai = [
-    "ultralytics>=8.0.0",
-    # torch and torchvision should come from system on Jetson (CUDA support)
-    # On non-Jetson systems, install manually: pip install torch torchvision
+    "ultralytics>=8.0.0,<9.0.0",  # TensorRT 호환 버전
+    # torch, torchvision, numpy, opencv: Jetson 시스템 패키지 사용
 ]
-# For non-Jetson development (CPU-only or x86 CUDA)
-ai-desktop = [
-    "ultralytics>=8.0.0",
-    "torch>=2.0.0",
-    "torchvision>=0.15.0",
-    "numpy>=1.24.0,<2.0.0",
-    "opencv-python-headless>=4.8.0,<4.11.0",
-]
+# =============================================================================
+# DEPRECATED: ai-desktop 제거됨 - Jetson Orin Nano 전용 환경으로 전환
+# =============================================================================
+# Windows/CPU 개발 환경은 더 이상 지원하지 않습니다.
+# TensorRT 엔진(.engine)은 Jetson에서만 실행 가능합니다.
+# ai-desktop = [
+#     "ultralytics>=8.0.0",
+#     "torch>=2.0.0",
+#     "torchvision>=0.15.0",
+#     "numpy>=1.24.0,<2.0.0",
+#     "opencv-python-headless>=4.8.0,<4.11.0",
+# ]
 mqtt = [
     "aiomqtt>=2.0.0",
 ]
