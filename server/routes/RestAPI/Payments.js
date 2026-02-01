@@ -62,21 +62,14 @@ function MakeCameraFolder({ localRoot } = {}) {
 //   }
 // }
 
-async function requestTopCameraON({ include_top, record_video, folderPath }) {
+async function requestTopCameraON({ save_path }) {
   try {
-    const CameraSaveDirApi =  `${config.cameraApi}/api/recording/start`;
-    const response = await axios.post(CameraSaveDirApi, null, {
-      params: {
-        zone_id: null,
-        include_top: include_top,
-        record_video: record_video,
-        base_path: folderPath
-      }
-    });
+    const CameraSaveDirApi =  `${config.cameraApi}/recording/start`;
+    const request = await axios.post(CameraSaveDirApi, { save_path: save_path });
     // 성공 시 응답 데이터 반환
-    if (response.status === 200) {
-        console.log("Recording Started with Path:", response.data);
-        return response.data;
+    if (request.status === 200) {
+        console.log("Recording Started with Path:", request.data);
+        return request.data;
     }
   } catch (error) {
     if (error.response) {
@@ -92,7 +85,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function requestCameraOFF() {
   try {
-    const CameraStopApi =  `${config.cameraApi}/api/recording/stop`;
+    const CameraStopApi =  `${config.cameraApi}/recording/stop`;
     await delay(5000);
     const response = await axios.post(CameraStopApi);
     if (response && response.status === 200) {;
@@ -294,23 +287,9 @@ async function Payments(token, CardMethod) {
     // [5] 문 열기 (OPEN)
     const openResult = await callApiToControlDeadbolt("OPEN");
     if (openResult !== "OPEN" && openResult !== 'UNLOCK') throw new Error(`Failed to open door. Status: ${openResult}`)
-    console.log("로드셀 제어까지 완료")
 
-    // await requestTopCameraCapture({ folderPath: folderPath, action: 'ON' });
-    // ------- 우진님 코드에 따라 변경 -------
-    await requestTopCameraON({ 
-        zone_id: 0, 
-        include_top: true, 
-        record_video: true,   // [중요] 영상 녹화를 하려면 true여야 합니다 
-        folderPath: folderPath
-    });
-
-    try {
-      await axios.post(`${config.ioboardApi}/recording/start`, {}); 
-      console.log("녹화 시작 성공");
-    } catch (error) {
-      console.error("녹화 시작 실패:", error);
-    }
+    // [6] 상단 카메라 ON 요청
+    await requestTopCameraON({ save_path: folderPath});
 
     // [7] 로드셀 무게 정보 실시간 전달
     
