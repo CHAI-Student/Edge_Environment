@@ -14,6 +14,7 @@ const { exec } = require("child_process");
 const os = require("os");
 
 const closedStates = ["LOCK", "LOCKED", "CLOSE", "CLOSED"];
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function playMp3(filePath) {
   const platform = os.platform(); // 'darwin', 'linux', 'win32'
@@ -87,35 +88,28 @@ function MakeCameraFolder() {
   return { folderName, folderPath };
 }
 
-// async function requestTopCameraCapture({ action }) {
-//   try {
-//     let url;
-//     if (action === 'ON') {
-//       url = `${config.cameraApi}/api/zone/0/activate`; 
-//       // 상단카메라 키는 함수여서 카메라 인덱스 0으로 고정
-//     } else if (action === 'OFF') {
-//       url = `${config.cameraApi}/api/zone/${zoneId}/deactivate`;
-//     } else {
-//       throw new Error("Invalid action. Use 'ON' or 'OFF'.");
-//     }
+let stopPolling = false;
 
-//     // 2. 스냅샷 경로와 같이 요청 전송
-//     const response = await axios.post(url);
+async function modelPooling(productData, opts = {}) {
+  const { intervalMs = 10_000, timeoutMs = 5 * 60_000 } = opts;
+  const started = Date.now();
 
-//     if (response.status === 200) {
-//       console.log(`Camera Zone 0 ${action} Success:`, response.data);
-//       return true;
-//     }
+  while (true) {
+    if (Date.now() - started > timeoutMs) throw new Error("Model inference timeout");
 
-//   } catch (error) {
-//     if (error.response) {
-//       console.error(`API Error (${action}):`, error.response.data);
-//     } else {
-//       console.error(`Request Error (${action}):`, error.message);
-//     }
-//     return false;
-//   }
-// }
+    try {
+      const res = await axios.post(`${config.modelApi}/api/judge/multi-zone`, productData, { timeout: 30_000 });
+      const data = res.data;
+
+      if (data?.success === true) return data;
+    } catch (e) {
+      console.error("[Model] request failed:", e?.message || e);
+    }
+
+    await delay(intervalMs);
+  }
+}
+
 
 async function requestTopCameraON({ save_path }) {
   try {
@@ -136,13 +130,12 @@ async function requestTopCameraON({ save_path }) {
   }
 }
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-
 async function requestCameraOFF() {
   try {
     // const CameraStopApi =  `${config.cameraApi}/recording/stop`;
     // await delay(5000);
-    const response = await axios.post(`${config.cameraApi}/recording/stop`, delay(5000));
+    await delay(5000);
+    const response = await axios.post(`${config.cameraApi}/recording/stop`);
     if (response && response.status === 200) {;
       return response.data; // 저장된 파일 경로 정보 반환 
     } else {
@@ -161,7 +154,7 @@ async function requestCameraOFF() {
 
 
 function waitForDeadboltClose() {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         // [수정] 문서에 명시된 SSE 스트림 엔드포인트 사용
         const deadboltSource = new EventSource(`${config.ioboardApi}/sse?streams=doors`);
 
@@ -188,6 +181,7 @@ function waitForDeadboltClose() {
         deadboltSource.onerror = (err) => {
             console.error("[Door] SSE Error:", err);
             deadboltSource.close();
+            reject(new Error("SSE connection error"));
         };
     });
 }
@@ -211,22 +205,19 @@ async function init() {
     // 일반 카드 토큰 수신
     TokenHandler.addEventListener('tx_token_generate', (event) => {
         // e {"status": "Y", "vankey_hash": "0027057596824048aafeea42", "card_info": {"SERIAL_NUMBER": "", "ACQUIRER_ID": "003", "ACQUIRER_NAME": "\ud558\ub098\uce74\ub4dc", "ISSUER_ID": "003", "ISSUER_NAME": "\ud1a0\uc2a4\ubc45\ud06c\uce74\ub4dc", "MERCHANT_ID": "00915100663"}, "response_code": 0, "message": ""}
-        console.log('e', event.data)
-        if (event.data) {
-            try {
-                paymentToken = event.data.vankey_hash;
-                // const CardMethod = token.startsWith("SPAYKEY") ? "S" : "N"
-                CardMethod = 'N'
-                // S = 삼성페이, N = 일반카드
-                console.log('[CardToken] Token received:', paymentToken);
-                
-                // 토큰을 받으면 프로세스 시작 (비동기 호출)
-                startProcess(paymentToken, CardMethod); 
-            } catch (err) {
-                console.error('[CardToken] Error parsing token:', err);
-            }
-        } else {
-            console.log('[CardToken] No token data received');
+        try {
+            const payload = JSON.parse(event.data);
+            console.log('e', payload)
+            paymentToken = payload.vankey_hash;
+            // const CardMethod = token.startsWith("SPAYKEY") ? "S" : "N"
+            CardMethod = 'N'
+            // S = 삼성페이, N = 일반카드
+            console.log('[CardToken] Token received:', paymentToken);
+            
+            // 토큰을 받으면 프로세스 시작 (비동기 호출)
+            startProcess(paymentToken, CardMethod); 
+        } catch (err) {
+            console.error('[CardToken] Error parsing token:', err);
         }
     });
 
@@ -247,7 +238,7 @@ async function init() {
                 display_message: "SamsungPay Payment"
             }).then((response) => {
                 console.log('Samsung Pay Approval Response:', response.data);
-                if (response.status == 'Y') {
+                if (response.data.status == 'Y') {
                     preAuthNum = response.data.authorization_number;
                     preAuthDate = response.data.authorization_date;
                     samsungpayToken = response.data.vankey;
@@ -265,14 +256,15 @@ async function init() {
     // rfid:::: {"data": "1763193013"}
     // 사원증 토큰 수신
     TokenHandler.addEventListener('rfid_init', (event) => {
-        console.log('rfid::::', event.data); // {"data": "1763193013"}
-        if (event.data.date) {
-            // PNT한테 사원증 토큰 전송 후 유효성 검사하기
-            rfidToken = event.data.data;
-            CardMethod = 'R' // R = RFID
-            console.log('[RFID-Token] Token received:', rfidToken);
-            // startProcess(rfidToken, CardMethod);
-        }
+      const payload = JSON.parse(event.data);
+      console.log('rfid::::', payload); // {"data": "1763193013"}
+      if (payload.data) {
+          // PNT한테 사원증 토큰 전송 후 유효성 검사하기
+          rfidToken = payload.data;
+          CardMethod = 'R' // R = RFID
+          console.log('[RFID-Token] Token received:', rfidToken);
+          // startProcess(rfidToken, CardMethod);
+      }
     });
 }
 
@@ -286,7 +278,7 @@ async function startProcess(token, CardMethod) {
     if (CardTerminalStatus == '39' && DeadboltStatus == '19' && LoadcellStatus == '29' && CameraStatus == '09') {
         console.log('[PAYMENT] Health check passed. Starting Payments process...');
         try {
-            await Payments(CardMethod);
+            await Payments(token, CardMethod);
         } catch (error) {
             console.error("[PAYMENT] Process failed:", error);
         }
@@ -360,20 +352,22 @@ async function startProcess(token, CardMethod) {
 // }
 
 
-let LoadcellData = null
+// let LoadcellData = null
 let paymentResponse = null;
 let inferenceResult = null;
 
 // --- 3. 결제 및 제어 로직 ---
-async function Payments(CardMethod) {
+async function Payments(token, CardMethod) {
     const divisionIdx = config.divisionIdx;
 
     // [3] 상품정보 조회
-    const productData = await ProductList({
+    const productList = await ProductList({
         division_idx: divisionIdx,
         device_idx: null
     });
-    console.log("[ProductList] Data Loading Complete:", productData);
+    console.log("[ProductList] Data Loading Complete:", productList);
+    const productData = productList.Data.product_list
+
 
     // [4] 카메라 폴더 생성
     // const LOCAL_ROOT = path.resolve(process.cwd()); 
@@ -389,13 +383,8 @@ async function Payments(CardMethod) {
     
     // 모델 서버 요청 (POST)
     console.log("[Model] Sending data for inference...");
-    const modelRes = await axios.post(`${config.modelApi}/api/judge/multi-zone`, productData);
-    // 모델이 추론 결과를 보낼때 까지 계속 10초 간격으로 post(만약 추론이 안 끝났으면 모델은 아직 안 끝났다는 response를 보내야 함.)
-    setInterval(() => {modelRes}, 10000);
-    if (!modelRes.data.success == true) {
-        inferenceResult = modelRes.data;
-        console.log("[Model] Inference Result:", inferenceResult);
-    }
+    stopPolling = false;
+    const inferencePromise = modelPooling(productData, { intervalMs: 10_000 });
 
     // [6] 상단 카메라 ON 요청
     await requestTopCameraON({ save_path: folderPath});
@@ -410,6 +399,7 @@ async function Payments(CardMethod) {
       const closeEventData = await waitForDeadboltClose();
       const state = closeEventData.state;
       if (state && closedStates.includes(state)) {
+          // stopPolling = true;
           stopDoorOpenMonitor("deadbolt closed");
           console.log("[DEADBOLT] Door closed detected:", closeEventData.state);
         try {
@@ -433,29 +423,29 @@ async function Payments(CardMethod) {
     }
 
     // 로드셀 무게 log 불러오기
-    try {
-          const resp = await axios.get(`${config.ioboardApi}/recording/data`, {});
-          // Use only the data payload (avoid passing axios response object which contains circular refs)
-          LoadcellData = resp.data;
-          // console.log('[LoadcellData]', LoadcellData.logs, { depth: null })
-          console.log('[LoadcellData] loadcell data responsed')
-        } catch (error) {
-          if (error.response) {
-            console.error("로드셀 데이터 갖고오기 실패:", error.response.data);
-          } else {
-            console.error("로드셀 데이터 갖고오기 실패:", error.message);
-          }
-        } // 여기까지는 확인 완료 --> 0129
+    // try {
+    //       const resp = await axios.get(`${config.ioboardApi}/recording/data`, {});
+    //       // Use only the data payload (avoid passing axios response object which contains circular refs)
+    //       LoadcellData = resp.data;
+    //       // console.log('[LoadcellData]', LoadcellData.logs, { depth: null })
+    //       console.log('[LoadcellData] loadcell data responsed')
+    //     } catch (error) {
+    //       if (error.response) {
+    //         console.error("로드셀 데이터 갖고오기 실패:", error.response.data);
+    //       } else {
+    //         console.error("로드셀 데이터 갖고오기 실패:", error.message);
+    //       }
+    //     } // 여기까지는 확인 완료 --> 0129
     // [10] 모델 서버에 상품 목록 + 카메라 폴더명 + 로드셀 데이터 전송 → 추론 결과 수신
+    // [10] 모델 서버에 상품 목록 → 추론 결과 수신
     try {
-        if (inferenceResult.status == true) {
-            console.log("[Model] Inference Result:", inferenceResult);
-        }
+        inferenceResult = await inferencePromise;
+        console.log("[Model] Inference Result:", inferenceResult);
 
         // 결제 승인 요청
         const finalAmount = inferenceResult.totalPrice;
         const paymentAt = new Date()
-        if (modelRes.data.success === true){
+        if (inferenceResult.success === true){
           // 삼성 페이
           if (CardMethod === "S") {
             paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {
@@ -467,14 +457,14 @@ async function Payments(CardMethod) {
                 amount: preAmount,
                 original_authorization_date: preAuthDate,
                 original_authorization_number: preAuthNum,
-                vankey: samsungpayToken
+                vankey: samsungpayToken || token
             })
           }
           // 일반 카드
           else if (CardMethod === "N"){
             paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/token/approve`, {
                     amount: finalAmount,
-                    vankey_hash: paymentToken
+                    vankey_hash: paymentToken || token
                 });
           }
           else{
@@ -485,8 +475,8 @@ async function Payments(CardMethod) {
         // 결제 결과 처리
         if (paymentResponse && paymentResponse.status === 200) {
             console.log("[PAYMENT] Success:", paymentResponse.data);
-            sendToPNT(
-              paymentResponse,
+            await sendToPNT(
+              paymentResponse.data,
               inferenceResult,
               folderPath,
               paymentAt,
@@ -494,7 +484,7 @@ async function Payments(CardMethod) {
             )
 
         } else {
-            console.error("[PAYMENT] Failed:", paymentResponse);
+            console.error("[PAYMENT] Failed:", paymentResponse.data);
         }
 
     } catch (error) {
