@@ -169,7 +169,7 @@ async function CameraStatusAPI() {
 
 async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
   //edgepc status check
-  let edgeStatus = '';
+  let edgeStatus = '49';
   let network = false;
   let ModelRes = null;
 
@@ -179,19 +179,20 @@ async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
     // 2. 모델 서버 상태 확인
     console.log(`[MODEL-EDGEPC] Sending Request to ${config.modelApi}`);
     ModelRes = await axios.get(`${config.modelApi}/api/health`, { timeout: 5000 });
-    // console.log('[MODEL] ModelRes:', ModelRes.data);
+    console.log('[MODEL] ModelRes:', ModelRes.data);
 
     // 3. 상태 판단
-    if (LoadcellState == '29' && DeadboltState == '19' && network && ModelRes.data.model == 'HEALTHY') {
+    if (LoadcellState == '29' && DeadboltState == '19' && network && ModelRes.data.status == 'ok') {
       // console.log('[EDGEPC] All systems healthy')
       edgeStatus = '49'
     } else if (LoadcellState != '29' && DeadboltState != '19') {
       edgeStatus = '41'
       // console.log('[EDGEPC] IO Board unconnected')
-    } else if (ModelRes.data.model == 'UNHEALTHY') {
-      edgeStatus = '42'
-      // console.log('[EDGEPC] Model server unconnected')
-    }
+    } 
+    // else if (ModelRes.data.model == 'UNHEALTHY') {
+    //   edgeStatus = '42'
+    //   // console.log('[EDGEPC] Model server unconnected')
+    // }
     return edgeStatus
 
   } catch (error) {

@@ -366,8 +366,6 @@ async function Payments(token, CardMethod) {
         device_idx: null
     });
     console.log("[ProductList] Data Loading Complete:", productList);
-    const productData = productList.Data.product_list
-
 
     // [4] 카메라 폴더 생성
     // const LOCAL_ROOT = path.resolve(process.cwd()); 
@@ -380,6 +378,11 @@ async function Payments(token, CardMethod) {
 
     // 문 열림 알림 시작 - 1분간
     startDoorOpenMonitor(Date.now());
+    
+    // 상품 정보 추출
+    let productData = []
+    if (productList) { productData = productList.DATA.product_list }
+    // console.log(productData)
     
     // 모델 서버 요청 (POST)
     console.log("[Model] Sending data for inference...");
@@ -438,6 +441,7 @@ async function Payments(token, CardMethod) {
     //     } // 여기까지는 확인 완료 --> 0129
     // [10] 모델 서버에 상품 목록 + 카메라 폴더명 + 로드셀 데이터 전송 → 추론 결과 수신
     // [10] 모델 서버에 상품 목록 → 추론 결과 수신
+    // [Model] request failed: Request failed with status code 422
     try {
         inferenceResult = await inferencePromise;
         console.log("[Model] Inference Result:", inferenceResult);
