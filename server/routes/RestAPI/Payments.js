@@ -386,11 +386,15 @@ async function Payments(CardMethod) {
 
     // 문 열림 알림 시작 - 1분간
     startDoorOpenMonitor(Date.now());
-
-    try {
-      await waitForDeadboltClose();
-    } finally {
-      stopDoorOpenMonitor("flow ended");
+    
+    // 모델 서버 요청 (POST)
+    console.log("[Model] Sending data for inference...");
+    const modelRes = await axios.post(`${config.modelApi}/api/judge/multi-zone`, productData);
+    // 모델이 추론 결과를 보낼때 까지 계속 10초 간격으로 post(만약 추론이 안 끝났으면 모델은 아직 안 끝났다는 response를 보내야 함.)
+    setInterval(() => {modelRes}, 10000);
+    if (!modelRes.data.success == true) {
+        inferenceResult = modelRes.data;
+        console.log("[Model] Inference Result:", inferenceResult);
     }
 
     // [6] 상단 카메라 ON 요청
@@ -444,20 +448,7 @@ async function Payments(CardMethod) {
         } // 여기까지는 확인 완료 --> 0129
     // [10] 모델 서버에 상품 목록 + 카메라 폴더명 + 로드셀 데이터 전송 → 추론 결과 수신
     try {
-        console.log("[Model] Sending data for inference...");
-        // req
-        const inferencePayload = {
-            ProductList     : productData,
-            ImageFolder     : folderPath,
-            Loadcell        : LoadcellData,
-        };
-
-        // 모델 서버 요청 (POST)
-        const modelRes = await axios.post(`${config.modelApi}/api/judge/multi-zone`, inferencePayload);
-        // 모델이 추론 결과를 보낼때 까지 계속 10초 간격으로 post(만약 추론이 안 끝났으면 모델은 아직 안 끝났다는 response를 보내야 함.)
-        setInterval(() => {modelRes}, 10000);
-        if (!modelRes.data.success == true) {
-            inferenceResult = modelRes.data;
+        if (inferenceResult.status == true) {
             console.log("[Model] Inference Result:", inferenceResult);
         }
 
