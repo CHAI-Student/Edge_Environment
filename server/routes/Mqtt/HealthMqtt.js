@@ -3,7 +3,6 @@ const { getClient, subscribe } = require("./MqttClient");
 const { v4: uuidv4 } = require("uuid");
 const axios = require("axios"); // ✅ API 통신을 위한 라이브러리
 const { devAutoLogin } = require("../../routes/auth");
-
 async function CardTerminalStatusAPI() {
   let CardTerminalState = '39'
   try {
@@ -82,8 +81,7 @@ async function DeadboltStatusAPI() {
       DeadboltState = '10'
       console.log(`[DEADBOLT] deadbolt is ${IOBoardRes.data.deadbolt}`)
     }
-    const DeadboltOpen = IOBoardRes.data.deadbolt
-    return DeadboltState, DeadboltOpen
+    return DeadboltState
   } catch (error) {
     // deadbolt timeout
     if (error.code === "ECONNREFUSED") {
@@ -144,7 +142,7 @@ async function CameraStatusAPI() {
     console.log(`[CAMERA] Sending Request to ${config.cameraApi}`);
     const CameraRes = await axios.get(`${config.cameraApi}/health`, { timeout: 5000 });
     console.log(CameraRes.data)
-    if (CameraRes.data.status == 'HEALTHY') {
+    if (CameraRes.data) {
       CameraState = '09'
       console.log('[CAMERA] camera connect success')
     } else {
@@ -186,7 +184,7 @@ async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
     console.log('[MODEL] ModelRes:', ModelRes.data);
 
     // 3. 상태 판단
-    if (LoadcellState == '29' && DeadboltState == '19' && network && ModelRes.data) {
+    if (LoadcellState == '29' && DeadboltState == '19' && network && ModelRes.data.model == 'HEALTHY') {
       console.log('[EDGEPC] All systems healthy')
       edgeStatus = '49'
     } else if (LoadcellState != '29' && DeadboltState != '19') {
@@ -195,7 +193,7 @@ async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
     } else if (!network) {
       edgeStatus = '42'
       console.log('[EDGEPC] Network unconnected')
-    } else if (!ModelRes.data) {
+    } else if (ModelRes.data.model == 'UNHEALTHY') {
       edgeStatus = '43'
       console.log('[EDGEPC] Model server unconnected')
     }
@@ -215,36 +213,6 @@ async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
       console.error(`[EDGEPC] Error: ${error.message}`);
     }
     return edgeStatus
-  }
-}
-
-async function CameraStatusAPI() {
-  //camera status check
-  let CameraState = ''
-  try {
-    console.log(`[CAMERA] Sending Request to ${config.cameraApi}`);
-    const CameraRes = await axios.get(`${config.cameraApi}/health`, { timeout: 5000 });
-    console.log(CameraRes.data)
-    if (CameraRes.data) {
-      CameraState = '09'
-      console.log('[CAMERA] camera connect success')
-    } else {
-      CameraState = '00'
-      console.log('[CAMERA] camera unconnected')
-    }
-  } catch (error) {
-    // camera timeout
-    if (error.code === "ECONNABORTED") {
-      CameraState = "00"
-      console.log(`[CAMERA] Camera connect timeout: ${CameraState}`);
-    } else if (error.response) {
-      // 서버가 4xx, 5xx 에러를 보낸 경우
-      CameraState = "00"
-      throw new Error(`[CAMERA] Server Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
-    } else {
-      CameraState = "00"
-      throw new Error(error.message);
-    } return CameraState
   }
 }
 
@@ -271,13 +239,10 @@ async function HealthMqtt() {
       const LoadcellStatus = await LoadcellStatusAPI();
       const CameraStatus = await CameraStatusAPI();
       const EdgePCStatus = await EdgePCStatusAPI(DeadboltStatus, LoadcellStatus);
+      // const [CardTerminalStatus, DeadboltStatus, LoadcellStatus,] = await Promise.all([
       //   CardTerminalStatusAPI(),
       //   DeadboltStatusAPI(),
       //   LoadcellStatusAPI(),
-      //   CameraStatusAPI()
-      // ]);
-      // const [CardTerminalStatus] = await Promise.all([
-      //   CardTerminalStatusAPI()
       // ]);
 
       const timestamp = Date.now();
@@ -305,11 +270,9 @@ async function HealthMqtt() {
         if (e) console.error("[MQTT] publish error:", e.message);
       });
     };
-    // publishOnce(); // ✅ 연결 직후 1회
+    publishOnce(); // ✅ 연결 직후 1회
     setInterval(publishOnce, 30000); // ✅ 이후 주기
   });
 }
 
 module.exports = { HealthMqtt, CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI, CameraStatusAPI, EdgePCStatusAPI };
-// module.exports = { HealthMqtt, CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI };
-// module.exports = { HealthMqtt };
