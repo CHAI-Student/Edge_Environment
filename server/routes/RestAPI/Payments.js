@@ -39,61 +39,33 @@ function playDoorOpenVoice() {
     console.log("[VOICE] Door is still open over 1 minute. (play audio)");
 }
 
-const CHECK_INTERVAL_MS = 3000;   // 상태 확인 주기
-const GRACE_MS = 60_000;          // 1분 지난 뒤부터
-const REPEAT_MS = 60_000;         // 1분마다 반복
-
-let doorOpenStartedAt = null;
-let checkTimer = null;
-let voiceTimer = null;
-
-function startDoorOpenMonitor() {
-  stopDoorOpenMonitor("restart");
-  console.log("[DOOR] Door-open monitor started");
-
-  checkTimer = setInterval(async () => {
-    try {
-        const { DeadboltState, DeadboltOpen } = await DeadboltStatusAPI();
-        const open = DeadboltOpen === 'HEALTHY';
-
-      if (open) {
-        // 첫 OPEN 감지 시각 기록
-        if (!doorOpenStartedAt) {
-          doorOpenStartedAt = Date.now();
-          console.log("[DOOR] openedAt =", new Date(doorOpenStartedAt).toISOString());
-        }
-
-        const elapsed = Date.now() - doorOpenStartedAt;
-
-        // 1분 경과 후 음성 반복 시작 (딱 1번만 세팅)
-        if (elapsed >= GRACE_MS && !voiceTimer) {
-          console.log("[DOOR] open > 60s, start voice repeating");
-          playDoorOpenVoice(); // 시작 즉시 1회
-          voiceTimer = setInterval(playDoorOpenVoice, REPEAT_MS);
-        }
-      } else {
-        // 문 닫힘(또는 잠김/이상) 감지되면 모두 중단
-        if (doorOpenStartedAt || voiceTimer) {
-          stopDoorOpenMonitor("door closed or not healthy");
-        }
-      }
-    } catch (e) {
-      // health 체크 실패는 서버 죽이면 안 됨
-      console.error("[DOOR] /health check failed:", e.message);
-      // 실패 시에는 상태를 "모름"으로 두고, 기존 타이머 유지(원하면 여기서 stop도 가능)
-    }
-  }, CHECK_INTERVAL_MS);
-}
+let graceTimer = null;   // 1분 후 시작용 (setTimeout)
+let repeatTimer = null;  // 1분마다 반복용 (setInterval)
+let startedAt = null;
 
 function stopDoorOpenMonitor(reason = "") {
-  if (checkTimer) clearInterval(checkTimer);
-  if (voiceTimer) clearInterval(voiceTimer);
+  if (graceTimer) clearTimeout(graceTimer);
+  if (repeatTimer) clearInterval(repeatTimer);
 
-  checkTimer = null;
-  voiceTimer = null;
-  doorOpenStartedAt = null;
+  graceTimer = null;
+  repeatTimer = null;
+  startedAt = null;
 
-  if (reason) console.log("[DOOR] Door-open monitor stopped:", reason);
+  if (reason) console.log("[DOOR] monitor stopped:", reason);
+}
+
+function startDoorOpenMonitor(openedAt = Date.now()) {
+  // 중복 방지 (OPEN이 연속 호출될 수 있으니)
+  stopDoorOpenMonitor("restart");
+  startedAt = openedAt;
+
+  console.log("[DOOR] monitor started at", new Date(openedAt).toISOString());
+
+  // 1분 뒤부터 알람 시작
+  graceTimer = setTimeout(() => {
+    playDoorOpenVoice(); // 1분 경과 시 즉시 1회
+    repeatTimer = setInterval(playDoorOpenVoice, 60_000); // 이후 1분마다
+  }, 60_000);
 }
 
 function makeTimestampFolderName(d = new Date()) {
@@ -413,7 +385,17 @@ async function Payments(CardMethod) {
     if (openResult !== "OPEN" && openResult !== 'UNLOCK') throw new Error(`Failed to open door. Status: ${openResult}`)
 
     // 문 열림 알림 시작 - 1분간
-    startDoorOpenMonitor();
+    startDoorOpenMonitor(Date.now());
+    
+    // 모델 서버 요청 (POST)
+    console.log("[Model] Sending data for inference...");
+    const modelRes = await axios.post(`${config.modelApi}/api/judge/multi-zone`, productData);
+    // 모델이 추론 결과를 보낼때 까지 계속 10초 간격으로 post(만약 추론이 안 끝났으면 모델은 아직 안 끝났다는 response를 보내야 함.)
+    setInterval(() => {modelRes}, 10000);
+    if (!modelRes.data.success == true) {
+        inferenceResult = modelRes.data;
+        console.log("[Model] Inference Result:", inferenceResult);
+    }
 
     // [6] 상단 카메라 ON 요청
     await requestTopCameraON({ save_path: folderPath});
@@ -424,8 +406,12 @@ async function Payments(CardMethod) {
 
     // [9] 데드볼트 상태 (close) (sensor → node) + (상단 카메라 off + folder snapshot) 저장 (node → camera python)
     try {
-        // 1. 문이 닫히고 로그 경로가 올 때까지 대기
-        const closeEventData = await waitForDeadboltClose();
+      // 1. 문이 닫히고 로그 경로가 올 때까지 대기
+      const closeEventData = await waitForDeadboltClose();
+      const state = closeEventData.state;
+      if (state && closedStates.includes(state)) {
+          stopDoorOpenMonitor("deadbolt closed");
+          console.log("[DEADBOLT] Door closed detected:", closeEventData.state);
         try {
           await axios.post(`${config.ioboardApi}/recording/stop`, {}); 
           await delay(5000);
@@ -433,11 +419,14 @@ async function Payments(CardMethod) {
         } catch (error) {
           console.error("녹화 종료 실패:", error);
         }
-
-        if (closedStates.includes(closeEventData.state)) {
-            console.log("[DEADBOLT] Door closed detected:", closeEventData.state);
-            await requestCameraOFF();
+        try {
+          await requestCameraOFF();
+        } catch (e) {
+          console.error("[CAM] OFF failed:", e?.message || e);
         }
+      } else {
+        console.log("[DEADBOLT] Close event received but state not closed:", state);
+      }
     } catch (error) {
         console.error("[Process Error] Door/Camera Sequence:", error);
         return; // 에러 시 중단
@@ -449,6 +438,7 @@ async function Payments(CardMethod) {
           // Use only the data payload (avoid passing axios response object which contains circular refs)
           LoadcellData = resp.data;
           // console.log('[LoadcellData]', LoadcellData.logs, { depth: null })
+          console.log('[LoadcellData] loadcell data responsed')
         } catch (error) {
           if (error.response) {
             console.error("로드셀 데이터 갖고오기 실패:", error.response.data);
@@ -458,20 +448,7 @@ async function Payments(CardMethod) {
         } // 여기까지는 확인 완료 --> 0129
     // [10] 모델 서버에 상품 목록 + 카메라 폴더명 + 로드셀 데이터 전송 → 추론 결과 수신
     try {
-        console.log("[Model] Sending data for inference...");
-        // req
-        const inferencePayload = {
-            ProductList     : productData,
-            ImageFolder     : folderPath,
-            Loadcell        : LoadcellData,
-        };
-
-        // 모델 서버 요청 (POST)
-        const modelRes = await axios.post(`${config.modelApi}/api/judge/multi-zone`, inferencePayload);
-        // 모델이 추론 결과를 보낼때 까지 계속 10초 간격으로 post(만약 추론이 안 끝났으면 모델은 아직 안 끝났다는 response를 보내야 함.)
-        setInterval(() => {modelRes}, 10000);
-        if (!modelRes.data.success == true) {
-            inferenceResult = modelRes.data;
+        if (inferenceResult.status == true) {
             console.log("[Model] Inference Result:", inferenceResult);
         }
 
