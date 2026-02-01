@@ -73,17 +73,37 @@ Node.js, IO Board, Payment, Camera Driver는 별도 레포에서 관리됩니다
 | cuDNN | 9.x | JetPack 포함 |
 | TensorRT | 10.x | JetPack 포함 |
 | FFmpeg | 4.x 이상 | `apt install ffmpeg` |
+| NumPy | **1.x (< 2.0)** | 시스템 패키지 호환 필수 |
 
-### Python 환경 설정 (중요)
+### uv 기반 환경 설정 (권장)
 
 ```bash
-# 반드시 --system-site-packages 옵션 사용!
-# torch, numpy, opencv는 시스템 패키지 사용
-python3 -m venv --system-site-packages .venv
+# 1. uv 설치 (없으면)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# 2. 자동 설정 스크립트 실행
+chmod +x scripts/setup_jetson.sh
+./scripts/setup_jetson.sh
+
+# 3. 가상환경 활성화
+source .venv/bin/activate
+```
+
+### 수동 설정 (uv)
+
+```bash
+# 1. uv로 가상환경 생성 (시스템 패키지 상속 - CUDA/torch/tensorrt 필수!)
+uv venv --system-site-packages --python python3.10 .venv
 source .venv/bin/activate
 
-# 의존성 설치
-pip install -e ".[ai]"
+# 2. 의존성 설치
+uv pip install -e ".[dev]"
+
+# 3. NumPy 버전 확인 (반드시 1.x)
+python -c "import numpy; print(numpy.__version__)"
+# 2.x면 다운그레이드:
+uv pip install "numpy>=1.24.0,<2.0.0"
 ```
 
 ### TensorRT 엔진 변환
@@ -110,7 +130,11 @@ python3 -c "import torch; print(torch.cuda.get_device_name(0))"
 # 3. TensorRT 버전
 python3 -c "import tensorrt; print(f'TensorRT: {tensorrt.__version__}')"
 
-# 4. 서비스 시작 후 헬스 체크
+# 4. NumPy 버전 (반드시 1.x)
+python3 -c "import numpy; print(f'NumPy: {numpy.__version__}')"
+# 기대: 1.24.x 또는 1.26.x (NOT 2.x)
+
+# 5. 서비스 시작 후 헬스 체크
 curl http://localhost:8002/api/health
 ```
 
@@ -126,12 +150,12 @@ MODEL__BUFFER__TTL_SECONDS=300
 MODEL__BUFFER__MAX_SESSIONS=100
 ```
 
-### 2. 의존성 설치
+### 2. 의존성 설치 (uv)
 ```bash
-# Jetson: 시스템 패키지 사용 venv
-python3 -m venv --system-site-packages .venv
+# Jetson: uv + 시스템 패키지 상속
+uv venv --system-site-packages --python python3.10 .venv
 source .venv/bin/activate
-pip install -e ".[ai]"
+uv pip install -e ".[dev]"
 ```
 
 ### 3. 서비스 실행

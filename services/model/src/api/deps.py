@@ -159,10 +159,13 @@ def is_initialized() -> bool:
 
 def get_status() -> dict:
     """의존성 상태 반환."""
+    yolo = _instances.get("yolo")
     return {
         "initialized": is_initialized(),
         "session_store": _instances.get("session_store") is not None,
-        "yolo": _instances.get("yolo") is not None,
+        "yolo": yolo is not None,
+        "yolo_instance": yolo,  # health.py에서 is_loaded 확인용
+        "yolo_loaded": yolo.is_loaded if yolo else False,
         "engine": _instances.get("engine") is not None,
         "db": _instances.get("db") is not None,
         "video_processor": _instances.get("video_processor") is not None,

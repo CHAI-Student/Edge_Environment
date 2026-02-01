@@ -27,7 +27,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ProductResult:
     """단일 상품 판단 결과."""
-    product_id: int
+    product_id: int           # YOLO class_id (내부용)
+    product_idx: Optional[str]  # IF11 product_idx (Node.js 응답용)
     name: str
     count: int
     price: int
@@ -71,6 +72,7 @@ class SessionData:
             "zone": self.zone,
             "products": [
                 {
+                    "productIdx": p.product_idx if p.product_idx else str(p.product_id),
                     "productId": p.product_id,
                     "name": p.name,
                     "count": p.count,

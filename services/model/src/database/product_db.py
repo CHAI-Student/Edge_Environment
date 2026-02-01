@@ -1162,6 +1162,9 @@ class ProductDatabase:
         """
         YOLO-IF11 매핑 파일 로드.
 
+        매핑 파일에서 yolo_class_id, yolo_class_name, product_idx를 읽어
+        상품 정보를 업데이트합니다.
+
         Args:
             path: 매핑 파일 경로 (JSON)
 
@@ -1182,19 +1185,45 @@ class ProductDatabase:
             for mapping in data.get("mappings", []):
                 yolo_class_id = mapping.get("yolo_class_id")
                 yolo_class_name = mapping.get("yolo_class_name")
-                product_idx = mapping.get("product_idx")
+                product_idx = mapping.get("product_idx")  # IF11 product_idx (null 가능)
+                product_name = mapping.get("product_name")
+                category = mapping.get("category", "etc")
+                weight = mapping.get("weight", 0)
+                price = mapping.get("price", 0)
 
                 if yolo_class_id is None:
                     continue
 
-                # YOLO 클래스 등록
+                # YOLO 클래스 등록 (create_product=True로 상품 생성)
                 if yolo_class_name:
-                    self.register_yolo_class(yolo_class_id, yolo_class_name, create_product=False)
+                    product_id = self.register_yolo_class(
+                        yolo_class_id, yolo_class_name, create_product=True
+                    )
 
-                # IF11과 연결
-                if product_idx:
-                    if self.link_yolo_to_if11(yolo_class_id, product_idx):
+                    # 상품 정보 업데이트
+                    if product_id is not None and product_id in self._products:
+                        product = self._products[product_id]
+
+                        # 매핑 파일의 정보로 업데이트
+                        if product_name:
+                            product.name = product_name
+                        if category:
+                            product.category = category
+                        if weight > 0:
+                            product.weight = float(weight)
+                        if price > 0:
+                            product.price = int(price)
+
+                        # IF11 product_idx 설정 (null이면 None)
+                        product.product_idx = product_idx
+                        if product_idx:
+                            self._product_idx_to_id[product_idx] = product_id
+
                         loaded_count += 1
+                        logger.debug(
+                            f"Loaded mapping: yolo_class_id={yolo_class_id}, "
+                            f"product_idx={product_idx}, name={product_name}"
+                        )
 
             logger.info(f"Loaded {loaded_count} mappings from {path}")
             return loaded_count

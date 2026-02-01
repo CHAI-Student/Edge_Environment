@@ -1,96 +1,94 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "ai-smart-vending"
-version = "1.0.0"
-description = "AI Smart Vending Machine System - Edge Environment"
+version = "4.0.0"
+description = "AI Smart Vending Machine - Model Service (Jetson Orin Nano TensorRT)"
 readme = "README.md"
 requires-python = ">=3.10,<3.12"
 license = { text = "MIT" }
 
-# Core dependencies (torch, numpy, opencv are provided by system on Jetson)
+# =============================================================================
+# Jetson Orin Nano (JetPack 6.2, Ubuntu 22.04) 전용
+# =============================================================================
+# 중요: torch, torchvision, opencv, tensorrt는 Jetson 시스템 패키지 사용
+# uv venv --system-site-packages 옵션 필수!
 dependencies = [
+    # API Framework
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.23.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
+    "python-multipart>=0.0.6",
+
+    # HTTP Client
     "httpx>=0.24.0",
     "aiohttp>=3.8.0",
-    "httpx-sse>=0.3.0",
+
+    # NumPy: 반드시 1.x (시스템 패키지 호환)
+    "numpy>=1.24.0,<2.0.0",
+
+    # Image Processing
     "pillow>=10.0.0",
-    "pyserial>=3.5",
-    "pyserial-asyncio>=0.6",
-    "construct>=2.10.70",
+
+    # YOLO (TensorRT 지원)
+    "ultralytics>=8.0.0,<9.0.0",
+
+    # Utilities
     "pyyaml>=6.0.0",
-    "python-multipart>=0.0.6",
 ]
 
 [project.optional-dependencies]
-# =============================================================================
-# Jetson Orin Nano (JetPack 6.2) TensorRT 전용 환경
-# =============================================================================
-# torch/torchvision/numpy/opencv는 시스템 패키지로 사전 설치됨
-# 반드시 --system-site-packages 옵션으로 venv 생성:
-#   python3 -m venv --system-site-packages .venv
-#   source .venv/bin/activate
-#   pip install -e ".[ai]"
-ai = [
-    "ultralytics>=8.0.0,<9.0.0",  # TensorRT 호환 버전
-    # torch, torchvision, numpy, opencv: Jetson 시스템 패키지 사용
-]
-# =============================================================================
-# DEPRECATED: ai-desktop 제거됨 - Jetson Orin Nano 전용 환경으로 전환
-# =============================================================================
-# Windows/CPU 개발 환경은 더 이상 지원하지 않습니다.
-# TensorRT 엔진(.engine)은 Jetson에서만 실행 가능합니다.
-# ai-desktop = [
-#     "ultralytics>=8.0.0",
-#     "torch>=2.0.0",
-#     "torchvision>=0.15.0",
-#     "numpy>=1.24.0,<2.0.0",
-#     "opencv-python-headless>=4.8.0,<4.11.0",
-# ]
-mqtt = [
-    "aiomqtt>=2.0.0",
-]
+# 개발 도구
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",
-    "mypy>=1.0.0",
 ]
+
+# 테스트
 test = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
 ]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["services*"]
+[tool.hatch.build.targets.wheel]
+packages = ["services"]
 
+# =============================================================================
+# UV Configuration (Jetson Orin Nano)
+# =============================================================================
 [tool.uv]
-python = "3.10"
-# Jetson uses system packages for torch/numpy/opencv
-system-packages = true
+# Python 3.10 (JetPack 6.2 기본)
+python-version = "3.10"
 
+# 시스템 패키지 상속 (torch, opencv, tensorrt)
+system-site-packages = true
+
+# =============================================================================
+# Pytest Configuration
+# =============================================================================
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["services/model/tests", "services/camera_driver/tests"]
+testpaths = ["services/model/tests"]
 python_files = "test_*.py"
 python_functions = "test_*"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
 
+# =============================================================================
+# Ruff Configuration
+# =============================================================================
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
 ignore = ["E501"]
-
-[tool.mypy]
-python_version = "3.11"
-ignore_missing_imports = true

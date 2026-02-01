@@ -53,7 +53,8 @@ class MultiZoneRequest(BaseModel):
 class ProductResponse(BaseModel):
     """상품 판단 결과."""
 
-    productId: int
+    productIdx: str  # IF11 product_idx (문자열)
+    productId: int   # YOLO class_id (하위 호환)
     name: str
     count: int
     price: int
@@ -145,6 +146,7 @@ async def judge_multi_zone(
     # 결과가 있으면 complete 응답
     products = [
         {
+            "productIdx": p.product_idx if p.product_idx else str(p.product_id),
             "productId": p.product_id,
             "name": p.name,
             "count": p.count,

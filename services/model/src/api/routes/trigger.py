@@ -26,7 +26,8 @@ from video import VideoProcessor, VoteResult
 from engine import ProductDecisionEngine, EnsembleResult
 from session import SessionStore, SessionData, ProductResult
 from session.session_store import generate_session_id
-from api.deps import get_decision_engine, get_video_processor, get_session_store
+from api.deps import get_decision_engine, get_video_processor, get_session_store, get_product_db
+from database.product_db import ProductDatabase
 from core.exceptions import (
     VideoProcessingError,
     VideoCorruptedError,
@@ -294,6 +295,7 @@ async def trigger_judgment(
     video_processor: VideoProcessor = Depends(get_video_processor),
     engine: ProductDecisionEngine = Depends(get_decision_engine),
     session_store: SessionStore = Depends(get_session_store),
+    product_db: ProductDatabase = Depends(get_product_db),
 ):
     """
     Camera에서 녹화 완료 시 호출되는 트리거 API.
@@ -362,9 +364,18 @@ async def trigger_judgment(
         )
 
         # 6. SessionStore에 결과 저장
+        # YOLO class_id → IF11 product_idx 조회
+        def get_product_idx(product_id: int) -> str | None:
+            """YOLO class_id로 IF11 product_idx 조회."""
+            product_info = product_db.get_by_yolo_class_id(product_id)
+            if product_info and product_info.product_idx:
+                return product_info.product_idx
+            return None
+
         products = [
             ProductResult(
                 product_id=p.product_id,
+                product_idx=get_product_idx(p.product_id),
                 name=p.name,
                 count=p.count,
                 price=p.unit_price,
