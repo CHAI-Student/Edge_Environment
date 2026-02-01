@@ -82,7 +82,8 @@ async function DeadboltStatusAPI() {
       DeadboltState = '10'
       console.log(`[DEADBOLT] deadbolt is ${IOBoardRes.data.deadbolt}`)
     }
-    return DeadboltState
+    const DeadboltOpen = IOBoardRes.data.deadbolt
+    return DeadboltState, DeadboltOpen
   } catch (error) {
     // deadbolt timeout
     if (error.code === "ECONNREFUSED") {
@@ -310,5 +311,5 @@ async function HealthMqtt() {
 }
 
 module.exports = { HealthMqtt, CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI, CameraStatusAPI, EdgePCStatusAPI };
-module.exports = { HealthMqtt, CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI };
+// module.exports = { HealthMqtt, CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI };
 // module.exports = { HealthMqtt };

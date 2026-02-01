@@ -5,108 +5,97 @@ const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 
-// [수정 4] 날짜 포맷 함수 추가 (YYYY-MM-DD HH:mm:ss 형식 예시)
-function getFormatDate(date) {
-    const yyyy = date.getFullYear();
-    const mm = String(date.getMonth() + 1).padStart(2, '0');
-    const dd = String(date.getDate()).padStart(2, '0');
-    const HH = String(date.getHours()).padStart(2, '0');
-    const MM = String(date.getMinutes()).padStart(2, '0');
-    const SS = String(date.getSeconds()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd} ${HH}:${MM}:${SS}`;
-}
-
-async function sendToPNT(paymentDate, paymentData, inferenceData, folderPath, token) {
+async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt, CardMethod) {
     console.log("[PNT] Preparing IF_08 data transfer...");
 
     try {
-        const formData = new FormData();
-        const currentDate = new Date();
-        const formattedDate = getFormatDate(currentDate);
-
-        // --- 이미지 파일 준비 ---
-        let paymentImgList = [];
-        
-        const camFolderPath = path.join(folderPath, "images", "cam_0");
-
-        if (fs.existsSync(camFolderPath)) {
-            const files = fs.readdirSync(camFolderPath);
-            const imageFiles = files.filter(file => /\.(jpg|jpeg|png)$/i.test(file)).slice(0, 2);
-
-            paymentImgList = imageFiles.map(file => {
-                const filePath = path.join(camFolderPath, file);
-                const stats = fs.statSync(filePath);
-                
-                // 파일 스트림 첨부
-                formData.append('files', fs.createReadStream(filePath), { filename: file });
-
-                return {
-                    file_name: file,
-                    file_ext: path.extname(file).replace('.', ''),
-                    file_size: stats.size
-                };
-            });
-        } else {
-            console.warn(`[PNT] Warning: Image folder not found at ${camFolderPath}`);
+        const camFolderPath = path.join(folderPath, "archival", "cam_0");
+        const files = fs.readdirSync(camFolderPath);
+        const mp4 = files.find(f => f.toLowerCase().endsWith(".mp4"));
+        if (!mp4) {
+            throw new Error("No mp4 file found in cam_0 folder");
         }
+        const fullPath = path.join(camFolderPath, mp4);
+        const fileName = path.basename(fullPath);
+        const stat = fs.statSync(fullPath);
+        
+        // if (fs.existsSync(camFolderPath)) {
+        //     const files = fs.readdirSync(camFolderPath);
+        //     const imageFiles = files.filter(file => /\.(jpg|jpeg|png)$/i.test(file)).slice(0, 2);
 
-        const cardInfo = paymentData.card_info;
+        //     paymentImgList = imageFiles.map(file => {
+        //         const filePath = path.join(camFolderPath, file);
+        //         const stats = fs.statSync(filePath);
+                
+        //         // 파일 스트림 첨부
+        //         formData.append('files', fs.createReadStream(filePath), { filename: file });
 
-        const jsonData = {
-            "HEADER": {
-                "IF_ID": "IF_08",
-                "IF_SYSID": uuidv4(),
-                "IF_HOST": "EDGE",
-                "IF_DATE": formattedDate
+        //         return {
+        //             file_name: file,
+        //             file_ext: path.extname(file).replace('.', ''),
+        //             file_size: stats.size
+        //         };
+        //     });
+        // } else {
+        //     console.warn(`[PNT] Warning: Image folder not found at ${camFolderPath}`);
+        // }
+
+
+        // 결제 데이터 전달
+        // const external = axios.create({
+        //   baseURL: config.restApi, // https://apichaidev.atcrk.co.kr/api/v1
+        //   timeout: 10000,
+        //   headers: { "Content-Type": "application/json" },
+        // });
+
+        const timestamp = Date.now();
+        const payload = {
+            HEADER: {
+                IF_ID: "IF_08",
+                IF_SYSID: uuidv4(),
+                IF_HOST: "CHAI",
+                IF_DATE: timestamp,
             },
-            "DATA": {
-                "device_idx": config.deviceIdx,
-                "division_idx": config.divisionIdx,
-                "token_id": token,
-                
-                "payment_at": paymentDate,
-                "approve_at": paymentData.authorization_date,
-                
-                "approve_type": "1", // [필수 수정]    
-                "approve_result": "0", // [필수 수정]
-                "approve_price": inferenceData.totalPrice,
-                "approve_no": paymentData.authorization_number,
-                
-                "approve_card_issuer": cardInfo.ISSUER_NAME,
-                "approve_card_num": cardInfo.SERIAL_NUMBER,
-                
-                "approve_card_json": JSON.stringify(paymentData),
-                
-                "provider": "chai",
-                "state": paymentData.response_code,
-                
-                // [필수 수정] 상품 목록 (AI 모델 추론 결과 매핑)
-                // 해당 탐지된 제품들의 productId notion에 적힌대로 나오는게 맞는지 확인
-                "product_list": (inferenceData.products || []).map(p => ({
-                    "product_idx": p.productId,
-                    "product_count": p.count
-                })),
-                
-                "payment_img_list": paymentImgList
+            DATA:{
+                device_idx: config.deviceIdx,
+                division_idx: config.divisionIdx,
+                token_id: paymentResponse.vankey_hash || paymentResponse.vankey,
+                payment_at: paymentAt,
+                approve_at: paymentResponse.authorization_date,
+                approve_type: CardMethod === 'R' ? '2' : (CardMethod === 'S' ? '1' : '0'), // 0=일반카드, 1=삼성페이, 2=RFID
+                approve_result: 'SUCCESS',
+                approve_price: inferenceResult.totalPrice,
+                approve_no: paymentResponse.authorization_number,
+                approve_card_issuer: paymentResponse.card_info.ISSUER_NAME,
+                approve_card_num: paymentResponse.card_info.SERIAL_NUMBER,
+                approve_card_json: JSON.stringify(paymentResponse),
+                provider: "chai",
+                state: inferenceResult.status === 'success' ? '0' : '1',
+                product_idx: inferenceResult.products.map(p => p.productId).join(","),
+                product_count: inferenceResult.products.map(p => p.count).join(","),
+                file_name: fileName,
+                file_ext: 'mp4',
+                file_size: stat.size,
             }
-        };
-
-        // --- [3] JSON 데이터 추가 ---
-        formData.append('data', JSON.stringify(jsonData));
-
-        // --- [4] 서버 전송 ---
-        const pntUrl = `${config.restApi}/chai/payment/store`; 
-
-        console.log(`[PNT] Sending to ${pntUrl} (Images: ${paymentImgList.length})`);
-
-        const response = await axios.post(pntUrl, formData, {
-            headers: {
-                ...formData.getHeaders(), 
-            },
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity
+        }
+        // 3) FormData 구성 (payload + paymentFile)
+        const form = new FormData();
+        form.append("payload", JSON.stringify(payload));
+        form.append("paymentFile", fs.createReadStream(fullPath), {
+            filename: fileName,
+            contentType: "video/mp4",
         });
 
+        const token = config.jwtToken
+        const response = await axios.post("/chai/payment/store", form, {
+            headers: {
+                ...form.getHeaders(),
+                Authorization: `Bearer ${jwt}`,
+            }, 
+            timeout: 30000,
+            maxBodyLength: Infinity,
+            maxContentLength: Infinity,
+        });
         if (response.status === 200) {
             console.log("[PNT] Transfer Success:", response.data);
             return true;
