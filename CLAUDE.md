@@ -1,6 +1,6 @@
 # Edge Environment Lite - Model 서비스
 
-AI 스마트 자판기 시스템의 Model 서비스 (v4.1 Door Session API)
+AI 스마트 자판기 시스템의 Model 서비스 (v4.2 Service Layer + Docker)
 **Jetson Orin Nano 4GB (JetPack 6.2) TensorRT 전용**
 
 > **최종 업데이트**: 2026-02-02
@@ -11,7 +11,21 @@ AI 스마트 자판기 시스템의 Model 서비스 (v4.1 Door Session API)
 **TensorRT 엔진(.engine)** 파일만 지원하며, **CUDA가 필수**입니다.
 Node.js, IO Board, Payment, Camera Driver는 별도 레포에서 관리됩니다.
 
-### v4.1 변경사항 (최신)
+### v4.2 변경사항 (최신)
+
+- **Service Layer 추가**: Controller-Service 패턴 적용
+  - `src/service/trigger_service.py` - 트리거 비즈니스 로직
+  - `src/service/judgment_service.py` - 판단 비즈니스 로직
+  - `src/service/door_session_service.py` - DoorSession 관리
+- **Config 통합**: `src/config.py` 제거, `core.config`로 일원화
+- **Docker 지원**: Jetson Orin Nano 4GB 최적화 컨테이너
+  - `Dockerfile` - 멀티스테이지 빌드
+  - `docker-compose.yml` - 메모리 3G 제한
+  - `.env.docker` - 환경변수 템플릿
+- **TTL 자동 정리**: 백그라운드 태스크로 좀비 세션 정리
+- **YAML Lock 분리**: Copy-on-write로 파일 I/O 중 블로킹 제거
+
+### v4.1 변경사항
 
 - **Door Session 추가**: 문 열림~닫힘 동안의 여러 trigger를 하나의 세션으로 통합 관리
 - **ProductAggregator**: 다중 trigger 상품 합산, 반환(무게 증가) 시 차감 처리
@@ -38,7 +52,7 @@ Node.js, IO Board, Payment, Camera Driver는 별도 레포에서 관리됩니다
 | 배치 크기 | 1 (고정) | 4GB 메모리 제약 |
 | GPU 워밍업 | 서비스 시작 시 더미 추론 2회 | 첫 요청 지연 제거 |
 
-## 아키텍처 (v4.1)
+## 아키텍처 (v4.2)
 
 ```
 다른 레포                                 이 레포
@@ -172,7 +186,25 @@ uv pip install -e ".[dev]"
 cd services/model && python main.py
 ```
 
-## API 엔드포인트 (v4.1)
+### 4. Docker 실행 (v4.2)
+
+```bash
+cd services/model
+
+# 환경변수 설정
+cp .env.docker .env
+
+# Docker Compose로 실행 (Jetson GPU 사용)
+docker-compose up -d
+
+# 로그 확인
+docker-compose logs -f model
+
+# 헬스 체크
+curl http://localhost:8002/api/health
+```
+
+## API 엔드포인트 (v4.2)
 
 ### 1. POST /trigger (Camera → Model)
 
@@ -411,6 +443,9 @@ Edge_Environment/
 └── services/
     └── model/                    # AI 상품 판단 (포트 8002)
         ├── main.py               # PM2 호환 진입점
+        ├── Dockerfile            # Docker 빌드 (v4.2)
+        ├── docker-compose.yml    # Docker Compose (v4.2)
+        ├── .env.docker           # Docker 환경변수 템플릿 (v4.2)
         └── src/
             ├── api/
             │   ├── routes/       # 분리된 라우터
@@ -419,7 +454,11 @@ Edge_Environment/
             │   │   ├── multi_zone.py # POST /api/judge/multi-zone
             │   │   └── products.py   # 상품 관리
             │   ├── deps.py       # 의존성 주입
-            │   └── manager.py    # FastAPI 앱 팩토리
+            │   └── manager.py    # FastAPI 앱 팩토리 + TTL cleanup
+            ├── service/          # 비즈니스 로직 레이어 (v4.2)
+            │   ├── trigger_service.py      # 트리거 처리 서비스
+            │   ├── judgment_service.py     # 판단 서비스
+            │   └── door_session_service.py # DoorSession 서비스
             ├── session/          # 세션 저장소
             │   ├── session_store.py      # 기본 세션 저장소
             │   ├── door_session_store.py # Door Session 저장소 (v4.1)
@@ -439,13 +478,13 @@ Edge_Environment/
             │   └── models.py
             ├── database/         # 상품 DB
             │   └── product_db.py
-            └── core/             # 설정
-                ├── config.py
+            └── core/             # 설정 (통합됨)
+                ├── config.py     # 모든 설정 (유일한 config 파일)
                 ├── exceptions.py
                 └── logging_config.py
 ```
 
-## 데이터 흐름 (v4.1)
+## 데이터 흐름 (v4.2)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -658,7 +697,7 @@ pytest services/model/tests --cov=services/model/src --cov-report=html
 | `test_pipeline.py` | E2E 파이프라인 | 8 |
 | `test_scenario.py` | 실제 시나리오 | 14 |
 | `test_error_handling.py` | 예외 처리 | 14 |
-| **총계** | | **113+** |
+| **총계** | | **116** |
 
 ## 삭제된 API (v3.0 → v4.0)
 
