@@ -141,13 +141,13 @@ async function CameraStatusAPI() {
   try {
     console.log(`[CAMERA] Sending Request to ${config.cameraApi}`);
     const CameraRes = await axios.get(`${config.cameraApi}/health`, { timeout: 5000 });
-    // console.log(CameraRes.data)
+    console.log(CameraRes.data)
     if (CameraRes.data.status == 'HEALTHY') {
       CameraState = '09'
       // console.log('[CAMERA] camera connect success')
     } else {
       CameraState = '00'
-      // console.log('[CAMERA] camera unconnected')
+      // console.log('[CAMERA] camera unconnected: ', CameraRes.data)
     }
     return CameraState
   } catch (error) {
