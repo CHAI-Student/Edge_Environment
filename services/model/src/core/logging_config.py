@@ -74,14 +74,6 @@ def setup_logging(log_level: str = "INFO") -> None:
     # Convert log level string to constant
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
 
-    # Configure root logger
-    logger = logging.getLogger("model")
-    logger.setLevel(numeric_level)
-
-    # Remove existing handlers
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
-
     # Create console handler with structured formatter
     handler = logging.StreamHandler()
     handler.setLevel(numeric_level)
@@ -96,10 +88,25 @@ def setup_logging(log_level: str = "INFO") -> None:
     # Add correlation ID filter
     handler.addFilter(CorrelationIdFilter())
 
-    logger.addHandler(handler)
+    # Configure root logger (모든 모듈에 적용)
+    root_logger = logging.getLogger()
+    root_logger.setLevel(numeric_level)
 
-    # Prevent propagation to root logger
-    logger.propagate = False
+    # Remove existing handlers from root
+    for h in root_logger.handlers[:]:
+        root_logger.removeHandler(h)
+
+    root_logger.addHandler(handler)
+
+    # Also configure "model" logger for backward compatibility
+    model_logger = logging.getLogger("model")
+    model_logger.setLevel(numeric_level)
+    model_logger.propagate = True  # root로 전파
+
+    # Suppress noisy loggers
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def get_logger(name: str) -> logging.Logger:
