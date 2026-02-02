@@ -280,6 +280,7 @@ async def judge_multi_zone(
         }
 
     # 결과가 있으면 complete 응답
+    # 개수가 0인 상품은 제외 (Node.js에서 요청한 상품 목록에 포함되지 않음)
     products = [
         {
             "productIdx": p.product_idx if p.product_idx else str(p.product_id),
@@ -290,19 +291,24 @@ async def judge_multi_zone(
             "confidence": round(p.confidence, 4),
         }
         for p in session_data.products
+        if p.count > 0  # 개수 0인 상품 필터링
     ]
 
-    # 총 상품 개수 계산
-    product_count = sum(p.count for p in session_data.products)
+    # 총 상품 개수 계산 (count > 0인 상품만)
+    product_count = sum(p.count for p in session_data.products if p.count > 0)
+
+    # success 조건: status가 "complete"이고 개수가 0보다 큰 상품이 하나 이상 있을 때만 true
+    is_success = session_data.status == "complete" and product_count > 0
 
     logger.info(
         f"[MULTI-ZONE RESPONSE] device_id={device_id}, session_id={session_data.session_id}, "
         f"status=complete, zone={session_data.zone}, products={len(products)}, "
-        f"count={product_count}, total={session_data.total_price}, delta={session_data.delta_weight:.1f}g"
+        f"count={product_count}, total={session_data.total_price}, delta={session_data.delta_weight:.1f}g, "
+        f"success={is_success}"
     )
 
     return {
-        "success": True,
+        "success": is_success,
         "status": "complete",
         "device_id": device_id,
         "zone": session_data.zone,
