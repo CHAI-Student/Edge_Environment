@@ -26,7 +26,7 @@ from .models import (
     JudgmentResult,
     JudgmentStatus,
 )
-from config import config
+from core.config import config
 
 # Lazy import to avoid circular dependency
 if TYPE_CHECKING:

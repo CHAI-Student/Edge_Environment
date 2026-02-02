@@ -117,7 +117,7 @@ class WeightModel(BaseModel):
 
 
 class BufferModel(BaseModel):
-    """Session store configuration settings (v4.0)."""
+    """Session store configuration settings (v4.2)."""
 
     ttl_seconds: float = Field(
         default=300.0,
@@ -127,10 +127,14 @@ class BufferModel(BaseModel):
         default=100,
         description="Maximum concurrent sessions",
     )
+    cleanup_interval_seconds: float = Field(
+        default=60.0,
+        description="Background cleanup interval in seconds (v4.2)",
+    )
 
 
 class DoorSessionModel(BaseModel):
-    """Door Session configuration settings (v4.1)."""
+    """Door Session configuration settings (v4.2)."""
 
     enabled: bool = Field(
         default=True,
@@ -151,6 +155,10 @@ class DoorSessionModel(BaseModel):
     max_duration_seconds: float = Field(
         default=600.0,
         description="최대 세션 지속 시간 (초, 10분)",
+    )
+    yaml_retention_days: int = Field(
+        default=7,
+        description="완료된 YAML 세션 파일 보관 기간 (일, v4.2)",
     )
 
 

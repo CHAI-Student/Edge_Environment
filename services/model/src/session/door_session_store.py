@@ -1,8 +1,12 @@
 """
-Door Session Store.
+Door Session Store (v4.2).
 
 Door Session을 관리하는 저장소.
 여러 번의 /trigger 호출을 하나의 Door Session으로 통합 관리합니다.
+
+v4.2 변경사항:
+- Copy-on-Write 패턴: Lock 내에서 데이터 복사, Lock 해제 후 YAML 저장
+- 타임아웃 체크 로직 통합 (_check_timeout 메서드)
 
 사용법:
     store = DoorSessionStore(
@@ -18,9 +22,11 @@ Door Session을 관리하는 저장소.
     session, is_finalized = store.get_or_finalize(zone=1)
 """
 
+import copy
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .door_session import (
@@ -33,6 +39,13 @@ from .product_aggregator import ProductAggregator
 from .yaml_persistence import YamlPersistence
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TimeoutCheckResult:
+    """타임아웃 체크 결과."""
+    is_timed_out: bool
+    reason: str = ""  # "idle_timeout" | "max_duration" | ""
 
 
 class DoorSessionStore:
@@ -85,6 +98,41 @@ class DoorSessionStore:
             f"max_duration={max_duration}s"
         )
 
+    def _check_timeout(
+        self,
+        session: DoorSession,
+        now: Optional[float] = None,
+    ) -> TimeoutCheckResult:
+        """
+        세션 타임아웃 체크 (통합 로직, v4.2).
+
+        Args:
+            session: 체크할 DoorSession
+            now: 현재 시각 (기본값: time.time())
+
+        Returns:
+            TimeoutCheckResult
+        """
+        if now is None:
+            now = time.time()
+
+        time_since_last = now - session.last_trigger_at
+        total_duration = now - session.created_at
+
+        if time_since_last > self._session_timeout:
+            return TimeoutCheckResult(
+                is_timed_out=True,
+                reason="idle_timeout",
+            )
+
+        if total_duration > self._max_duration:
+            return TimeoutCheckResult(
+                is_timed_out=True,
+                reason="max_duration",
+            )
+
+        return TimeoutCheckResult(is_timed_out=False)
+
     def set_product_weight_getter(
         self,
         get_product_weight: Callable[[int], float],
@@ -112,6 +160,8 @@ class DoorSessionStore:
         활성 세션이 없으면 새로 생성하고,
         있으면 기존 세션에 trigger를 추가합니다.
 
+        v4.2: Copy-on-Write 패턴 - Lock 내에서 데이터 수정, Lock 해제 후 YAML 저장
+
         Args:
             zone: Zone 번호
             result: TriggerResult
@@ -119,6 +169,9 @@ class DoorSessionStore:
         Returns:
             업데이트된 DoorSession
         """
+        session_to_save: Optional[DoorSession] = None
+        session_to_finalize: Optional[DoorSession] = None
+
         with self._lock:
             now = time.time()
 
@@ -126,23 +179,23 @@ class DoorSessionStore:
             session = self._active_sessions.get(zone)
 
             if session is not None:
-                # 타임아웃 또는 최대 지속 시간 체크
-                time_since_last = now - session.last_trigger_at
-                total_duration = now - session.created_at
+                # 타임아웃 체크 (통합 로직 사용)
+                timeout_result = self._check_timeout(session, now)
 
-                if time_since_last > self._session_timeout:
-                    logger.info(
-                        f"Door session timed out: {session.door_session_id} "
-                        f"(idle for {time_since_last:.1f}s)"
-                    )
-                    self._finalize_session(session)
-                    session = None
-                elif total_duration > self._max_duration:
-                    logger.warning(
-                        f"Door session max duration exceeded: {session.door_session_id} "
-                        f"(duration={total_duration:.1f}s)"
-                    )
-                    self._finalize_session(session)
+                if timeout_result.is_timed_out:
+                    if timeout_result.reason == "idle_timeout":
+                        logger.info(
+                            f"Door session timed out: {session.door_session_id} "
+                            f"(idle for {now - session.last_trigger_at:.1f}s)"
+                        )
+                    else:
+                        logger.warning(
+                            f"Door session max duration exceeded: {session.door_session_id} "
+                            f"(duration={now - session.created_at:.1f}s)"
+                        )
+                    # Lock 내에서 finalize 처리 (메모리 상태만)
+                    self._finalize_session_in_memory(session)
+                    session_to_finalize = session  # Lock 해제 후 YAML 저장
                     session = None
 
             if session is None:
@@ -166,8 +219,8 @@ class DoorSessionStore:
             # 상품 재집계
             self._reaggregate_products(session)
 
-            # YAML 저장
-            self._persistence.save(session)
+            # 저장할 세션 복사 (Lock 해제 후 저장)
+            session_to_save = copy.deepcopy(session)
 
             logger.info(
                 f"Trigger added to {session.door_session_id}: "
@@ -176,7 +229,16 @@ class DoorSessionStore:
                 f"total_triggers={len(session.triggers)}"
             )
 
-            return session
+            return_session = session
+
+        # Lock 해제 후 YAML 저장 (I/O 작업)
+        if session_to_finalize is not None:
+            self._persistence.save(session_to_finalize)
+
+        if session_to_save is not None:
+            self._persistence.save(session_to_save)
+
+        return return_session
 
     def get_or_finalize(
         self,
@@ -184,6 +246,8 @@ class DoorSessionStore:
     ) -> Tuple[Optional[DoorSession], bool]:
         """
         세션 조회. 타임아웃 시 자동 finalize.
+
+        v4.2: Copy-on-Write 패턴, 통합 타임아웃 체크
 
         Args:
             zone: Zone 번호
@@ -193,6 +257,10 @@ class DoorSessionStore:
             - DoorSession: 세션 (없으면 None)
             - is_finalized: 이번 호출에서 finalize 되었는지 여부
         """
+        session_to_save: Optional[DoorSession] = None
+        return_session: Optional[DoorSession] = None
+        is_finalized = False
+
         with self._lock:
             session = self._active_sessions.get(zone)
 
@@ -200,28 +268,31 @@ class DoorSessionStore:
                 return None, False
 
             now = time.time()
-            time_since_last = now - session.last_trigger_at
-            total_duration = now - session.created_at
+            timeout_result = self._check_timeout(session, now)
 
-            # 타임아웃 체크
-            if time_since_last > self._session_timeout:
-                logger.info(
-                    f"Door session finalized (timeout): {session.door_session_id} "
-                    f"(idle for {time_since_last:.1f}s)"
-                )
-                self._finalize_session(session)
-                return session, True
+            if timeout_result.is_timed_out:
+                if timeout_result.reason == "idle_timeout":
+                    logger.info(
+                        f"Door session finalized (timeout): {session.door_session_id} "
+                        f"(idle for {now - session.last_trigger_at:.1f}s)"
+                    )
+                else:
+                    logger.warning(
+                        f"Door session finalized (max duration): {session.door_session_id} "
+                        f"(duration={now - session.created_at:.1f}s)"
+                    )
+                self._finalize_session_in_memory(session)
+                session_to_save = copy.deepcopy(session)
+                return_session = session
+                is_finalized = True
+            else:
+                return_session = session
 
-            # 최대 지속 시간 체크
-            if total_duration > self._max_duration:
-                logger.warning(
-                    f"Door session finalized (max duration): {session.door_session_id} "
-                    f"(duration={total_duration:.1f}s)"
-                )
-                self._finalize_session(session)
-                return session, True
+        # Lock 해제 후 YAML 저장 (I/O 작업)
+        if session_to_save is not None:
+            self._persistence.save(session_to_save)
 
-            return session, False
+        return return_session, is_finalized
 
     def get_session(self, zone: int) -> Optional[DoorSession]:
         """
@@ -240,22 +311,35 @@ class DoorSessionStore:
         """
         세션 강제 종료.
 
+        v4.2: Copy-on-Write 패턴
+
         Args:
             zone: Zone 번호
 
         Returns:
             종료된 DoorSession 또는 None
         """
+        session_to_save: Optional[DoorSession] = None
+
         with self._lock:
             session = self._active_sessions.get(zone)
             if session is not None:
-                self._finalize_session(session)
-                return session
-            return None
+                self._finalize_session_in_memory(session)
+                session_to_save = copy.deepcopy(session)
+            else:
+                return None
 
-    def _finalize_session(self, session: DoorSession) -> None:
+        # Lock 해제 후 YAML 저장 (I/O 작업)
+        if session_to_save is not None:
+            self._persistence.save(session_to_save)
+
+        return session_to_save
+
+    def _finalize_session_in_memory(self, session: DoorSession) -> None:
         """
-        세션 종료 처리 (내부용, lock 내에서 호출).
+        세션 종료 처리 - 메모리 상태만 변경 (내부용, lock 내에서 호출).
+
+        v4.2: YAML 저장은 Lock 해제 후 별도로 수행
 
         Args:
             session: 종료할 DoorSession
@@ -267,9 +351,6 @@ class DoorSessionStore:
         if session.zone in self._active_sessions:
             del self._active_sessions[session.zone]
 
-        # YAML 저장 (completed로 이동)
-        self._persistence.save(session)
-
         logger.info(
             f"Door session finalized: {session.door_session_id}, "
             f"triggers={len(session.triggers)}, "
@@ -277,15 +358,32 @@ class DoorSessionStore:
             f"total_price={session.total_price}"
         )
 
+    def _finalize_session(self, session: DoorSession) -> None:
+        """
+        세션 종료 처리 - 메모리 + YAML (레거시 호환, lock 내에서 호출).
+
+        주의: 이 메서드는 Lock 내에서 I/O를 수행하므로 새 코드에서는
+        _finalize_session_in_memory + Lock 해제 후 save 패턴 사용 권장.
+
+        Args:
+            session: 종료할 DoorSession
+        """
+        self._finalize_session_in_memory(session)
+        self._persistence.save(session)
+
     def _reaggregate_products(self, session: DoorSession) -> None:
         """
         세션의 상품 재집계 (내부용, lock 내에서 호출).
 
+        v4.2: unmatched_returns 추적 추가
+
         Args:
             session: 재집계할 DoorSession
         """
-        # 전체 trigger에서 상품 재집계
-        session.aggregated_products = self._aggregator.aggregate(session.triggers)
+        # 전체 trigger에서 상품 재집계 (unmatched_returns 포함)
+        result = self._aggregator.aggregate_with_unmatched(session.triggers)
+        session.aggregated_products = result.products
+        session.unmatched_returns = result.unmatched_returns
 
         # 무게 정보 업데이트
         if self._get_product_weight is not None:
@@ -298,34 +396,44 @@ class DoorSessionStore:
         """
         서비스 시작 시 활성 세션 복구.
 
+        v4.2: 통합 타임아웃 체크, Copy-on-Write
+
         Returns:
             복구된 세션 수
         """
+        sessions_to_save: List[DoorSession] = []
+
         with self._lock:
             recovered = self._persistence.recover_active_sessions()
+            now = time.time()
 
             for zone, session in recovered.items():
-                # 타임아웃 체크
-                now = time.time()
-                time_since_last = now - session.last_trigger_at
+                # 타임아웃 체크 (통합 로직 사용)
+                timeout_result = self._check_timeout(session, now)
 
-                if time_since_last > self._session_timeout:
+                if timeout_result.is_timed_out:
                     # 이미 타임아웃됨 → finalize
                     logger.info(
                         f"Recovered session already timed out: {session.door_session_id}"
                     )
                     session.status = "complete"
                     session.finalized_at = now
-                    self._persistence.save(session)
+                    sessions_to_save.append(copy.deepcopy(session))
                 else:
                     # 아직 활성 → 복구
                     self._active_sessions[zone] = session
                     logger.info(
                         f"Recovered active session: {session.door_session_id} "
-                        f"(idle for {time_since_last:.1f}s)"
+                        f"(idle for {now - session.last_trigger_at:.1f}s)"
                     )
 
-            return len(self._active_sessions)
+            active_count = len(self._active_sessions)
+
+        # Lock 해제 후 YAML 저장 (I/O 작업)
+        for session in sessions_to_save:
+            self._persistence.save(session)
+
+        return active_count
 
     def get_stats(self) -> dict:
         """
@@ -348,9 +456,17 @@ class DoorSessionStore:
             }
 
     def clear_all(self) -> None:
-        """모든 활성 세션 정리."""
+        """모든 활성 세션 정리 (v4.2: Copy-on-Write)."""
+        sessions_to_save: List[DoorSession] = []
+
         with self._lock:
             for session in list(self._active_sessions.values()):
-                self._finalize_session(session)
+                self._finalize_session_in_memory(session)
+                sessions_to_save.append(copy.deepcopy(session))
             self._active_sessions.clear()
-            logger.info("All door sessions cleared")
+
+        # Lock 해제 후 YAML 저장 (I/O 작업)
+        for session in sessions_to_save:
+            self._persistence.save(session)
+
+        logger.info(f"All {len(sessions_to_save)} door sessions cleared")

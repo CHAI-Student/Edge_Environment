@@ -238,6 +238,23 @@ async def judge_multi_zone(
                     f"triggers={door_session.trigger_count}, "
                     f"products={product_count}, total_price={total_price}"
                 )
+
+                # unmatched_returns 정보 (v4.2)
+                unmatched_info = None
+                if door_session.has_unmatched_returns:
+                    unmatched_info = {
+                        "count": len(door_session.unmatched_returns),
+                        "totalWeight": round(door_session.unmatched_returns_weight, 1),
+                        "details": [
+                            {
+                                "triggerId": r.trigger_id,
+                                "deltaWeight": round(r.delta_weight, 1),
+                                "timestamp": r.timestamp,
+                            }
+                            for r in door_session.unmatched_returns
+                        ],
+                    }
+
                 return {
                     "success": product_count > 0,
                     "status": "complete",
@@ -267,6 +284,7 @@ async def judge_multi_zone(
                         "durationSeconds": round(door_session.duration_seconds, 1),
                         "createdAt": door_session.created_at,
                         "finalizedAt": door_session.finalized_at,
+                        "unmatchedReturns": unmatched_info,
                     },
                     "stats": {
                         "topFrames": 0,

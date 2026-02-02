@@ -27,7 +27,7 @@ import os
 
 import numpy as np
 
-from config import config
+from core.config import config
 
 logger = logging.getLogger(__name__)
 

@@ -1,8 +1,16 @@
 """
-API Dependencies for Dependency Injection (v4.0).
+API Dependencies for Dependency Injection (v4.2).
 
 FastAPI Depends()를 위한 의존성 제공자.
-전역 변수 대신 이 모듈을 통해 인스턴스에 접근합니다.
+ServiceContainer를 통해 인스턴스에 접근합니다.
+
+v4.2 변경사항:
+- 전역 _instances dict를 ServiceContainer로 교체
+- 테스트 격리 개선
+- 하위 호환성 유지 (기존 함수 시그니처 동일)
+
+v4.1 변경사항:
+- DoorSessionStore 추가
 
 v4.0 변경사항:
 - FrameBuffer 제거
@@ -17,11 +25,10 @@ from vision import YOLOWrapper
 from database.product_db import ProductDatabase
 from engine import ProductDecisionEngine
 from video import VideoProcessor
+from container import ServiceContainer
+from container.service_container import get_global_container, set_global_container, reset_global_container
 
 logger = logging.getLogger(__name__)
-
-# Module-level instances (initialized in lifespan)
-_instances: dict = {}
 
 
 def init_dependencies(
@@ -31,7 +38,7 @@ def init_dependencies(
     product_db: ProductDatabase,
     video_processor: Optional[VideoProcessor] = None,
     door_session_store: Optional[DoorSessionStore] = None,
-):
+) -> ServiceContainer:
     """
     의존성 초기화 (lifespan에서 호출).
 
@@ -42,40 +49,25 @@ def init_dependencies(
         product_db: ProductDatabase 인스턴스
         video_processor: VideoProcessor 인스턴스 (선택)
         door_session_store: DoorSessionStore 인스턴스 (선택, v4.1)
+
+    Returns:
+        초기화된 ServiceContainer 인스턴스
     """
-    _instances["session_store"] = session_store
-    _instances["yolo"] = yolo
-    _instances["engine"] = engine
-    _instances["db"] = product_db
-    _instances["door_session_store"] = door_session_store
-
-    # VideoProcessor는 yolo를 공유
-    if video_processor is not None:
-        _instances["video_processor"] = video_processor
-    else:
-        _instances["video_processor"] = VideoProcessor(yolo=yolo)
-
-    logger.info(
-        f"Dependencies initialized: "
-        f"session_store={session_store is not None}, "
-        f"yolo={yolo is not None}, "
-        f"engine={engine is not None}, "
-        f"db={product_db is not None}, "
-        f"video_processor={_instances.get('video_processor') is not None}, "
-        f"door_session_store={door_session_store is not None}"
+    container = get_global_container()
+    container.init(
+        session_store=session_store,
+        yolo=yolo,
+        engine=engine,
+        product_db=product_db,
+        video_processor=video_processor,
+        door_session_store=door_session_store,
     )
+    return container
 
 
-def cleanup_dependencies():
+def cleanup_dependencies() -> None:
     """의존성 정리 (shutdown 시 호출)."""
-    if "session_store" in _instances:
-        _instances["session_store"].clear_all()
-
-    if "door_session_store" in _instances and _instances["door_session_store"] is not None:
-        _instances["door_session_store"].clear_all()
-
-    _instances.clear()
-    logger.info("Dependencies cleaned up")
+    reset_global_container()
 
 
 # ============================================================================
@@ -85,50 +77,32 @@ def cleanup_dependencies():
 
 def get_session_store() -> SessionStore:
     """SessionStore 인스턴스 반환."""
-    store = _instances.get("session_store")
-    if store is None:
-        raise RuntimeError("SessionStore not initialized. Call init_dependencies() first.")
-    return store
+    return get_global_container().get_session_store()
 
 
 def get_yolo() -> YOLOWrapper:
     """YOLOWrapper 인스턴스 반환."""
-    yolo = _instances.get("yolo")
-    if yolo is None:
-        raise RuntimeError("YOLOWrapper not initialized. Call init_dependencies() first.")
-    return yolo
+    return get_global_container().get_yolo()
 
 
 def get_decision_engine() -> ProductDecisionEngine:
     """ProductDecisionEngine 인스턴스 반환."""
-    engine = _instances.get("engine")
-    if engine is None:
-        raise RuntimeError("ProductDecisionEngine not initialized. Call init_dependencies() first.")
-    return engine
+    return get_global_container().get_decision_engine()
 
 
 def get_product_db() -> ProductDatabase:
     """ProductDatabase 인스턴스 반환."""
-    db = _instances.get("db")
-    if db is None:
-        raise RuntimeError("ProductDatabase not initialized. Call init_dependencies() first.")
-    return db
+    return get_global_container().get_product_db()
 
 
 def get_video_processor() -> VideoProcessor:
     """VideoProcessor 인스턴스 반환."""
-    processor = _instances.get("video_processor")
-    if processor is None:
-        raise RuntimeError("VideoProcessor not initialized. Call init_dependencies() first.")
-    return processor
+    return get_global_container().get_video_processor()
 
 
 def get_door_session_store() -> DoorSessionStore:
     """DoorSessionStore 인스턴스 반환."""
-    store = _instances.get("door_session_store")
-    if store is None:
-        raise RuntimeError("DoorSessionStore not initialized. Call init_dependencies() first.")
-    return store
+    return get_global_container().get_door_session_store()
 
 
 # ============================================================================
@@ -138,32 +112,32 @@ def get_door_session_store() -> DoorSessionStore:
 
 def get_session_store_optional() -> Optional[SessionStore]:
     """SessionStore 인스턴스 반환 (None 허용)."""
-    return _instances.get("session_store")
+    return get_global_container().get_session_store_optional()
 
 
 def get_yolo_optional() -> Optional[YOLOWrapper]:
     """YOLOWrapper 인스턴스 반환 (None 허용)."""
-    return _instances.get("yolo")
+    return get_global_container().get_yolo_optional()
 
 
 def get_decision_engine_optional() -> Optional[ProductDecisionEngine]:
     """ProductDecisionEngine 인스턴스 반환 (None 허용)."""
-    return _instances.get("engine")
+    return get_global_container().get_decision_engine_optional()
 
 
 def get_product_db_optional() -> Optional[ProductDatabase]:
     """ProductDatabase 인스턴스 반환 (None 허용)."""
-    return _instances.get("db")
+    return get_global_container().get_product_db_optional()
 
 
 def get_video_processor_optional() -> Optional[VideoProcessor]:
     """VideoProcessor 인스턴스 반환 (None 허용)."""
-    return _instances.get("video_processor")
+    return get_global_container().get_video_processor_optional()
 
 
 def get_door_session_store_optional() -> Optional[DoorSessionStore]:
     """DoorSessionStore 인스턴스 반환 (None 허용)."""
-    return _instances.get("door_session_store")
+    return get_global_container().get_door_session_store_optional()
 
 
 # ============================================================================
@@ -173,24 +147,45 @@ def get_door_session_store_optional() -> Optional[DoorSessionStore]:
 
 def is_initialized() -> bool:
     """의존성 초기화 상태 확인."""
-    required_keys = ["session_store", "yolo", "engine", "db", "video_processor"]
-    # door_session_store는 선택적 (설정으로 비활성화 가능)
-    return all(key in _instances for key in required_keys)
+    return get_global_container().is_initialized
 
 
 def get_status() -> dict:
     """의존성 상태 반환."""
-    yolo = _instances.get("yolo")
-    door_store = _instances.get("door_session_store")
-    return {
-        "initialized": is_initialized(),
-        "session_store": _instances.get("session_store") is not None,
-        "yolo": yolo is not None,
-        "yolo_instance": yolo,  # health.py에서 is_loaded 확인용
-        "yolo_loaded": yolo.is_loaded if yolo else False,
-        "engine": _instances.get("engine") is not None,
-        "db": _instances.get("db") is not None,
-        "video_processor": _instances.get("video_processor") is not None,
-        "door_session_store": door_store is not None,
-        "door_session_store_instance": door_store,
-    }
+    return get_global_container().get_status()
+
+
+# ============================================================================
+# Test Utilities
+# ============================================================================
+
+
+def create_test_container() -> ServiceContainer:
+    """
+    테스트용 새 컨테이너 생성.
+
+    테스트 간 격리를 위해 전역 컨테이너 대신 새 인스턴스 사용.
+
+    Returns:
+        새 ServiceContainer 인스턴스
+    """
+    return ServiceContainer()
+
+
+def use_test_container(container: ServiceContainer) -> None:
+    """
+    테스트용 컨테이너를 전역으로 설정.
+
+    테스트 fixture에서 사용:
+        @pytest.fixture
+        def container():
+            c = create_test_container()
+            c.init(...)
+            use_test_container(c)
+            yield c
+            cleanup_dependencies()  # 전역 컨테이너 리셋
+
+    Args:
+        container: 테스트용 ServiceContainer
+    """
+    set_global_container(container)

@@ -1,0 +1,101 @@
+# Model Service Docker Compose
+#
+# Jetson Orin Nano 4GB 최적화 구성
+#
+# 사용법:
+#   docker-compose up -d        # 시작
+#   docker-compose logs -f      # 로그 확인
+#   docker-compose down         # 종료
+#
+# 환경변수 오버라이드:
+#   cp .env.docker .env
+#   # .env 파일 수정
+#   docker-compose up -d
+
+version: '3.8'
+
+services:
+  model:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: model-service:latest
+    container_name: model-service
+
+    # Jetson NVIDIA 런타임 필수
+    runtime: nvidia
+
+    # 네트워크
+    ports:
+      - "8002:8002"
+
+    # 메모리 제한 (Jetson 4GB: 시스템 1GB 예약)
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 2G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    # 볼륨 마운트
+    volumes:
+      # TensorRT 엔진 파일
+      - ${MODELS_PATH:-./../../models}:/data/models:ro
+      # YOLO 매핑 파일
+      - ${CONFIG_PATH:-./../../config}:/app/config:ro
+      # Door Session YAML 저장
+      - ${SESSIONS_PATH:-./data/sessions}:/data/sessions:rw
+
+    # 환경 변수 (override via .env file)
+    environment:
+      # API 설정
+      - MODEL__API__HOST=0.0.0.0
+      - MODEL__API__PORT=8002
+      - MODEL__API__LOG_LEVEL=${LOG_LEVEL:-info}
+
+      # YOLO 모델 경로
+      - MODEL__VISION__YOLO_MODEL_PATH=/data/models/${YOLO_MODEL:-siyeon_best.engine}
+      - MODEL__VISION__CONF_THRESHOLD=${CONF_THRESHOLD:-0.01}
+
+      # 세션 설정
+      - MODEL__BUFFER__TTL_SECONDS=${TTL_SECONDS:-300}
+      - MODEL__BUFFER__MAX_SESSIONS=${MAX_SESSIONS:-100}
+      - MODEL__BUFFER__CLEANUP_INTERVAL_SECONDS=${CLEANUP_INTERVAL:-60}
+
+      # Door Session 설정
+      - MODEL__DOOR_SESSION__ENABLED=${DOOR_SESSION_ENABLED:-true}
+      - MODEL__DOOR_SESSION__TIMEOUT=${DOOR_SESSION_TIMEOUT:-30.0}
+      - MODEL__DOOR_SESSION__WEIGHT_TOLERANCE=${WEIGHT_TOLERANCE:-3.0}
+      - MODEL__DOOR_SESSION__MAX_DURATION=${MAX_DURATION:-600.0}
+      - MODEL__DOOR_SESSION__YAML_RETENTION_DAYS=${YAML_RETENTION_DAYS:-7}
+
+      # Node.js 연동
+      - MODEL__NODEJS_URL=${NODEJS_URL:-http://host.docker.internal:8888}
+
+    # 헬스체크
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    # 재시작 정책
+    restart: unless-stopped
+
+    # 로깅
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# 네트워크 설정 (다른 서비스와 연결 시)
+networks:
+  default:
+    name: edge-network
+    external: true

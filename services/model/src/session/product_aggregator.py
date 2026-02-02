@@ -1,5 +1,5 @@
 """
-Product Aggregator for Door Session.
+Product Aggregator for Door Session (v4.2).
 
 여러 TriggerResult의 상품을 통합하고, 반환 처리를 수행합니다.
 
@@ -7,21 +7,40 @@ Product Aggregator for Door Session.
 1. 제거(delta<0): 상품 count 증가
 2. 반환(delta>0): 무게 매칭하여 count 감소
 
+v4.2 변경사항:
+- 무게 매칭 실패 시 UnmatchedReturn으로 추적
+- AggregationResult 반환으로 unmatched_returns 포함
+
 사용법:
     aggregator = ProductAggregator(weight_tolerance=3.0)
-    aggregated = aggregator.aggregate(triggers)
+    result = aggregator.aggregate(triggers)
 
-    # 무게로 상품 찾기
-    product_id = aggregator.find_product_by_weight(aggregated, 365.0)
+    # 결과 접근
+    products = result.products
+    unmatched = result.unmatched_returns
 """
 
 import logging
-from typing import Callable, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Callable, Dict, List, Optional, Tuple
 
-from .door_session import TriggerResult, AggregatedProduct
+from .door_session import TriggerResult, AggregatedProduct, UnmatchedReturn
 from .session_store import ProductResult
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class AggregationResult:
+    """
+    상품 집계 결과 (v4.2).
+
+    Attributes:
+        products: 통합된 상품 (product_id -> AggregatedProduct)
+        unmatched_returns: 매칭 실패한 반환 목록
+    """
+    products: Dict[int, AggregatedProduct] = field(default_factory=dict)
+    unmatched_returns: List[UnmatchedReturn] = field(default_factory=list)
 
 
 class ProductAggregator:
@@ -63,23 +82,61 @@ class ProductAggregator:
 
         Returns:
             통합된 상품 결과 (product_id -> AggregatedProduct)
+
+        Note:
+            하위 호환성을 위해 Dict만 반환합니다.
+            unmatched_returns가 필요하면 aggregate_with_unmatched() 사용.
+        """
+        result = self.aggregate_with_unmatched(triggers)
+        return result.products
+
+    def aggregate_with_unmatched(
+        self,
+        triggers: List[TriggerResult],
+    ) -> AggregationResult:
+        """
+        여러 TriggerResult의 상품을 통합 (unmatched_returns 포함, v4.2).
+
+        합산 로직:
+        1. 제거(delta<0): 상품 count 증가 (YOLO 결과 사용)
+        2. 반환(delta>0): 무게 매칭하여 count 감소
+        3. 매칭 실패 시 unmatched_returns에 기록
+
+        Args:
+            triggers: TriggerResult 목록 (시간순)
+
+        Returns:
+            AggregationResult (products + unmatched_returns)
         """
         aggregated: Dict[int, AggregatedProduct] = {}
+        unmatched_returns: List[UnmatchedReturn] = []
 
         for trigger in triggers:
             if trigger.is_return:
                 # 반환 처리: 무게 매칭하여 차감
-                self._handle_return(aggregated, trigger.delta_weight)
+                matched_id = self._handle_return(aggregated, trigger.delta_weight)
+                if matched_id is None:
+                    # 매칭 실패 → 기록
+                    unmatched_returns.append(UnmatchedReturn(
+                        trigger_id=trigger.trigger_id,
+                        delta_weight=trigger.delta_weight,
+                        timestamp=trigger.timestamp,
+                        tolerance_used=self._weight_tolerance,
+                    ))
             else:
                 # 제거 처리: YOLO 결과 합산
                 self._handle_removal(aggregated, trigger)
 
         logger.debug(
             f"Aggregated {len(triggers)} triggers -> {len(aggregated)} products, "
-            f"total count={sum(p.count for p in aggregated.values())}"
+            f"total count={sum(p.count for p in aggregated.values())}, "
+            f"unmatched_returns={len(unmatched_returns)}"
         )
 
-        return aggregated
+        return AggregationResult(
+            products=aggregated,
+            unmatched_returns=unmatched_returns,
+        )
 
     def _handle_removal(
         self,
@@ -252,3 +309,43 @@ class ProductAggregator:
                     agg.weight = weight
                     updated += 1
         return updated
+
+    # ========================================================================
+    # Incremental Update Methods (v4.2) - O(N²) → O(N) 최적화
+    # ========================================================================
+
+    def add_trigger_incremental(
+        self,
+        aggregated: Dict[int, AggregatedProduct],
+        unmatched_returns: List[UnmatchedReturn],
+        trigger: TriggerResult,
+    ) -> Tuple[Dict[int, AggregatedProduct], List[UnmatchedReturn]]:
+        """
+        단일 trigger를 증분 추가 (v4.2).
+
+        전체 재집계 대신 새 trigger만 처리하여 O(N²) → O(N) 최적화.
+
+        Args:
+            aggregated: 기존 통합 상품 딕셔너리 (in-place 수정)
+            unmatched_returns: 기존 매칭 실패 목록 (in-place 수정)
+            trigger: 추가할 TriggerResult
+
+        Returns:
+            (업데이트된 aggregated, 업데이트된 unmatched_returns)
+        """
+        if trigger.is_return:
+            # 반환 처리: 무게 매칭하여 차감
+            matched_id = self._handle_return(aggregated, trigger.delta_weight)
+            if matched_id is None:
+                # 매칭 실패 → 기록
+                unmatched_returns.append(UnmatchedReturn(
+                    trigger_id=trigger.trigger_id,
+                    delta_weight=trigger.delta_weight,
+                    timestamp=trigger.timestamp,
+                    tolerance_used=self._weight_tolerance,
+                ))
+        else:
+            # 제거 처리: YOLO 결과 합산
+            self._handle_removal(aggregated, trigger)
+
+        return aggregated, unmatched_returns

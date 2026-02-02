@@ -1,17 +1,22 @@
 """
-Trigger API Routes (v4.0).
+Trigger API Routes (v4.2).
 
 POST /trigger - Camera에서 녹화 완료 시 호출
 즉시 YOLO 추론 실행 후 결과를 SessionStore에 저장.
 
+v4.2 변경사항:
+- YOLO 추론 비동기화 (asyncio.to_thread)
+- 다른 요청과 병렬 처리 가능
+
 사용 흐름:
 1. Camera Driver가 녹화 완료 후 /trigger 호출
-2. Model 서비스가 YOLO 추론 실행
+2. Model 서비스가 YOLO 추론 실행 (비동기)
 3. 결과를 SessionStore에 저장
 4. session_id 반환
 5. Node.js가 /api/judge/multi-zone으로 결과 폴링
 """
 
+import asyncio
 import logging
 import time
 from datetime import datetime
@@ -356,7 +361,9 @@ async def trigger_judgment(
             processing_stage_detail="비디오에서 프레임 추출 중",
         )
 
-        processing_result = video_processor.process_videos(
+        # v4.2: 비동기 실행으로 다른 요청과 병렬 처리 가능
+        processing_result = await asyncio.to_thread(
+            video_processor.process_videos,
             top_path=request.videos.top,
             side_path=request.videos.side,
         )

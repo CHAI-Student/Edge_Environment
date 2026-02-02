@@ -1,10 +1,19 @@
 """
-FastAPI application manager for Model service (v4.0).
+FastAPI application manager for Model service (v4.2).
 
 This module provides:
 - FastAPI application configuration
 - Uvicorn server with graceful shutdown
 - Lifespan management for AI components
+- Background cleanup tasks for TTL expiration
+
+v4.2 변경사항:
+- TTL 자동 정리 백그라운드 태스크 추가
+- YAML cleanup 자동화 (서비스 종료 시)
+- ServiceContainer 통합
+
+v4.1 변경사항:
+- DoorSessionStore 추가
 
 v4.0 변경사항:
 - FrameBuffer 제거
@@ -35,6 +44,53 @@ from api.routes import (
 )
 
 logger = get_logger(__name__)
+
+
+# ============================================================================
+# Background Cleanup Tasks
+# ============================================================================
+
+
+async def session_cleanup_task(
+    session_store: SessionStore,
+    interval_seconds: float = 60.0,
+    stop_event: asyncio.Event = None,
+) -> None:
+    """
+    세션 TTL 정리 백그라운드 태스크.
+
+    지정된 간격으로 만료된 세션을 자동 정리합니다.
+
+    Args:
+        session_store: SessionStore 인스턴스
+        interval_seconds: 정리 주기 (초)
+        stop_event: 태스크 종료 신호
+    """
+    logger.info(f"Session cleanup task started (interval={interval_seconds}s)")
+
+    while True:
+        try:
+            # stop_event가 설정되면 종료
+            if stop_event is not None and stop_event.is_set():
+                logger.info("Session cleanup task stopping (stop event set)")
+                break
+
+            # 만료된 세션 정리
+            cleaned = session_store.cleanup_expired()
+            if cleaned > 0:
+                logger.info(f"Session cleanup: removed {cleaned} expired sessions")
+
+            # 다음 주기까지 대기
+            await asyncio.sleep(interval_seconds)
+
+        except asyncio.CancelledError:
+            logger.info("Session cleanup task cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Session cleanup task error: {e}", exc_info=True)
+            await asyncio.sleep(interval_seconds)
+
+    logger.info("Session cleanup task stopped")
 
 
 # ============================================================================
@@ -170,6 +226,17 @@ def create_lifespan(settings: Settings):
             door_session_store=door_session_store,
         )
 
+        # 9. 백그라운드 정리 태스크 시작 (v4.2)
+        cleanup_stop_event = asyncio.Event()
+        cleanup_interval = settings.buffer.cleanup_interval_seconds
+        cleanup_task = asyncio.create_task(
+            session_cleanup_task(
+                session_store=session_store,
+                interval_seconds=cleanup_interval,
+                stop_event=cleanup_stop_event,
+            )
+        )
+
         logger.info(f"Model service ready on port {settings.port}")
         logger.info(
             f"ProductDatabase: {product_db.product_count} products, "
@@ -177,7 +244,8 @@ def create_lifespan(settings: Settings):
         )
         logger.info(
             f"SessionStore: ttl={settings.buffer.ttl_seconds}s, "
-            f"max_sessions={settings.buffer.max_sessions}"
+            f"max_sessions={settings.buffer.max_sessions}, "
+            f"cleanup_interval={cleanup_interval}s"
         )
         if settings.door_session.enabled:
             logger.info(
@@ -190,6 +258,30 @@ def create_lifespan(settings: Settings):
 
         # 종료 처리
         logger.info("Model service shutting down...")
+
+        # 10. 백그라운드 태스크 종료 (v4.2)
+        cleanup_stop_event.set()
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+
+        # 11. YAML 오래된 세션 정리 (v4.2)
+        if door_session_store is not None:
+            try:
+                days_to_keep = settings.door_session.yaml_retention_days
+                deleted = door_session_store._persistence.cleanup_old_sessions(
+                    days_to_keep=days_to_keep
+                )
+                if deleted > 0:
+                    logger.info(
+                        f"YAML cleanup: removed {deleted} old session files "
+                        f"(older than {days_to_keep} days)"
+                    )
+            except Exception as e:
+                logger.error(f"YAML cleanup failed: {e}")
+
         cleanup_dependencies()
         logger.info("Model service stopped")
 
