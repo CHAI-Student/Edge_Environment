@@ -1055,7 +1055,7 @@ class ProductDatabase:
                     elif weight_diff <= 10:  # 10g 이내
                         score += 0.1
 
-                if score > best_score and score >= 0.5:  # 최소 50% 일치
+                if score > best_score and score >= 0.9:  # 최소 90% 일치
                     best_score = score
                     best_match = if11_product
 

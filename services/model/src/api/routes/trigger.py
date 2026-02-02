@@ -331,7 +331,24 @@ async def trigger_judgment(
         # 1. 비디오 파일 경로 검증
         _validate_video_paths(request.videos)
 
+        # 세션 초기 저장 (processing 상태로)
+        initial_session = SessionData(
+            session_id=session_id,
+            zone=request.zone,
+            status="processing",
+            processing_stage="extracting_frames",
+            processing_stage_detail="비디오 프레임 추출 준비 중",
+        )
+        session_store.save(session_id, initial_session)
+
         # 2. 비디오 처리 (전체 프레임 YOLO + 투표)
+        # 상태 업데이트: 프레임 추출 중
+        session_store.update_stage(
+            session_id,
+            processing_stage="extracting_frames",
+            processing_stage_detail="비디오에서 프레임 추출 중",
+        )
+
         processing_result = video_processor.process_videos(
             top_path=request.videos.top,
             side_path=request.videos.side,
@@ -352,6 +369,13 @@ async def trigger_judgment(
                 f"weighted_conf={v.weighted_confidence:.3f}, "
                 f"top={v.top_detected}, side={v.side_detected}"
             )
+
+        # 상태 업데이트: 상품 후보 도출 완료, 개수 판단 중
+        session_store.update_stage(
+            session_id,
+            processing_stage="calculating_count",
+            processing_stage_detail=f"후보 {len(vote_results)}개 도출, 개수 판단 중",
+        )
 
         # 3. 로드셀 데이터에서 무게 변화량 계산
         delta_weight = _calculate_weight_delta(request.loadcells)
@@ -398,6 +422,8 @@ async def trigger_judgment(
             total_price=result.total_price,
             delta_weight=delta_weight,
             status="complete",
+            processing_stage="complete",
+            processing_stage_detail=f"상품 {len(products)}개 판단 완료",
             confidence=result.confidence,
             top_frames=stats.top_frames,
             side_frames=stats.side_frames,

@@ -193,12 +193,26 @@ async def judge_multi_zone(
         f"products={len(request.products)}, zone={request.zone}"
     )
 
-    # session_id 결정: 명시적 지정 또는 최근 활성 세션 자동 선택
-    if request.session_id is not None:
-        # 명시적 session_id로 조회
+    # session_id 유효성 검사: zone_으로 시작하면 실제 세션 ID, 아니면 device_id
+    # Node.js가 deviceIdx(예: "DE17683631997086480")를 session_id로 보내는 경우
+    is_valid_session_id = (
+        request.session_id is not None
+        and request.session_id.startswith("zone_")
+    )
+
+    # device_id 추출: zone_으로 시작 안하면 device_id로 간주
+    device_id = None if is_valid_session_id else request.session_id
+
+    if is_valid_session_id:
+        # 유효한 session_id로 조회
         session_data, session_status = session_store.get_with_status(request.session_id)
     else:
-        # 최근 활성 세션 자동 선택
+        # device_id이거나 없으면 최근 활성 세션 자동 선택
+        if device_id:
+            logger.info(
+                f"[MULTI-ZONE] device_id={device_id}, "
+                f"looking up latest active session for zone={request.zone}"
+            )
         session_data = session_store.get_latest_active(request.zone)
         session_status = "found" if session_data else "no_active_session"
 
@@ -206,7 +220,7 @@ async def judge_multi_zone(
         # 세션이 없거나 만료된 경우
         if session_status == "expired":
             logger.info(
-                f"[MULTI-ZONE RESPONSE] session_id={request.session_id}, "
+                f"[MULTI-ZONE RESPONSE] device_id={device_id}, session_id={request.session_id}, "
                 f"status=processing, reason=expired"
             )
             return {
@@ -214,10 +228,13 @@ async def judge_multi_zone(
                 "status": "processing",
                 "message": "세션이 만료되었습니다. 다시 시도해주세요.",
                 "reason": "expired",
+                "device_id": device_id,
+                "processing_stage": "expired",
+                "processing_stage_detail": "세션 TTL 만료",
             }
         elif session_status == "no_active_session":
             logger.info(
-                f"[MULTI-ZONE RESPONSE] zone={request.zone}, "
+                f"[MULTI-ZONE RESPONSE] device_id={device_id}, zone={request.zone}, "
                 f"status=processing, reason=no_active_session"
             )
             return {
@@ -225,10 +242,13 @@ async def judge_multi_zone(
                 "status": "processing",
                 "message": "활성 세션이 없습니다",
                 "reason": "no_active_session",
+                "device_id": device_id,
+                "processing_stage": "waiting",
+                "processing_stage_detail": "카메라 트리거 대기 중",
             }
         else:
             logger.info(
-                f"[MULTI-ZONE RESPONSE] session_id={request.session_id}, "
+                f"[MULTI-ZONE RESPONSE] device_id={device_id}, session_id={request.session_id}, "
                 f"status=processing, reason=not_found"
             )
             return {
@@ -236,7 +256,28 @@ async def judge_multi_zone(
                 "status": "processing",
                 "message": "YOLO 추론 대기 중",
                 "reason": "not_found",
+                "device_id": device_id,
+                "processing_stage": "waiting",
+                "processing_stage_detail": "세션 생성 대기 중",
             }
+
+    # 세션이 아직 처리 중인 경우 (status="processing")
+    if session_data.status == "processing":
+        logger.info(
+            f"[MULTI-ZONE RESPONSE] device_id={device_id}, session_id={session_data.session_id}, "
+            f"status=processing, stage={session_data.processing_stage}"
+        )
+        return {
+            "success": False,
+            "status": "processing",
+            "message": session_data.processing_stage_detail or "처리 중",
+            "reason": "in_progress",
+            "device_id": device_id,
+            "session_id": session_data.session_id,
+            "zone": session_data.zone,
+            "processing_stage": session_data.processing_stage,
+            "processing_stage_detail": session_data.processing_stage_detail,
+        }
 
     # 결과가 있으면 complete 응답
     products = [
@@ -255,16 +296,19 @@ async def judge_multi_zone(
     product_count = sum(p.count for p in session_data.products)
 
     logger.info(
-        f"[MULTI-ZONE RESPONSE] session_id={session_data.session_id}, status=complete, "
-        f"zone={session_data.zone}, products={len(products)}, count={product_count}, "
-        f"total={session_data.total_price}, delta={session_data.delta_weight:.1f}g"
+        f"[MULTI-ZONE RESPONSE] device_id={device_id}, session_id={session_data.session_id}, "
+        f"status=complete, zone={session_data.zone}, products={len(products)}, "
+        f"count={product_count}, total={session_data.total_price}, delta={session_data.delta_weight:.1f}g"
     )
 
     return {
         "success": True,
         "status": "complete",
+        "device_id": device_id,
         "zone": session_data.zone,
         "session_id": session_data.session_id,
+        "processing_stage": session_data.processing_stage,
+        "processing_stage_detail": session_data.processing_stage_detail,
         "products": products,
         "productCount": product_count,
         "totalPrice": session_data.total_price,

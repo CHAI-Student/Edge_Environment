@@ -48,6 +48,12 @@ class SessionData:
         delta_weight: 무게 변화량 (g)
         created_at: 생성 시간 (timestamp)
         status: 처리 상태 ("processing" | "complete")
+        processing_stage: 현재 처리 단계
+            - "extracting_frames": 프레임 추출 중
+            - "detecting_products": 상품 후보 도출 중
+            - "calculating_count": 개수 판단 중
+            - "complete": 완료
+        processing_stage_detail: 처리 단계 상세 정보
         confidence: 전체 신뢰도
         top_frames: Top 카메라 프레임 수
         side_frames: Side 카메라 프레임 수
@@ -60,6 +66,8 @@ class SessionData:
     delta_weight: float = 0.0
     created_at: float = field(default_factory=time.time)
     status: str = "processing"
+    processing_stage: str = "extracting_frames"
+    processing_stage_detail: str = ""
     confidence: float = 0.0
     top_frames: int = 0
     side_frames: int = 0
@@ -85,6 +93,8 @@ class SessionData:
             "delta_weight": round(self.delta_weight, 1),
             "created_at": self.created_at,
             "status": self.status,
+            "processing_stage": self.processing_stage,
+            "processing_stage_detail": self.processing_stage_detail,
             "confidence": round(self.confidence, 4),
             "stats": {
                 "top_frames": self.top_frames,
@@ -176,6 +186,38 @@ class SessionStore:
                 return None, "expired"
 
             return data, "found"
+
+    def update_stage(
+        self,
+        session_id: str,
+        processing_stage: str,
+        processing_stage_detail: str = "",
+    ) -> bool:
+        """
+        세션 처리 단계 업데이트.
+
+        Args:
+            session_id: 세션 ID
+            processing_stage: 처리 단계
+                - "extracting_frames": 프레임 추출 중
+                - "detecting_products": 상품 후보 도출 중
+                - "calculating_count": 개수 판단 중
+                - "complete": 완료
+            processing_stage_detail: 상세 정보 (예: "Top 카메라 50/120 프레임")
+
+        Returns:
+            업데이트 성공 여부
+        """
+        with self._lock:
+            if session_id not in self._store:
+                return False
+
+            self._store[session_id].processing_stage = processing_stage
+            self._store[session_id].processing_stage_detail = processing_stage_detail
+            logger.debug(
+                f"Session stage updated: {session_id} -> {processing_stage} ({processing_stage_detail})"
+            )
+            return True
 
     def delete(self, session_id: str) -> bool:
         """
