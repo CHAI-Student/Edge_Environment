@@ -161,7 +161,7 @@ class YOLOWrapper:
         self,
         model_path: Optional[str] = None,
         conf_threshold: float = 0.01,
-        device: str = "cuda",  # Jetson: CUDA only
+        device: str = '0',  # Jetson: GPU 0 (문자열)
     ):
         """
         YOLO TensorRT 래퍼 초기화 (Jetson Orin Nano 전용).
@@ -222,7 +222,7 @@ class YOLOWrapper:
                 return False
 
             # 5. 모델 로드
-            self.device = "cuda"
+            self.device = '0'  # Jetson: GPU 0 (문자열)
             logger.info(f"Loading TensorRT engine: {resolved_path}")
             self.model = YOLO(resolved_path)
 
@@ -263,10 +263,14 @@ class YOLOWrapper:
                 )
                 return False
 
-            # CUDA 컨텍스트 초기화 (lazy init 강제)
-            torch.cuda.init()
-            device_name = torch.cuda.get_device_name(0)
-            cuda_version = torch.version.cuda
+            # CUDA 디바이스 정보 확인 (torch.cuda.init() 제거 - Jetson에서 문제 발생 가능)
+            try:
+                device_name = torch.cuda.get_device_name(0)
+                cuda_version = torch.version.cuda
+            except Exception as e:
+                logger.warning(f"Could not get CUDA device info: {e}")
+                device_name = "Unknown GPU"
+                cuda_version = "Unknown"
 
             # Jetson 환경 확인
             is_jetson = "orin" in device_name.lower() or "tegra" in device_name.lower()
@@ -311,7 +315,7 @@ class YOLOWrapper:
                     imgsz=self.INPUT_SIZE,
                     half=True,
                     max_det=self.MAX_DETECTIONS,
-                    device=0,
+                    device=self.device,  # 문자열 '0'
                 )
 
             # GPU 메모리 정리
@@ -381,7 +385,7 @@ class YOLOWrapper:
                 imgsz=self.INPUT_SIZE,  # 480x480 입력
                 half=True,  # FP16 추론
                 max_det=self.MAX_DETECTIONS,  # 최대 20개 탐지
-                device=0,  # GPU 명시
+                device=self.device,  # 문자열 '0' (Jetson GPU)
             )
             return self.parse_results(results[0], self.class_names)
         except Exception as e:

@@ -322,11 +322,9 @@ async def trigger_judgment(
     # 세션 ID 생성
     session_id = generate_session_id(request.zone)
 
-    logger.info(
-        f"Trigger request: zone={request.zone}, session_id={session_id}, "
-        f"top={request.videos.top}, side={request.videos.side}, "
-        f"loadcells={len(request.loadcells)}"
-    )
+    logger.info(f"[TRIGGER RECEIVED] zone={request.zone}, session_id={session_id}")
+    logger.info(f"  -> videos: top={request.videos.top}, side={request.videos.side}")
+    logger.info(f"  -> loadcells: {len(request.loadcells)} samples")
 
     try:
         # 1. 비디오 파일 경로 검증
@@ -401,11 +399,9 @@ async def trigger_judgment(
 
         elapsed_ms = (time.time() - start_time) * 1000
         logger.info(
-            f"Trigger complete: session_id={session_id}, "
-            f"status={result.status.value}, "
-            f"products={len(result.products)}, "
-            f"confidence={result.confidence:.3f}, "
-            f"total_elapsed={elapsed_ms:.1f}ms"
+            f"[TRIGGER COMPLETE] session_id={session_id}, status={result.status.value}, "
+            f"products={len(result.products)}, confidence={result.confidence:.3f}, "
+            f"elapsed={elapsed_ms:.1f}ms"
         )
 
         return TriggerResponse(
@@ -414,11 +410,15 @@ async def trigger_judgment(
             message="추론 완료",
         )
 
-    except HTTPException:
+    except HTTPException as e:
+        logger.error(
+            f"[TRIGGER ERROR] session_id={session_id}, "
+            f"status={e.status_code}, detail={e.detail}"
+        )
         raise
 
     except FileNotFoundError as e:
-        logger.error(f"Video file not found: {e}")
+        logger.error(f"[TRIGGER ERROR] session_id={session_id}, video file not found: {e}")
         raise HTTPException(
             status_code=400,
             detail={
@@ -428,7 +428,7 @@ async def trigger_judgment(
         )
 
     except (VideoCorruptedError, FFmpegError) as e:
-        logger.error(f"Video processing error: {e}", exc_info=True)
+        logger.error(f"[TRIGGER ERROR] session_id={session_id}, video processing: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={
@@ -439,7 +439,7 @@ async def trigger_judgment(
         )
 
     except VideoProcessingError as e:
-        logger.error(f"Video processing error: {e}", exc_info=True)
+        logger.error(f"[TRIGGER ERROR] session_id={session_id}, video processing: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={
@@ -449,7 +449,7 @@ async def trigger_judgment(
         )
 
     except YOLOModelNotLoadedError as e:
-        logger.error(f"YOLO model not loaded: {e}")
+        logger.error(f"[TRIGGER ERROR] session_id={session_id}, YOLO model not loaded: {e}")
         raise HTTPException(
             status_code=503,  # Service Unavailable
             detail={
@@ -459,7 +459,7 @@ async def trigger_judgment(
         )
 
     except YOLOGPUError as e:
-        logger.error(f"YOLO GPU error: {e}", exc_info=True)
+        logger.error(f"[TRIGGER ERROR] session_id={session_id}, YOLO GPU: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={
@@ -469,7 +469,7 @@ async def trigger_judgment(
         )
 
     except YOLOInferenceError as e:
-        logger.error(f"YOLO inference error: {e}", exc_info=True)
+        logger.error(f"[TRIGGER ERROR] session_id={session_id}, YOLO inference: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={
@@ -479,7 +479,7 @@ async def trigger_judgment(
         )
 
     except Exception as e:
-        logger.error(f"Trigger failed with unexpected error: {e}", exc_info=True)
+        logger.error(f"[TRIGGER ERROR] session_id={session_id}, unexpected: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={

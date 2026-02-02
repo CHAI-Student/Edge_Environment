@@ -121,7 +121,7 @@ async def judge_multi_zone(
     Returns:
         ProcessingResponse or CompleteResponse
     """
-    logger.debug(f"Multi-zone request: session_id={request.session_id}")
+    logger.info(f"[MULTI-ZONE RECEIVED] session_id={request.session_id}")
 
     # SessionStore에서 결과 조회 (상태 포함)
     session_data, session_status = session_store.get_with_status(request.session_id)
@@ -129,14 +129,20 @@ async def judge_multi_zone(
     if session_data is None:
         # 세션이 없거나 만료된 경우
         if session_status == "expired":
-            logger.info(f"Session expired: {request.session_id}")
+            logger.info(
+                f"[MULTI-ZONE RESPONSE] session_id={request.session_id}, "
+                f"status=processing, reason=expired"
+            )
             return {
                 "status": "processing",
                 "message": "세션이 만료되었습니다. 다시 시도해주세요.",
                 "reason": "expired",
             }
         else:
-            logger.debug(f"Session not found: {request.session_id}")
+            logger.info(
+                f"[MULTI-ZONE RESPONSE] session_id={request.session_id}, "
+                f"status=processing, reason=not_found"
+            )
             return {
                 "status": "processing",
                 "message": "YOLO 추론 대기 중",
@@ -160,10 +166,9 @@ async def judge_multi_zone(
     product_count = sum(p.count for p in session_data.products)
 
     logger.info(
-        f"Multi-zone complete: session_id={request.session_id}, "
-        f"zone={session_data.zone}, products={len(products)}, "
-        f"count={product_count}, total={session_data.total_price}, "
-        f"delta_weight={session_data.delta_weight:.1f}g"
+        f"[MULTI-ZONE RESPONSE] session_id={request.session_id}, status=complete, "
+        f"zone={session_data.zone}, products={len(products)}, count={product_count}, "
+        f"total={session_data.total_price}, delta={session_data.delta_weight:.1f}g"
     )
 
     return {

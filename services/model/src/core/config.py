@@ -157,7 +157,7 @@ class Settings(BaseSettings):
         description="Node.js judgment endpoint",
     )
 
-    # Legacy compatibility properties
+    # Convenience properties for commonly used settings
     @property
     def host(self) -> str:
         return self.api.host
@@ -173,42 +173,6 @@ class Settings(BaseSettings):
     @property
     def yolo_model_path(self) -> str:
         return self.vision.yolo_model_path
-
-    @property
-    def hand_class_id(self) -> int:
-        return self.vision.hand_class_id
-
-    @property
-    def max_distance_px(self) -> float:
-        return self.vision.max_distance_px
-
-    @property
-    def top_k(self) -> int:
-        return self.vision.top_k
-
-    @property
-    def tolerance_percent(self) -> float:
-        return self.weight.tolerance_percent
-
-    @property
-    def min_weight_change(self) -> float:
-        return self.weight.min_weight_change
-
-    @property
-    def max_combination_size(self) -> int:
-        return self.weight.max_combination_size
-
-    @property
-    def top_weight(self) -> float:
-        return self.vision.top_weight
-
-    @property
-    def side_weight(self) -> float:
-        return self.vision.side_weight
-
-    @property
-    def common_class_bonus(self) -> float:
-        return self.vision.common_class_bonus
 
 
 # Global config instance
