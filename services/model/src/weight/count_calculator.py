@@ -81,9 +81,12 @@ class WeightBasedCountCalculator:
         """
         abs_weight = abs(delta_weight)
 
+        logger.info(f"[COUNT] ========== 개수 추정 ==========")
+        logger.info(f"[COUNT] 후보: {len(candidates)}개, delta_weight={abs_weight:.1f}g")
+
         # 최소 무게 변화량 체크
         if abs_weight < self.min_weight_change:
-            logger.debug(f"Weight change too small: {abs_weight}g < {self.min_weight_change}g")
+            logger.info(f"[COUNT] 무게 변화 너무 작음: {abs_weight}g < {self.min_weight_change}g")
             return []
 
         estimates = []
@@ -151,6 +154,14 @@ class WeightBasedCountCalculator:
 
         # match_score 기준 정렬
         estimates.sort(key=lambda e: e.match_score, reverse=True)
+
+        # 결과 로깅
+        for est in estimates[:5]:
+            logger.info(
+                f"[COUNT] {est.product_name}: count={est.count}, "
+                f"expected={est.expected_weight:.1f}g, "
+                f"match_score={est.match_score:.3f}, validated={est.validated}"
+            )
 
         return estimates
 

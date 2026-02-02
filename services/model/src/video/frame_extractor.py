@@ -304,6 +304,13 @@ class StreamingFrameExtractor:
         if not self._probe_video():
             return
 
+        logger.info(f"[FFMPEG] ========== 프레임 추출 시작 ==========")
+        logger.info(f"[FFMPEG] 비디오: {self.video_path}")
+        logger.info(f"[FFMPEG] 해상도: {self._width}x{self._height}, FPS: {self._fps:.1f}")
+        logger.info(f"[FFMPEG] 예상 프레임: {self._total_frames}개")
+        hwaccel_status = 'NVDEC' if self.use_hwaccel and self._hwaccel_available else 'CPU'
+        logger.info(f"[FFMPEG] HWACCEL: {hwaccel_status}")
+
         cmd = self._build_ffmpeg_cmd()
         logger.debug(f"FFmpeg command: {' '.join(cmd)}")
 
@@ -332,7 +339,7 @@ class StreamingFrameExtractor:
                 frame_count += 1
                 yield frame
 
-            logger.debug(f"Extracted {frame_count} frames from {self.video_path}")
+            logger.info(f"[FFMPEG] 프레임 추출 완료: {frame_count}개")
 
         except Exception as e:
             logger.error(f"Frame extraction failed: {e}")

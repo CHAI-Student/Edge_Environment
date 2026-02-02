@@ -322,9 +322,10 @@ async def trigger_judgment(
     # 세션 ID 생성
     session_id = generate_session_id(request.zone)
 
-    logger.info(f"[TRIGGER RECEIVED] zone={request.zone}, session_id={session_id}")
-    logger.info(f"  -> videos: top={request.videos.top}, side={request.videos.side}")
-    logger.info(f"  -> loadcells: {len(request.loadcells)} samples")
+    logger.info(f"[TRIGGER] ========== 추론 시작 ==========")
+    logger.info(f"[TRIGGER] zone={request.zone}, session_id={session_id}")
+    logger.info(f"[TRIGGER] videos: top={request.videos.top}, side={request.videos.side}")
+    logger.info(f"[TRIGGER] loadcells: {len(request.loadcells)}개")
 
     try:
         # 1. 비디오 파일 경로 검증
@@ -339,15 +340,23 @@ async def trigger_judgment(
         vote_results = processing_result.vote_results
         stats = processing_result.stats
 
+        logger.info(f"[TRIGGER] ========== 비디오 처리 완료 ==========")
         logger.info(
-            f"Video processing: {stats.top_frames + stats.side_frames} frames, "
-            f"{len(vote_results)} candidates, "
-            f"{stats.processing_time_ms:.1f}ms"
+            f"[TRIGGER] 총 프레임: {stats.top_frames + stats.side_frames}, "
+            f"후보: {len(vote_results)}개, 처리시간: {stats.processing_time_ms:.1f}ms"
         )
+        logger.info(f"[TRIGGER] Top-5 후보군:")
+        for i, v in enumerate(vote_results[:5]):
+            logger.info(
+                f"  [{i+1}] {v.class_name}: votes={v.vote_count}, "
+                f"weighted_conf={v.weighted_confidence:.3f}, "
+                f"top={v.top_detected}, side={v.side_detected}"
+            )
 
         # 3. 로드셀 데이터에서 무게 변화량 계산
         delta_weight = _calculate_weight_delta(request.loadcells)
-        logger.info(f"Weight delta: {delta_weight:.1f}g")
+        logger.info(f"[TRIGGER] ========== 무게 계산 ==========")
+        logger.info(f"[TRIGGER] delta_weight={delta_weight:.1f}g")
 
         # 4. 투표 결과를 EnsembleResult로 변환
         vision_candidates = _vote_results_to_ensemble(vote_results)
@@ -398,11 +407,11 @@ async def trigger_judgment(
         session_store.save(session_id, session_data)
 
         elapsed_ms = (time.time() - start_time) * 1000
-        logger.info(
-            f"[TRIGGER COMPLETE] session_id={session_id}, status={result.status.value}, "
-            f"products={len(result.products)}, confidence={result.confidence:.3f}, "
-            f"elapsed={elapsed_ms:.1f}ms"
-        )
+        logger.info(f"[TRIGGER] ========== 판단 결과 ==========")
+        logger.info(f"[TRIGGER] status={result.status.value}, confidence={result.confidence:.3f}")
+        for p in result.products:
+            logger.info(f"  - {p.name} x{p.count}: {p.total_price}원")
+        logger.info(f"[TRIGGER] total_price={result.total_price}원, elapsed={elapsed_ms:.1f}ms")
 
         return TriggerResponse(
             success=True,

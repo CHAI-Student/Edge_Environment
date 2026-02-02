@@ -374,9 +374,16 @@ class YOLOWrapper:
             return []
 
         try:
+            original_width = image.shape[1]
+            original_height = image.shape[0]
+
             # 640x480 이미지 → 480x480 크롭 (오른쪽 160px 제거)
             if image.shape[1] > self.CROP_WIDTH:
                 image = image[:, :self.CROP_WIDTH]
+                logger.debug(
+                    f"[YOLO] 크롭: {original_width}→{self.CROP_WIDTH} "
+                    f"(오른쪽 {original_width - self.CROP_WIDTH}px 제거)"
+                )
 
             results = self.model.predict(
                 image,
@@ -387,7 +394,17 @@ class YOLOWrapper:
                 max_det=self.MAX_DETECTIONS,  # 최대 20개 탐지
                 device=self.device,  # 문자열 '0' (Jetson GPU)
             )
-            return self.parse_results(results[0], self.class_names)
+            detections = self.parse_results(results[0], self.class_names)
+
+            # 탐지 결과 로깅 (상위 3개만)
+            if detections:
+                logger.debug(f"[YOLO] 탐지: {len(detections)}개")
+                for det in detections[:3]:
+                    logger.debug(
+                        f"  - {det.name}: conf={det.conf:.3f}, is_hand={det.is_hand}"
+                    )
+
+            return detections
         except Exception as e:
             logger.error(f"YOLO detection failed: {e}")
             return []

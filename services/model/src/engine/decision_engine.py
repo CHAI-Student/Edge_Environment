@@ -116,8 +116,9 @@ class ProductDecisionEngine:
         timestamp = time.time()
         abs_weight = abs(delta_weight)
 
+        logger.info(f"[ENGINE] ========== 판단 엔진 ==========")
         logger.info(
-            f"Starting judgment: {len(vision_candidates)} candidates, "
+            f"[ENGINE] 후보: {len(vision_candidates)}개, "
             f"delta_weight={delta_weight:.1f}g, vision_only={vision_only}"
         )
 
@@ -143,24 +144,26 @@ class ProductDecisionEngine:
             return self.judge_by_weight_only(delta_weight, timestamp)
 
         # 4. 단일 상품 매칭 시도
+        logger.info(f"[ENGINE] 전략: single_product_match 시도...")
         single_result = self._try_single_product_match(
             estimates, delta_weight, timestamp
         )
         if single_result and single_result.status == JudgmentStatus.COMPLETE:
-            logger.info(f"Single product match success: {single_result.products[0].name}")
+            logger.info(f"[ENGINE] 단일 상품 매칭 성공: {single_result.products[0].name}")
             return single_result
 
         # 5. 다중 상품 조합 시도
+        logger.info(f"[ENGINE] 전략: combination_match 시도...")
         combo_result = self._try_combination_match(
             vision_candidates, delta_weight, timestamp
         )
         if combo_result and combo_result.status == JudgmentStatus.COMPLETE:
             names = [p.name for p in combo_result.products]
-            logger.info(f"Combination match success: {names}")
+            logger.info(f"[ENGINE] 조합 매칭 성공: {names}")
             return combo_result
 
         # 6. 불완전 결과 반환 (최선의 추정)
-        logger.info("Returning partial/uncertain result")
+        logger.info(f"[ENGINE] 전략: partial_result 반환 (매칭 실패)")
         return self._create_partial_result(estimates, delta_weight, timestamp)
 
     def _judge_vision_only(
@@ -445,10 +448,14 @@ class ProductDecisionEngine:
         )
 
         if confidence < self.confidence_threshold:
-            logger.debug(f"Confidence too low: {confidence:.3f} < {self.confidence_threshold}")
+            logger.info(f"[ENGINE] 신뢰도 부족: {confidence:.3f} < {self.confidence_threshold}")
             return None
 
         product = self._create_product_judgment(best, confidence)
+
+        logger.info(
+            f"[ENGINE] 최종: status=COMPLETE, products=1, confidence={confidence:.3f}"
+        )
 
         return JudgmentResult(
             products=[product],
@@ -493,6 +500,11 @@ class ProductDecisionEngine:
             total_explained += estimate.expected_weight
 
         avg_confidence = sum(p.confidence for p in products) / len(products)
+
+        logger.info(
+            f"[ENGINE] 최종: status=COMPLETE, products={len(products)}, "
+            f"confidence={avg_confidence:.3f}"
+        )
 
         return JudgmentResult(
             products=products,
@@ -604,5 +616,20 @@ class ProductDecisionEngine:
             self.WEIGHT_MATCH_WEIGHT * weight_normalized +
             self.COUNT_WEIGHT * count_score
         )
+
+        logger.debug(f"[ENGINE] 신뢰도 계산:")
+        logger.debug(
+            f"  vision={vision_normalized:.3f} × {self.VISION_WEIGHT} = "
+            f"{vision_normalized * self.VISION_WEIGHT:.3f}"
+        )
+        logger.debug(
+            f"  weight={weight_normalized:.3f} × {self.WEIGHT_MATCH_WEIGHT} = "
+            f"{weight_normalized * self.WEIGHT_MATCH_WEIGHT:.3f}"
+        )
+        logger.debug(
+            f"  count={count_score:.3f} × {self.COUNT_WEIGHT} = "
+            f"{count_score * self.COUNT_WEIGHT:.3f}"
+        )
+        logger.debug(f"  total = {min(confidence, 1.0):.3f}")
 
         return min(confidence, 1.0)

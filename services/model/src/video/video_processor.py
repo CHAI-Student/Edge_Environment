@@ -139,29 +139,33 @@ class VideoProcessor:
         start_time = time.time()
         stats = VideoProcessingStats()
 
+        logger.info(f"[VIDEO] ========== 비디오 처리 시작 ==========")
+        logger.info(f"[VIDEO] top_path={top_path}")
+        logger.info(f"[VIDEO] side_path={side_path}")
+
         top_ensemble = VotingEnsemble(min_vote_ratio=self.min_vote_ratio)
         side_ensemble = VotingEnsemble(min_vote_ratio=self.min_vote_ratio)
 
         # Process top camera video
         if top_path:
-            logger.info(f"Processing top camera video: {top_path}")
-            top_stats = self._process_single_video(top_path, top_ensemble)
+            logger.info(f"[VIDEO] Top 카메라 처리 시작...")
+            top_stats = self._process_single_video(top_path, top_ensemble, "top")
             stats.top_frames = top_stats["frames"]
             stats.top_detections = top_stats["detections"]
             logger.info(
-                f"Top camera: {stats.top_frames} frames, "
-                f"{stats.top_detections} detections"
+                f"[VIDEO] Top 완료: 총 {stats.top_frames}프레임, "
+                f"탐지={stats.top_detections}개, 고유클래스={len(top_ensemble.votes)}개"
             )
 
         # Process side camera video
         if side_path:
-            logger.info(f"Processing side camera video: {side_path}")
-            side_stats = self._process_single_video(side_path, side_ensemble)
+            logger.info(f"[VIDEO] Side 카메라 처리 시작...")
+            side_stats = self._process_single_video(side_path, side_ensemble, "side")
             stats.side_frames = side_stats["frames"]
             stats.side_detections = side_stats["detections"]
             logger.info(
-                f"Side camera: {stats.side_frames} frames, "
-                f"{stats.side_detections} detections"
+                f"[VIDEO] Side 완료: 총 {stats.side_frames}프레임, "
+                f"탐지={stats.side_detections}개, 고유클래스={len(side_ensemble.votes)}개"
             )
 
         # Combine results with config weights
@@ -181,12 +185,7 @@ class VideoProcessor:
 
         stats.processing_time_ms = (time.time() - start_time) * 1000
 
-        logger.info(
-            f"Video processing complete: "
-            f"{stats.top_frames + stats.side_frames} total frames, "
-            f"{len(filtered_results)} product candidates, "
-            f"{stats.processing_time_ms:.1f}ms"
-        )
+        logger.info(f"[VIDEO] 앙상블 결합 완료: {len(filtered_results)}개 후보")
 
         return VideoProcessingResult(
             vote_results=filtered_results,
@@ -199,6 +198,7 @@ class VideoProcessor:
         self,
         video_path: str,
         ensemble: VotingEnsemble,
+        camera_type: str = "unknown",
     ) -> dict:
         """
         Process a single video file.
@@ -249,9 +249,12 @@ class VideoProcessor:
             # Frame is automatically released when loop continues
             ensemble.increment_frame_count()
 
-            # Log progress every 100 frames
-            if frame_count % 100 == 0:
-                logger.debug(f"Processed {frame_count} frames...")
+            # Log progress every 50 frames
+            if frame_count % 50 == 0:
+                logger.info(
+                    f"[VIDEO] {camera_type} 처리 중: {frame_count}프레임, "
+                    f"탐지={detection_count}개"
+                )
 
         return {
             "frames": frame_count,

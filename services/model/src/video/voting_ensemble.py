@@ -257,6 +257,20 @@ class VotingEnsemble:
         Returns:
             Combined and sorted VoteResult list (by weighted_confidence descending)
         """
+        logger.info(f"[ENSEMBLE] ========== Top/Side 결합 ==========")
+        logger.info(
+            f"[ENSEMBLE] Top: {top_ensemble.total_frames}프레임, "
+            f"{len(top_ensemble.votes)}개 클래스"
+        )
+        logger.info(
+            f"[ENSEMBLE] Side: {side_ensemble.total_frames}프레임, "
+            f"{len(side_ensemble.votes)}개 클래스"
+        )
+        logger.info(
+            f"[ENSEMBLE] 가중치: top={top_weight}, side={side_weight}, "
+            f"bonus={common_class_bonus}"
+        )
+
         combined: Dict[int, VoteResult] = {}
         total_frames = top_ensemble.total_frames + side_ensemble.total_frames
 
@@ -344,10 +358,12 @@ class VotingEnsemble:
 
         # Log consensus count
         consensus_count = sum(1 for r in results if r.top_detected and r.side_detected)
-        logger.debug(
-            f"Combined ensembles: top_frames={top_ensemble.total_frames}, "
-            f"side_frames={side_ensemble.total_frames}, "
-            f"total_classes={len(results)}, consensus={consensus_count}"
-        )
+        logger.info(f"[ENSEMBLE] 결합 결과: {len(results)}개 후보")
+        logger.info(f"[ENSEMBLE] 양쪽 감지: {consensus_count}개")
+        for i, r in enumerate(results[:5]):
+            logger.info(
+                f"  [{i+1}] {r.class_name}: weighted={r.weighted_confidence:.3f}, "
+                f"top={r.top_detected}, side={r.side_detected}"
+            )
 
         return results
