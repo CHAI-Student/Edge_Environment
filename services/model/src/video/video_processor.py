@@ -172,7 +172,7 @@ class VideoProcessor:
         self,
         yolo: YOLOWrapper,
         min_vote_ratio: float = 0.05,
-        confidence_threshold: float = 0.6,
+        confidence_threshold: float = 0.4,
         use_hwaccel: bool = True,
         motion_filter_enabled: bool = True,
         min_motion_displacement: float = 30.0,

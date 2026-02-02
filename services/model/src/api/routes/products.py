@@ -8,7 +8,7 @@ POST /api/products/sync - IF11 상품 동기화
 
 import time
 import logging
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
@@ -30,7 +30,7 @@ class ProductInfo(BaseModel):
     """상품 정보."""
 
     product_id: int
-    product_idx: Optional[int] = None  # IF11 product_idx (없을 수 있음)
+    product_idx: Optional[str] = None  # IF11 product_idx (문자열 P...)
     name: str
     category: str
     weight: float
@@ -67,13 +67,12 @@ class ProductRegisterResponse(BaseModel):
 
 
 class IF11ProductItem(BaseModel):
-    """IF11 상품 아이템."""
+    """IF11 상품 아이템 (동기화용)."""
 
-    saleItemIdx: int = Field(..., description="상품 인덱스")
-    itemName: str = Field(..., description="상품명")
-    salePrice: int = Field(..., description="판매가")
-    barcode: Optional[str] = None
-    weight: Optional[float] = None
+    product_idx: str = Field(..., description="IF11 상품 ID (예: P17...)")
+    product_name: str = Field(..., description="상품명")
+    sale_price: int = Field(..., description="판매가")
+    product_weight: Union[str, float] = Field(..., description="상품 무게 (Loadcell Weight)")
 
 
 class IF11SyncRequest(BaseModel):
@@ -220,6 +219,7 @@ async def sync_products_if11(
     IF11 상품 동기화.
 
     Node.js에서 받은 IF11 상품 목록을 ProductDatabase에 동기화합니다.
+    YOLO 클래스와 자동 매칭을 시도합니다.
 
     Args:
         request: 동기화 요청
@@ -227,45 +227,23 @@ async def sync_products_if11(
     Returns:
         IF11SyncResponse: 동기화 결과
     """
-    synced_count = 0
-    updated_count = 0
-
-    for item in request.products:
-        existing = db.get_product(item.saleItemIdx)
-
-        if existing is None:
-            # 새 상품 등록
-            db.add_product(
-                name=item.itemName,
-                category="if11",
-                weight=item.weight or 0.0,
-                price=item.salePrice,
-                barcode=item.barcode,
-                product_id=item.saleItemIdx,
-            )
-            synced_count += 1
-        else:
-            # 기존 상품 업데이트
-            db.update_product(
-                product_id=item.saleItemIdx,
-                name=item.itemName,
-                price=item.salePrice,
-                weight=item.weight,
-                barcode=item.barcode,
-            )
-            updated_count += 1
-
+    # Pydantic 모델 리스트를 dict 리스트로 변환
+    product_list = [item.dict() for item in request.products]
+    
+    # DB의 스마트 로더 호출 (YOLO 매칭 포함)
+    added_count, updated_count = db.load_from_if11(product_list)
+    
     total_count = db.product_count
 
     logger.info(
-        f"IF11 sync complete: synced={synced_count}, updated={updated_count}, "
+        f"IF11 sync complete: added={added_count}, updated={updated_count}, "
         f"total={total_count}"
     )
 
     return IF11SyncResponse(
         success=True,
-        synced_count=synced_count,
-        updated_count=updated_count,
+        synced_count=added_count,   # 새로 추가된 수
+        updated_count=updated_count, # 업데이트된 수
         total_count=total_count,
         timestamp=time.time(),
     )

@@ -659,7 +659,7 @@ class ProductDatabase:
     # Node.js 연동 (IF11 Import/Export)
     # =========================================================================
 
-    def load_from_if11(self, product_list: List[dict]) -> int:
+    def load_from_if11(self, product_list: List[dict]) -> Tuple[int, int]:
         """
         IF11 상품 리스트 형식에서 데이터베이스 갱신.
 
@@ -667,22 +667,22 @@ class ProductDatabase:
         기존 상품은 업데이트하고, 새 상품은 추가합니다.
         YOLO 클래스와 자동 매칭도 시도합니다.
 
-        IF11 형식:
+        수신 포맷:
             {
                 "product_idx": "P17355176364813008",
                 "product_name": "페리에 330ml",
                 "sale_price": 1985,
-                "stock_qty": 12,
-                "product_weight": "550"  # 문자열 주의
+                "product_weight": "550"  # product_loadcell_weight 값
             }
 
         Args:
             product_list: IF11 형식의 상품 리스트
 
         Returns:
-            로드된 상품 수
+            (added_count, updated_count) 튜플
         """
-        loaded_count = 0
+        added_count = 0
+        updated_count = 0
 
         for item in product_list:
             try:
@@ -690,11 +690,15 @@ class ProductDatabase:
                 product_idx = item.get("product_idx", "")
                 name = item.get("product_name", "unknown")
                 price = int(item.get("sale_price", 0))
+                # stock_qty는 새 포맷에 없으면 0 처리
                 stock = int(item.get("stock_qty", 0))
 
                 # product_weight는 문자열일 수 있음
                 weight_str = item.get("product_weight", "0")
                 weight = float(weight_str) if weight_str else 0.0
+
+                if not product_idx:
+                    continue
 
                 # product_idx로 이미 등록된 상품이 있는지 확인
                 existing_by_idx = self.get_by_product_idx(product_idx)
@@ -707,7 +711,7 @@ class ProductDatabase:
                         weight=weight,
                         stock=stock,
                     )
-                    loaded_count += 1
+                    updated_count += 1
                     continue
 
                 # YOLO 클래스명과 정확히 일치하는 상품이 있는지 확인 (100% 매칭)
@@ -731,10 +735,10 @@ class ProductDatabase:
                         f"'{name}' -> yolo_class_id={product.yolo_class_id}, "
                         f"product_id={product.product_id}"
                     )
-                    loaded_count += 1
+                    updated_count += 1
                     continue
 
-                # product_idx에서 숫자 ID 추출 시도 (예: "P17355176364813008" → 해시)
+                # product_idx에서 숫자 ID 추출 시도 (예: "P17355176364813008" → 해시/매핑)
                 # 간단히 인덱스 기반 ID 할당
                 product_id = self._get_or_create_id_for_idx(product_idx)
 
@@ -751,6 +755,7 @@ class ProductDatabase:
                     # product_idx 설정
                     product.product_idx = product_idx
                     self._product_idx_to_id[product_idx] = product_id
+                    updated_count += 1
                 else:
                     # 새 상품 추가
                     self.add_product(
@@ -765,21 +770,20 @@ class ProductDatabase:
                     product = self._products[product_id]
                     product.product_idx = product_idx
                     self._product_idx_to_id[product_idx] = product_id
-
-                loaded_count += 1
+                    added_count += 1
 
             except (ValueError, TypeError) as e:
                 logger.warning(f"Failed to load product from IF11: {item}, error: {e}")
                 continue
 
-        logger.info(f"Loaded {loaded_count} products from IF11 format")
+        logger.info(f"Loaded from IF11: added={added_count}, updated={updated_count}")
 
-        # 자동 매칭 시도
-        if loaded_count > 0:
+        # 자동 매칭 시도 (새로 추가된 상품이 있을 때)
+        if added_count > 0:
             matched = self.auto_match_yolo_to_if11()
             logger.info(f"Auto-matched {matched} YOLO classes to IF11 products")
 
-        return loaded_count
+        return added_count, updated_count
 
     def _find_exact_yolo_match(self, name: str) -> Optional[ProductInfo]:
         """
