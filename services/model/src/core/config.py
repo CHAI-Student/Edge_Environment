@@ -174,6 +174,18 @@ class Settings(BaseSettings):
     def yolo_model_path(self) -> str:
         return self.vision.yolo_model_path
 
+    @property
+    def top_weight(self) -> float:
+        return self.vision.top_weight
+
+    @property
+    def side_weight(self) -> float:
+        return self.vision.side_weight
+
+    @property
+    def common_class_bonus(self) -> float:
+        return self.vision.common_class_bonus
+
 
 # Global config instance
 config = Settings()

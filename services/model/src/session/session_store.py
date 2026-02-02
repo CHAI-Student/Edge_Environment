@@ -269,6 +269,30 @@ class SessionStore:
                 "max_sessions": self._max_sessions,
             }
 
+    def get_latest_active(self, zone: Optional[int] = None) -> Optional[SessionData]:
+        """
+        최근 활성 세션 조회.
+
+        Args:
+            zone: Zone 필터 (선택)
+
+        Returns:
+            가장 최근 SessionData or None
+        """
+        with self._lock:
+            now = time.time()
+            active = [
+                data for data in self._store.values()
+                if now - data.created_at <= self._ttl_seconds
+                and (zone is None or data.zone == zone)
+            ]
+
+            if not active:
+                return None
+
+            # 가장 최근 세션 반환
+            return max(active, key=lambda d: d.created_at)
+
     @property
     def session_count(self) -> int:
         """현재 저장된 세션 수."""
