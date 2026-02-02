@@ -14,6 +14,7 @@ const external = axios.create({
 });
 
 // event 없이 'node ./server/test/productTest.js'로 실행
+
 if (require.main === module) {
   (async () => {
     try {
@@ -39,6 +40,7 @@ if (require.main === module) {
 
       console.log("[ProductList] response:");
       console.dir(data, { depth: null });
+      console.log(data.DATA.product_list)
     } catch (err) {
       console.error("[ProductList] error:");
       console.error(err.message);

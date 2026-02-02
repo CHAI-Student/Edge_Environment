@@ -94,8 +94,20 @@ async function modelPooling(productData, opts = {}) {
   const { intervalMs = 10_000, timeoutMs = 5 * 60_000 } = opts;
   const started = Date.now();
 
+  /**
+   * class MultiZoneRequest(BaseModel):
+    """Multi-Zone 판단 요청."""
+
+    session_id: str = Field(..., description="세션 ID (zone_{zone}_{YYMMDD}_{HHMMSS})")
+    products: List[ProductInfo] = Field(
+        default_factory=list,
+        description="상품 목록 (선택, 무게 검증용)",
+    )
+   */
+
   while (true) {
     if (Date.now() - started > timeoutMs) throw new Error("Model inference timeout");
+    console.log('product list', productData)
 
     try {
       const res = await axios.post(`${config.modelApi}/api/judge/multi-zone`, productData, { timeout: 30_000 });
@@ -383,11 +395,26 @@ async function Payments(token, CardMethod) {
     let productData = []
     if (productList) { productData = productList.DATA.product_list }
     // console.log(productData)
+    // 2. API 스펙(ProductInfo)에 맞춰 매핑 (Mapping)
+    const formattedProducts = productData.map((item) => {
+      return {
+        product_idx: item.product_idx,      // 매칭: P17355176366172772
+        product_name: item.product_name,    // 매칭: 광동) 제주 삼다수 500ml
+        sale_price: item.sale_price,        // 매칭: 1500 (Integer)
+        product_weight: item.product_weight // 매칭: '530' (String, API 정의와 일치)
+      };
+    });
+
+    // 3. 최종 전송 데이터 구성 (MultiZoneRequest)
+    const requestPayload = {
+      session_id: config.deviceIdx, // 세션 ID는 로직에 맞게 생성 필요
+      products: formattedProducts         // 위에서 정제한 배열
+    };
     
     // 모델 서버 요청 (POST)
     console.log("[Model] Sending data for inference...");
     stopPolling = false;
-    const inferencePromise = modelPooling(productData, { intervalMs: 10_000 });
+    const inferencePromise = modelPooling(requestPayload, { intervalMs: 10_000 });
 
     // [6] 상단 카메라 ON 요청
     await requestTopCameraON({ save_path: folderPath});
