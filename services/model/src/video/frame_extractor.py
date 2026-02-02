@@ -14,6 +14,7 @@ Usage:
 import logging
 import subprocess
 import json
+import time
 from pathlib import Path
 from typing import Iterator, Optional, Tuple
 
@@ -67,96 +68,127 @@ class StreamingFrameExtractor:
         """
         Probe video metadata using ffprobe.
 
+        AVI 파일이 아직 저장 중일 수 있으므로 10초 간격으로 최대 6번 재시도.
+        총 1분 후에도 실패하면 timeout error.
+
         Returns:
             True if successful, False otherwise
         """
         if self._initialized:
             return True
 
-        video_file = Path(self.video_path)
-        if not video_file.exists():
-            logger.error(f"Video file not found: {self.video_path}")
-            return False
+        MAX_RETRIES = 6
+        RETRY_INTERVAL = 10  # seconds
 
-        # 파일 크기 로깅
-        file_size = video_file.stat().st_size
-        logger.info(f"[FFPROBE] path={self.video_path}, size={file_size} bytes")
+        for attempt in range(1, MAX_RETRIES + 1):
+            video_file = Path(self.video_path)
+            if not video_file.exists():
+                logger.error(f"Video file not found: {self.video_path}")
+                return False
 
-        try:
-            cmd = [
-                "ffprobe",
-                "-v", "error",  # 에러 메시지만 stderr로 출력
-                "-print_format", "json",
-                "-show_format",
-                "-show_streams",
-                "-select_streams", "v:0",
-                self.video_path,
-            ]
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=10,
+            # 파일 크기 로깅
+            file_size = video_file.stat().st_size
+            logger.info(
+                f"[FFPROBE] attempt={attempt}/{MAX_RETRIES}, "
+                f"path={self.video_path}, size={file_size} bytes"
             )
 
-            if result.returncode != 0:
-                logger.error(
-                    f"ffprobe failed: returncode={result.returncode}, "
-                    f"stderr={result.stderr!r}, stdout={result.stdout!r}"
+            try:
+                cmd = [
+                    "ffprobe",
+                    "-v", "error",  # 에러 메시지만 stderr로 출력
+                    "-print_format", "json",
+                    "-show_format",
+                    "-show_streams",
+                    "-select_streams", "v:0",
+                    self.video_path,
+                ]
+
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
+
+                if result.returncode != 0:
+                    stderr_msg = result.stderr.strip()
+
+                    # "Invalid data" 에러는 파일이 아직 저장 중일 수 있음 → 재시도
+                    if "Invalid data" in stderr_msg and attempt < MAX_RETRIES:
+                        logger.warning(
+                            f"[FFPROBE] File may still be writing, retrying in {RETRY_INTERVAL}s... "
+                            f"(attempt {attempt}/{MAX_RETRIES})"
+                        )
+                        time.sleep(RETRY_INTERVAL)
+                        continue
+
+                    # 마지막 시도 실패 또는 다른 에러
+                    if attempt == MAX_RETRIES and "Invalid data" in stderr_msg:
+                        logger.error(
+                            f"[FFPROBE] Timeout after {MAX_RETRIES} attempts "
+                            f"({MAX_RETRIES * RETRY_INTERVAL}s): path={self.video_path}"
+                        )
+                    else:
+                        logger.error(
+                            f"ffprobe failed: returncode={result.returncode}, "
+                            f"stderr={result.stderr!r}, stdout={result.stdout!r}"
+                        )
+                    return False
+
+                info = json.loads(result.stdout)
+
+                # Extract video stream info
+                if "streams" not in info or len(info["streams"]) == 0:
+                    logger.error("No video stream found")
+                    return False
+
+                stream = info["streams"][0]
+                self._width = int(stream.get("width", 0))
+                self._height = int(stream.get("height", 0))
+
+                # FPS parsing (can be "30/1" or "29.97")
+                fps_str = stream.get("r_frame_rate", "0/1")
+                if "/" in fps_str:
+                    num, den = fps_str.split("/")
+                    self._fps = float(num) / float(den) if float(den) > 0 else 0.0
+                else:
+                    self._fps = float(fps_str)
+
+                # Total frames
+                self._total_frames = int(stream.get("nb_frames", 0))
+
+                # Duration from format
+                if "format" in info:
+                    self._duration = float(info["format"].get("duration", 0))
+
+                # If nb_frames is missing, estimate from duration
+                if self._total_frames == 0 and self._duration > 0 and self._fps > 0:
+                    self._total_frames = int(self._duration * self._fps)
+
+                self._initialized = True
+
+                logger.debug(
+                    f"Video probed: {self.video_path}, "
+                    f"{self._width}x{self._height}, "
+                    f"{self._fps:.2f}fps, "
+                    f"{self._total_frames} frames, "
+                    f"{self._duration:.2f}s"
+                )
+                return True
+
+            except subprocess.TimeoutExpired:
+                logger.error("ffprobe timeout")
+                return False
+            except json.JSONDecodeError as e:
+                logger.error(f"ffprobe JSON parse error: {e}")
+                return False
+            except Exception as e:
+                logger.error(f"ffprobe failed: {e}")
                 return False
 
-            info = json.loads(result.stdout)
-
-            # Extract video stream info
-            if "streams" not in info or len(info["streams"]) == 0:
-                logger.error("No video stream found")
-                return False
-
-            stream = info["streams"][0]
-            self._width = int(stream.get("width", 0))
-            self._height = int(stream.get("height", 0))
-
-            # FPS parsing (can be "30/1" or "29.97")
-            fps_str = stream.get("r_frame_rate", "0/1")
-            if "/" in fps_str:
-                num, den = fps_str.split("/")
-                self._fps = float(num) / float(den) if float(den) > 0 else 0.0
-            else:
-                self._fps = float(fps_str)
-
-            # Total frames
-            self._total_frames = int(stream.get("nb_frames", 0))
-
-            # Duration from format
-            if "format" in info:
-                self._duration = float(info["format"].get("duration", 0))
-
-            # If nb_frames is missing, estimate from duration
-            if self._total_frames == 0 and self._duration > 0 and self._fps > 0:
-                self._total_frames = int(self._duration * self._fps)
-
-            self._initialized = True
-
-            logger.debug(
-                f"Video probed: {self.video_path}, "
-                f"{self._width}x{self._height}, "
-                f"{self._fps:.2f}fps, "
-                f"{self._total_frames} frames, "
-                f"{self._duration:.2f}s"
-            )
-            return True
-
-        except subprocess.TimeoutExpired:
-            logger.error("ffprobe timeout")
-            return False
-        except json.JSONDecodeError as e:
-            logger.error(f"ffprobe JSON parse error: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"ffprobe failed: {e}")
-            return False
+        # 모든 재시도 실패 (이론상 도달하지 않음)
+        return False
 
     def _check_hwaccel(self) -> bool:
         """
