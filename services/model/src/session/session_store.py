@@ -28,11 +28,11 @@ logger = logging.getLogger(__name__)
 class ProductResult:
     """단일 상품 판단 결과."""
     product_id: int           # YOLO class_id (내부용)
-    product_idx: Optional[str]  # IF11 product_idx (Node.js 응답용)
     name: str
     count: int
     price: int
     confidence: float
+    product_idx: Optional[str] = None  # IF11 product_idx (Node.js 응답용)
 
 
 @dataclass

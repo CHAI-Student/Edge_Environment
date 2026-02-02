@@ -30,7 +30,7 @@ class ProductInfo(BaseModel):
     """상품 정보."""
 
     product_id: int
-    product_idx: int
+    product_idx: Optional[int] = None  # IF11 product_idx (없을 수 있음)
     name: str
     category: str
     weight: float
@@ -193,7 +193,7 @@ async def register_product(
     Returns:
         ProductRegisterResponse: 등록 결과
     """
-    product_id = db.register_product(
+    product_id = db.add_product(
         name=request.name,
         category=request.category,
         weight=request.weight,
@@ -235,7 +235,7 @@ async def sync_products_if11(
 
         if existing is None:
             # 새 상품 등록
-            db.register_product(
+            db.add_product(
                 name=item.itemName,
                 category="if11",
                 weight=item.weight or 0.0,

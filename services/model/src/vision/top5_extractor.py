@@ -61,7 +61,7 @@ class Top5Extractor:
             max_distance_px=max_distance_px,
             hand_class_id=hand_class_id,
         )
-        self.top_k = top_k or config.top_k
+        self.top_k = top_k or config.vision.top_k
 
     def extract(
         self,

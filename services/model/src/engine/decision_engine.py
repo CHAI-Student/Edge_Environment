@@ -84,10 +84,10 @@ class ProductDecisionEngine:
             self.product_db = ProductDatabase()
         else:
             self.product_db = product_db
-        self.tolerance_percent = tolerance_percent or config.tolerance_percent
+        self.tolerance_percent = tolerance_percent or config.weight.tolerance_percent
         self.confidence_threshold = confidence_threshold
-        self.max_combination_size = max_combination_size or config.max_combination_size
-        self.min_weight_change = min_weight_change or config.min_weight_change
+        self.max_combination_size = max_combination_size or config.weight.max_combination_size
+        self.min_weight_change = min_weight_change or config.weight.min_weight_change
         self.partial_threshold = partial_threshold
 
         WeightBasedCountCalculator = _get_count_calculator()

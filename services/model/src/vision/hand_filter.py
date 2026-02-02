@@ -51,8 +51,8 @@ class HandProximityFilter:
             max_distance_px: 최대 거리 제한 (픽셀)
             hand_class_id: 손 클래스 ID
         """
-        self.max_distance_px = max_distance_px or config.max_distance_px
-        self.hand_class_id = hand_class_id if hand_class_id is not None else config.hand_class_id
+        self.max_distance_px = max_distance_px or config.vision.max_distance_px
+        self.hand_class_id = hand_class_id if hand_class_id is not None else config.vision.hand_class_id
 
     def filter(
         self,
