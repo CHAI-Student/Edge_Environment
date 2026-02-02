@@ -1,6 +1,6 @@
 # Edge Environment Lite - Model Service
 
-> **최종 업데이트**: 2026-02-01 | **버전**: 4.0.0
+> **최종 업데이트**: 2026-02-02 | **버전**: 4.1.0
 
 AI 스마트 자판기 시스템의 **Model** 서비스 (Jetson Orin Nano 4GB TensorRT 전용)
 
@@ -8,6 +8,11 @@ AI 스마트 자판기 시스템의 **Model** 서비스 (Jetson Orin Nano 4GB Te
 
 이 레포는 **Model** 서비스만 관리합니다.
 **TensorRT 엔진(.engine)** 파일만 지원하며, **CUDA가 필수**입니다.
+
+**v4.1 신규 기능:**
+- Door Session: 문 열림~닫힘 동안 여러 trigger 통합 관리
+- 반환 처리: 무게 증가 시 해당 상품 차감
+- YAML 영속화: 서비스 재시작 시 세션 복구
 
 **다른 서비스 관리 위치:**
 - Node.js, Camera Driver, IO Board, MQTT → 다른 레포
@@ -92,6 +97,17 @@ curl -X POST http://localhost:8002/api/judge/multi-zone \
 - **Python**: 3.10.x
 - **CUDA**: 12.x (JetPack 포함)
 - **TensorRT**: 10.x (JetPack 포함)
+
+## 테스트 실행
+
+```bash
+# 전체 테스트 실행 (113+ 테스트)
+pytest services/model/tests -v
+
+# 특정 모듈 테스트
+pytest services/model/tests/test_door_session_store.py -v
+pytest services/model/tests/test_product_aggregator.py -v
+```
 
 ---
 

@@ -334,11 +334,18 @@ class VotingEnsemble:
             side_conf = result.side_max_confidence
 
             if result.top_detected and result.side_detected:
-                # Both cameras: weighted average + bonus
+                # Both cameras: weighted average + 동적 보너스
+                # 동적 보너스: 두 신뢰도의 최소값 기반 (0 ~ common_class_bonus)
+                # 두 카메라 모두 높은 신뢰도일 때만 최대 보너스 적용
+                dynamic_bonus = min(top_conf, side_conf) * common_class_bonus
                 weighted_conf = (
                     top_conf * top_weight +
                     side_conf * side_weight +
-                    common_class_bonus
+                    dynamic_bonus
+                )
+                logger.debug(
+                    f"[ENSEMBLE] class {result.class_id}: 동적 보너스={dynamic_bonus:.3f} "
+                    f"(top={top_conf:.2f}, side={side_conf:.2f})"
                 )
             elif result.top_detected:
                 # Top only

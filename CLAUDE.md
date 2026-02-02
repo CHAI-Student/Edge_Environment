@@ -1,15 +1,22 @@
 # Edge Environment Lite - Model 서비스
 
-AI 스마트 자판기 시스템의 Model 서비스 (v4.0 AVI Trigger API)
+AI 스마트 자판기 시스템의 Model 서비스 (v4.1 Door Session API)
 **Jetson Orin Nano 4GB (JetPack 6.2) TensorRT 전용**
 
-> **최종 업데이트**: 2026-02-01
+> **최종 업데이트**: 2026-02-02
 
 ## 개요
 
 이 레포는 **Model** 서비스만 관리합니다.
 **TensorRT 엔진(.engine)** 파일만 지원하며, **CUDA가 필수**입니다.
 Node.js, IO Board, Payment, Camera Driver는 별도 레포에서 관리됩니다.
+
+### v4.1 변경사항 (최신)
+
+- **Door Session 추가**: 문 열림~닫힘 동안의 여러 trigger를 하나의 세션으로 통합 관리
+- **ProductAggregator**: 다중 trigger 상품 합산, 반환(무게 증가) 시 차감 처리
+- **YAML 영속화**: Door Session 데이터를 YAML 파일로 저장 (서비스 재시작 시 복구)
+- **신규 API 엔드포인트**: Door Session 조회/통계/강제종료
 
 ### v4.0 변경사항
 
@@ -31,7 +38,7 @@ Node.js, IO Board, Payment, Camera Driver는 별도 레포에서 관리됩니다
 | 배치 크기 | 1 (고정) | 4GB 메모리 제약 |
 | GPU 워밍업 | 서비스 시작 시 더미 추론 2회 | 첫 요청 지연 제거 |
 
-## 아키텍처 (v4.0)
+## 아키텍처 (v4.1)
 
 ```
 다른 레포                                 이 레포
@@ -41,10 +48,10 @@ Node.js, IO Board, Payment, Camera Driver는 별도 레포에서 관리됩니다
 ├─────────────────────────────┤          ├─────────────────────────────┤
 │ Camera Driver (8003)        │─────────►│ Model Service (8002)        │
 │   - POST /trigger 호출      │          │   - SessionStore            │
-│   - AVI 녹화 완료 시        │          │   - YOLO 추론               │
-├─────────────────────────────┤          │   - 상품 판단               │
-│ IO Board (8000)             │          └─────────────────────────────┘
-│ Payment (5000/5001)         │
+│   - AVI 녹화 완료 시        │          │   - DoorSessionStore (v4.1) │
+├─────────────────────────────┤          │   - YOLO 추론               │
+│ IO Board (8000)             │          │   - 상품 판단               │
+│ Payment (5000/5001)         │          └─────────────────────────────┘
 │ MQTT Client (8006)          │
 └─────────────────────────────┘
 ```
@@ -165,7 +172,7 @@ uv pip install -e ".[dev]"
 cd services/model && python main.py
 ```
 
-## API 엔드포인트 (v4.0)
+## API 엔드포인트 (v4.1)
 
 ### 1. POST /trigger (Camera → Model)
 
@@ -195,6 +202,7 @@ Camera에서 녹화 완료 시 호출. 즉시 YOLO 추론 실행.
 {
   "success": true,
   "session_id": "zone_1_260201_143025",
+  "door_session_id": "door_zone_1_260201_143000",
   "message": "추론 완료"
 }
 ```
@@ -207,28 +215,139 @@ Camera에서 녹화 완료 시 호출. 즉시 YOLO 추론 실행.
 ```json
 {
   "session_id": "zone_1_260201_143025",
+  "zone": 1,
   "products": [
     {"product_idx": "26", "product_name": "치킨마요", "sale_price": 3500, "product_weight": "365"}
   ]
 }
 ```
 
-**Response 1: 판단 안됨**
+**Response 1: Door Session 진행 중 (in_progress)**
 ```json
 {
-  "status": "processing",
-  "message": "YOLO 추론 대기 중"
+  "success": false,
+  "status": "in_progress",
+  "zone": 1,
+  "door_session_id": "door_zone_1_260201_143000",
+  "processing_stage": "door_session_active",
+  "processing_stage_detail": "Door session 활성: 2개 trigger 수신",
+  "interim_products": [
+    {"productIdx": "26", "productId": 26, "name": "치킨마요", "count": 2, "price": 3500}
+  ],
+  "interimProductCount": 2,
+  "interimTotalPrice": 7000,
+  "doorSessionInfo": {
+    "triggerCount": 2,
+    "durationSeconds": 15.5,
+    "createdAt": 1738476600.0,
+    "lastTriggerAt": 1738476615.5
+  }
 }
 ```
 
-**Response 2: 판단 완료**
+**Response 2: Door Session 완료 (complete)**
 ```json
 {
+  "success": true,
   "status": "complete",
+  "zone": 1,
+  "door_session_id": "door_zone_1_260201_143000",
+  "processing_stage": "complete",
+  "processing_stage_detail": "Door session 완료: 3개 trigger 통합",
   "products": [
-    {"productId": 26, "name": "치킨마요", "count": 1, "price": 3500}
+    {"productIdx": "26", "productId": 26, "name": "치킨마요", "count": 1, "price": 3500}
   ],
-  "totalPrice": 3500
+  "productCount": 1,
+  "totalPrice": 3500,
+  "confidence": 0.92,
+  "weightInfo": {
+    "delta": -365.0,
+    "isRemoval": true
+  },
+  "doorSessionInfo": {
+    "triggerCount": 3,
+    "durationSeconds": 45.2,
+    "createdAt": 1738476600.0,
+    "finalizedAt": 1738476645.2
+  }
+}
+```
+
+### 3. GET /api/judge/session/{session_id} (세션 상태 조회)
+
+**Response:**
+```json
+{
+  "found": true,
+  "session_id": "zone_1_260201_143025",
+  "data": {
+    "zone": 1,
+    "status": "complete",
+    "products": [...]
+  }
+}
+```
+
+### 4. GET /api/judge/sessions/stats (세션 통계)
+
+**Response:**
+```json
+{
+  "total_sessions": 10,
+  "active_sessions": 3,
+  "ttl_seconds": 300,
+  "max_sessions": 100,
+  "door_session_store": {
+    "active_sessions": 1,
+    "active_zones": [1]
+  },
+  "timestamp": 1738476700.0
+}
+```
+
+### 5. GET /api/judge/door-sessions/stats (Door Session 통계)
+
+**Response:**
+```json
+{
+  "enabled": true,
+  "active_sessions": 2,
+  "active_zones": [1, 2],
+  "session_timeout": 30.0,
+  "weight_tolerance": 3.0,
+  "max_duration": 600.0,
+  "timestamp": 1738476700.0
+}
+```
+
+### 6. GET /api/judge/door-session/{zone} (Door Session 조회)
+
+**Response:**
+```json
+{
+  "found": true,
+  "zone": 1,
+  "data": {
+    "door_session_id": "door_zone_1_260201_143000",
+    "status": "active",
+    "triggers": [...],
+    "aggregated_products": {...}
+  }
+}
+```
+
+### 7. POST /api/judge/door-session/{zone}/finalize (Door Session 강제 종료)
+
+**Response:**
+```json
+{
+  "success": true,
+  "zone": 1,
+  "door_session_id": "door_zone_1_260201_143000",
+  "trigger_count": 3,
+  "product_count": 2,
+  "total_price": 7000,
+  "message": "Door session finalized successfully"
 }
 ```
 
@@ -272,6 +391,9 @@ curl -X POST http://localhost:8002/api/products/sync \
 | MODEL__VISION__SIDE_WEIGHT | 0.5 | Side 카메라 가중치 |
 | MODEL__VISION__COMMON_CLASS_BONUS | 0.2 | 양쪽 감지 시 보너스 |
 | MODEL__NODEJS_URL | http://localhost:8888 | Node.js URL |
+| MODEL__DOOR_SESSION__TIMEOUT | 30.0 | Door Session 타임아웃 (초) |
+| MODEL__DOOR_SESSION__WEIGHT_TOLERANCE | 3.0 | 반환 무게 매칭 허용 오차 (g) |
+| MODEL__DOOR_SESSION__MAX_DURATION | 600.0 | Door Session 최대 지속 시간 (초) |
 
 ## 프로젝트 구조
 
@@ -299,7 +421,11 @@ Edge_Environment/
             │   ├── deps.py       # 의존성 주입
             │   └── manager.py    # FastAPI 앱 팩토리
             ├── session/          # 세션 저장소
-            │   └── session_store.py
+            │   ├── session_store.py      # 기본 세션 저장소
+            │   ├── door_session_store.py # Door Session 저장소 (v4.1)
+            │   ├── door_session.py       # Door Session 데이터 모델
+            │   ├── product_aggregator.py # 상품 통합/반환 처리
+            │   └── yaml_persistence.py   # YAML 영속화
             ├── video/            # AVI 비디오 처리
             │   ├── video_processor.py
             │   ├── voting_ensemble.py
@@ -319,7 +445,7 @@ Edge_Environment/
                 └── logging_config.py
 ```
 
-## 데이터 흐름 (v4.0)
+## 데이터 흐름 (v4.1)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -335,45 +461,98 @@ Edge_Environment/
         │                  │ POST /api/judge/multi-zone
         │                  │ (10초 간격)
         │                  ▼
-        │            ┌─────────────┐
-        │            │ Model 서비스 │
-        │            │ 세션 없음    │
-        │            │ → processing │
-        │            └─────────────┘
+        │            ┌─────────────────────────┐
+        │            │ Model 서비스             │
+        │            │ Door Session 없음        │
+        │            │ → processing (waiting)   │
+        │            └─────────────────────────┘
         │
-        ▼ (녹화 완료)
+        ▼ (녹화 완료 - 첫 번째)
    POST /trigger
-   (zone, loadcells, videos)
+   (zone=1, loadcells, videos)
         │
         ▼
-┌───────────────────────────────────────┐
-│ Model 서비스                           │
-│                                       │
-│ 1. VideoProcessor (AVI 처리)          │
-│    - FFmpeg -c:v mjpeg 프레임 추출    │
-│    - 480x480 크롭 (오른쪽 160px 제거) │
-│    - YOLO TensorRT 추론 (FP16)        │
-│    - VotingEnsemble                   │
-│                                       │
-│ 2. 로드셀 → delta_weight 계산         │
-│                                       │
-│ 3. Top-5 후보군 추출                  │
-│                                       │
-│ 4. 무게 기반 개수 계산                │
-│                                       │
-│ 5. SessionStore에 결과 저장           │
-└───────────────────────────────────────┘
+┌────────────────────────────────────────────┐
+│ Model 서비스 - 첫 번째 trigger             │
+│                                            │
+│ 1. VideoProcessor (AVI 처리)               │
+│    - YOLO TensorRT 추론 → 치킨마요 2개     │
+│                                            │
+│ 2. delta_weight = -730g (제거)             │
+│                                            │
+│ 3. DoorSessionStore에 추가                 │
+│    - 새 Door Session 생성                  │
+│    - door_session_id 발급                  │
+│    - ProductAggregator: 치킨마요 x2 합산   │
+│                                            │
+│ 4. SessionStore에도 저장 (하위 호환)       │
+└────────────────────────────────────────────┘
         │
         ▼
-   [Node.js 다음 폴링]
-   POST /api/judge/multi-zone
+   [Node.js 폴링]
+   POST /api/judge/multi-zone (zone=1)
         │
         ▼
-┌───────────────────────────────────────┐
-│ Model 서비스                           │
-│ SessionStore에서 결과 조회            │
-│ → {"status": "complete", ...}         │
-└───────────────────────────────────────┘
+┌────────────────────────────────────────────┐
+│ Model 서비스                                │
+│ DoorSession 활성 → in_progress 응답        │
+│ interim_products: 치킨마요 x2              │
+└────────────────────────────────────────────┘
+        │
+        ▼
+   [Camera 두 번째 trigger - 반환 감지]
+   POST /trigger (delta=+365g)
+        │
+        ▼
+┌────────────────────────────────────────────┐
+│ Model 서비스 - 두 번째 trigger (반환)      │
+│                                            │
+│ 1. delta_weight = +365g (반환)             │
+│    - is_return = true                      │
+│                                            │
+│ 2. DoorSessionStore에 추가                 │
+│    - ProductAggregator: 무게 매칭          │
+│    - 치킨마요(365g) 1개 차감               │
+│    - 결과: 치킨마요 x1                     │
+└────────────────────────────────────────────┘
+        │
+        ▼
+   [30초 타임아웃 - 문 닫힘]
+        │
+        ▼
+   [Node.js 폴링]
+   POST /api/judge/multi-zone (zone=1)
+        │
+        ▼
+┌────────────────────────────────────────────┐
+│ Model 서비스                                │
+│ DoorSession 타임아웃 → complete 응답       │
+│ products: 치킨마요 x1                      │
+│ totalPrice: 3500                           │
+└────────────────────────────────────────────┘
+```
+
+### Door Session 개념 (v4.1)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Door Session                                │
+│  (문 열림 ~ 타임아웃까지의 모든 trigger 통합)                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  trigger_001 (제거)     trigger_002 (제거)    trigger_003 (반환) │
+│  ├─ delta: -730g        ├─ delta: -250g       ├─ delta: +365g   │
+│  ├─ 치킨마요 x2         ├─ 참치마요 x1        └─ (무게 매칭)    │
+│  └─ is_return: false    └─ is_return: false       is_return: true│
+│                                                                  │
+│                    ▼ ProductAggregator ▼                        │
+│                                                                  │
+│  aggregated_products:                                            │
+│  ├─ 치킨마요: 2 - 1 = 1개 (반환 1개 차감)                        │
+│  └─ 참치마요: 1개                                                │
+│                                                                  │
+│  최종 결과: 치킨마요 3500원 + 참치마요 3000원 = 6500원           │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## 가중치 계산 (v4.0)
@@ -448,6 +627,38 @@ ffmpeg -version
 # MJPEG 코덱 지원 확인
 ffmpeg -codecs | grep mjpeg
 ```
+
+## 테스트 실행
+
+```bash
+# 전체 테스트 실행
+cd Edge_Environment
+pytest services/model/tests -v
+
+# 특정 테스트 파일 실행
+pytest services/model/tests/test_door_session_store.py -v
+pytest services/model/tests/test_product_aggregator.py -v
+pytest services/model/tests/test_voting_ensemble.py -v
+
+# 테스트 커버리지 (pytest-cov 필요)
+pytest services/model/tests --cov=services/model/src --cov-report=html
+```
+
+### 테스트 파일 구조
+
+| 파일 | 테스트 대상 | 테스트 수 |
+|------|------------|----------|
+| `test_session_store.py` | SessionStore CRUD, TTL | 11 |
+| `test_door_session_store.py` | DoorSessionStore, 타임아웃, 동시성 | 12 |
+| `test_product_aggregator.py` | 상품 합산, 반환 처리 | 10 |
+| `test_voting_ensemble.py` | 투표 앙상블, Top/Side 결합 | 14 |
+| `test_trigger_helpers.py` | 무게 계산 헬퍼 | 15 |
+| `test_api_routes.py` | API 엔드포인트 | 7 |
+| `test_deps.py` | 의존성 주입 | 8 |
+| `test_pipeline.py` | E2E 파이프라인 | 8 |
+| `test_scenario.py` | 실제 시나리오 | 14 |
+| `test_error_handling.py` | 예외 처리 | 14 |
+| **총계** | | **113+** |
 
 ## 삭제된 API (v3.0 → v4.0)
 

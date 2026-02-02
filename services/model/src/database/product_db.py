@@ -1166,6 +1166,17 @@ class ProductDatabase:
                         f"Auto-matched [{match_type}]: YOLO '{yolo_class_name}' (id={yolo_class_id}) "
                         f"-> IF11 '{best_match.name}' (product_id={best_match.product_id})"
                     )
+            else:
+                # 매칭 실패: yolo_class_id를 product_idx로 자동 할당
+                yolo_product = self.get_by_yolo_class_id(yolo_class_id)
+                if yolo_product and yolo_product.product_idx is None:
+                    auto_product_idx = str(yolo_class_id)
+                    yolo_product.product_idx = auto_product_idx
+                    self._product_idx_to_id[auto_product_idx] = yolo_product.product_id
+                    logger.info(
+                        f"Auto-assigned product_idx={auto_product_idx} for unmatched "
+                        f"YOLO class '{yolo_class_name}' (yolo_class_id={yolo_class_id})"
+                    )
 
         logger.info(f"Auto-matching completed: {matched_count} products matched")
         return matched_count
@@ -1320,15 +1331,26 @@ class ProductDatabase:
                         if price > 0:
                             product.price = int(price)
 
-                        # IF11 product_idx 설정 (null이면 None)
-                        product.product_idx = product_idx
+                        # IF11 product_idx 설정
+                        # product_idx가 없으면 yolo_class_id를 문자열로 사용 (자동 할당)
                         if product_idx:
-                            self._product_idx_to_id[product_idx] = product_id
+                            product.product_idx = product_idx
+                        else:
+                            # Fallback: yolo_class_id를 product_idx로 자동 할당
+                            product.product_idx = str(yolo_class_id)
+                            logger.info(
+                                f"Auto-assigned product_idx={yolo_class_id} for "
+                                f"yolo_class_id={yolo_class_id} ({yolo_class_name})"
+                            )
+
+                        # 인덱스 등록
+                        if product.product_idx:
+                            self._product_idx_to_id[product.product_idx] = product_id
 
                         loaded_count += 1
                         logger.debug(
                             f"Loaded mapping: yolo_class_id={yolo_class_id}, "
-                            f"product_idx={product_idx}, name={product_name}"
+                            f"product_idx={product.product_idx}, name={product_name}"
                         )
 
             logger.info(f"Loaded {loaded_count} mappings from {path}")

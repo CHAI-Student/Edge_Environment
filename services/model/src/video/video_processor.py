@@ -49,12 +49,14 @@ class BboxTracker:
         max_distance: 관찰된 최대 이동 거리 (픽셀)
         detection_count: 총 감지 횟수
         frame_indices: 감지된 프레임 인덱스 목록
+        dynamic_threshold: bbox 크기 기반 동적 임계값 (픽셀)
     """
     first_center: Optional[Tuple[float, float]] = None
     last_center: Optional[Tuple[float, float]] = None
     max_distance: float = 0.0
     detection_count: int = 0
     frame_indices: List[int] = field(default_factory=list)
+    dynamic_threshold: float = 0.0  # bbox 크기 기반 동적 임계값
 
     def update(self, center: Tuple[float, float], frame_idx: int) -> None:
         """bbox 중심점 업데이트."""
@@ -93,7 +95,9 @@ class BboxTracker:
         Returns:
             이동이 감지되었으면 True
         """
-        return self.total_displacement >= min_displacement or self.max_distance >= min_displacement
+        # 동적 임계값이 설정되어 있으면 사용, 아니면 기본값 사용
+        threshold = self.dynamic_threshold if self.dynamic_threshold > 0 else min_displacement
+        return self.total_displacement >= threshold or self.max_distance >= threshold
 
 
 @dataclass
@@ -168,10 +172,11 @@ class VideoProcessor:
         self,
         yolo: YOLOWrapper,
         min_vote_ratio: float = 0.05,
-        confidence_threshold: float = 0.3,
+        confidence_threshold: float = 0.6,
         use_hwaccel: bool = True,
         motion_filter_enabled: bool = True,
         min_motion_displacement: float = 30.0,
+        side_roi_x_max: float = 240.0,
     ):
         """
         Initialize video processor.
@@ -179,10 +184,11 @@ class VideoProcessor:
         Args:
             yolo: YOLOWrapper instance for inference
             min_vote_ratio: Minimum vote ratio to include in results (default: 5%)
-            confidence_threshold: Minimum confidence for detection (default: 0.3)
+            confidence_threshold: Minimum confidence for YOLO detection (default: 0.6)
             use_hwaccel: Use hardware acceleration for video decoding (default: True)
             motion_filter_enabled: Enable motion-based filtering (default: True)
             min_motion_displacement: Minimum bbox center displacement to consider as motion (default: 30 pixels)
+            side_roi_x_max: Side 카메라 ROI 최대 X 좌표 (기본 240px, 왼쪽 절반만 허용)
         """
         self.yolo = yolo
         self.min_vote_ratio = min_vote_ratio
@@ -190,6 +196,7 @@ class VideoProcessor:
         self.use_hwaccel = use_hwaccel
         self.motion_filter_enabled = motion_filter_enabled
         self.min_motion_displacement = min_motion_displacement
+        self.side_roi_x_max = side_roi_x_max
 
     def process_videos(
         self,
@@ -253,11 +260,22 @@ class VideoProcessor:
             common_class_bonus=config.common_class_bonus,
         )
 
-        # Filter by minimum vote ratio
+        # Filter by minimum vote ratio OR minimum vote count
+        # 조건 1: vote_ratio >= 5% (기존)
+        # 조건 2: vote_count >= 3 (절대값 3프레임 이상이면 포함 - 짧은 비디오 대응)
+        min_vote_count = 3
         filtered_results = [
             r for r in combined_results
-            if r.vote_ratio >= self.min_vote_ratio
+            if r.vote_ratio >= self.min_vote_ratio or r.vote_count >= min_vote_count
         ]
+
+        # 필터링 로그
+        filtered_by_ratio = sum(1 for r in combined_results if r.vote_ratio >= self.min_vote_ratio)
+        filtered_by_count = sum(1 for r in combined_results if r.vote_count >= min_vote_count and r.vote_ratio < self.min_vote_ratio)
+        logger.info(
+            f"[VIDEO] 필터링: vote_ratio >= {self.min_vote_ratio*100:.0f}%: {filtered_by_ratio}개, "
+            f"vote_count >= {min_vote_count}: 추가 {filtered_by_count}개"
+        )
 
         stats.processing_time_ms = (time.time() - start_time) * 1000
 
@@ -313,6 +331,9 @@ class VideoProcessor:
             use_hwaccel=self.use_hwaccel,
         )
 
+        # ROI 필터링 통계
+        roi_filtered_count = 0
+
         for frame in extractor:
             frame_count += 1
 
@@ -327,15 +348,35 @@ class VideoProcessor:
                 if det.conf < self.confidence_threshold:
                     continue
 
+                # Side 카메라 ROI 필터: 왼쪽 영역만 허용
+                # bbox 중심점이 오른쪽 영역(> side_roi_x_max)에 있으면 제외
+                if camera_type == "side":
+                    center_x = det.center[0]
+                    if center_x > self.side_roi_x_max:
+                        roi_filtered_count += 1
+                        continue
+
                 class_id = det.cls
 
                 # Use YOLODetection's center property
                 center = det.center
 
+                # bbox 크기 기반 동적 임계값 계산
+                bbox_width = det.x2 - det.x1
+                bbox_height = det.y2 - det.y1
+                bbox_size = max(bbox_width, bbox_height)
+                # 동적 임계값: bbox 크기의 10%, 최소 15px
+                dynamic_threshold = max(15.0, bbox_size * 0.10)
+
                 # Update bbox tracker
                 if class_id not in bbox_trackers:
                     bbox_trackers[class_id] = BboxTracker()
                 bbox_trackers[class_id].update(center, frame_count)
+                # 동적 임계값 업데이트 (최대값 유지)
+                bbox_trackers[class_id].dynamic_threshold = max(
+                    bbox_trackers[class_id].dynamic_threshold,
+                    dynamic_threshold
+                )
 
                 # Store vote for later (will be applied after motion filtering)
                 if class_id not in pending_votes:
@@ -377,31 +418,42 @@ class VideoProcessor:
                 motion_passed_count += 1
 
                 if tracker:
+                    threshold_used = tracker.dynamic_threshold if tracker.dynamic_threshold > 0 else self.min_motion_displacement
                     logger.debug(
                         f"[MOTION] {camera_type} class {class_id}: PASSED "
                         f"(displacement={tracker.total_displacement:.1f}px, "
                         f"max_dist={tracker.max_distance:.1f}px, "
+                        f"threshold={threshold_used:.1f}px, "
                         f"detections={tracker.detection_count})"
                     )
             else:
                 motion_filtered_count += 1
                 if tracker:
+                    threshold_used = tracker.dynamic_threshold if tracker.dynamic_threshold > 0 else self.min_motion_displacement
                     logger.info(
                         f"[MOTION] {camera_type} class {class_id}: FILTERED "
-                        f"(displacement={tracker.total_displacement:.1f}px < {self.min_motion_displacement}px, "
+                        f"(displacement={tracker.total_displacement:.1f}px < threshold={threshold_used:.1f}px, "
                         f"detections={tracker.detection_count})"
                     )
 
         logger.info(
             f"[MOTION] {camera_type} 필터링 결과: "
             f"통과={motion_passed_count}개, 제외={motion_filtered_count}개 "
-            f"(임계값={self.min_motion_displacement}px)"
+            f"(기본 임계값={self.min_motion_displacement}px, 동적 임계값 적용)"
         )
+
+        # Side 카메라 ROI 필터링 결과 로그
+        if camera_type == "side" and roi_filtered_count > 0:
+            logger.info(
+                f"[ROI] {camera_type} ROI 필터링: "
+                f"{roi_filtered_count}개 탐지 제외 (center_x > {self.side_roi_x_max}px)"
+            )
 
         return {
             "frames": frame_count,
             "detections": detection_count,
             "motion_filtered": motion_filtered_count,
+            "roi_filtered": roi_filtered_count,
         }
 
     def process_single_video_file(
