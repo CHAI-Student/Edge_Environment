@@ -18,8 +18,10 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Body, Depends
 from pydantic import BaseModel, Field
 
-from session import SessionStore
-from api.deps import get_session_store
+from session import SessionStore, SessionData, ProductResult, DoorSessionStore
+from engine import ProductDecisionEngine, EnsembleResult
+from database.product_db import ProductDatabase
+from api.deps import get_session_store, get_product_db, get_decision_engine, get_door_session_store_optional
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +154,9 @@ def _parse_request(body: Any) -> MultiZoneRequest:
 async def judge_multi_zone(
     body: Any = Body(...),
     session_store: SessionStore = Depends(get_session_store),
+    product_db: ProductDatabase = Depends(get_product_db),
+    engine: ProductDecisionEngine = Depends(get_decision_engine),
+    door_session_store: DoorSessionStore | None = Depends(get_door_session_store_optional),
 ):
     """
     Node.js 폴링용 상품 판단 API.
@@ -193,6 +198,122 @@ async def judge_multi_zone(
         f"products={len(request.products)}, zone={request.zone}"
     )
 
+    # Door Session 기반 응답 (v4.1) - DoorSessionStore가 활성화되어 있으면 우선 사용
+    if door_session_store is not None and request.zone is not None:
+        door_session, is_finalized = door_session_store.get_or_finalize(request.zone)
+
+        if door_session is not None:
+            # DoorSession 기반 응답 생성
+            active_products = door_session.get_active_products()
+
+            # 상품 정보 변환
+            products_response = [
+                {
+                    "productIdx": p.product_idx if p.product_idx else str(p.product_id),
+                    "productId": p.product_id,
+                    "name": p.name,
+                    "count": p.count,
+                    "price": p.unit_price,
+                    "confidence": round(p.average_confidence, 4),
+                }
+                for p in active_products
+            ]
+
+            # 총 상품 개수 및 금액
+            product_count = sum(p.count for p in active_products)
+            total_price = door_session.total_price
+
+            # device_id 추출
+            is_valid_session_id = (
+                request.session_id is not None
+                and request.session_id.startswith("zone_")
+            )
+            device_id = None if is_valid_session_id else request.session_id
+
+            if is_finalized:
+                # 세션 종료 (complete)
+                logger.info(
+                    f"[MULTI-ZONE DOOR SESSION COMPLETE] "
+                    f"door_session_id={door_session.door_session_id}, "
+                    f"triggers={door_session.trigger_count}, "
+                    f"products={product_count}, total_price={total_price}"
+                )
+                return {
+                    "success": product_count > 0,
+                    "status": "complete",
+                    "device_id": device_id,
+                    "zone": door_session.zone,
+                    "door_session_id": door_session.door_session_id,
+                    "session_id": door_session.triggers[-1].session_id if door_session.triggers else None,
+                    "processing_stage": "complete",
+                    "processing_stage_detail": f"Door session 완료: {door_session.trigger_count}개 trigger 통합",
+                    "products": products_response,
+                    "productCount": product_count,
+                    "totalPrice": total_price,
+                    "confidence": round(
+                        sum(p.average_confidence for p in active_products) / len(active_products)
+                        if active_products else 0.0,
+                        4,
+                    ),
+                    "weightInfo": {
+                        "delta": round(
+                            sum(t.delta_weight for t in door_session.triggers),
+                            1,
+                        ),
+                        "isRemoval": sum(t.delta_weight for t in door_session.triggers) < 0,
+                    },
+                    "doorSessionInfo": {
+                        "triggerCount": door_session.trigger_count,
+                        "durationSeconds": round(door_session.duration_seconds, 1),
+                        "createdAt": door_session.created_at,
+                        "finalizedAt": door_session.finalized_at,
+                    },
+                    "stats": {
+                        "topFrames": 0,
+                        "sideFrames": 0,
+                        "processingTimeMs": round(
+                            sum(t.processing_time_ms for t in door_session.triggers),
+                            1,
+                        ),
+                    },
+                }
+            else:
+                # 세션 진행 중 (in_progress)
+                logger.info(
+                    f"[MULTI-ZONE DOOR SESSION IN_PROGRESS] "
+                    f"door_session_id={door_session.door_session_id}, "
+                    f"triggers={door_session.trigger_count}, "
+                    f"interim_products={product_count}"
+                )
+                return {
+                    "success": False,
+                    "status": "in_progress",
+                    "device_id": device_id,
+                    "zone": door_session.zone,
+                    "door_session_id": door_session.door_session_id,
+                    "session_id": door_session.triggers[-1].session_id if door_session.triggers else None,
+                    "processing_stage": "door_session_active",
+                    "processing_stage_detail": f"Door session 활성: {door_session.trigger_count}개 trigger 수신",
+                    "interim_products": products_response,
+                    "interimProductCount": product_count,
+                    "interimTotalPrice": total_price,
+                    "doorSessionInfo": {
+                        "triggerCount": door_session.trigger_count,
+                        "durationSeconds": round(door_session.duration_seconds, 1),
+                        "createdAt": door_session.created_at,
+                        "lastTriggerAt": door_session.last_trigger_at,
+                    },
+                    "stats": {
+                        "topFrames": 0,
+                        "sideFrames": 0,
+                        "processingTimeMs": round(
+                            sum(t.processing_time_ms for t in door_session.triggers),
+                            1,
+                        ),
+                    },
+                }
+
+    # 기존 SessionStore 기반 응답 (DoorSession이 없거나 비활성화된 경우)
     # session_id 유효성 검사: zone_으로 시작하면 실제 세션 ID, 아니면 device_id
     # Node.js가 deviceIdx(예: "DE17683631997086480")를 session_id로 보내는 경우
     is_valid_session_id = (
@@ -278,6 +399,92 @@ async def judge_multi_zone(
             "processing_stage": session_data.processing_stage,
             "processing_stage_detail": session_data.processing_stage_detail,
         }
+
+    # Node.js에서 전달한 product_weight로 무게 업데이트 + 재계산
+    if request.products and session_data.vision_candidates:
+        weights_updated = False
+        updated_product_ids = []
+
+        for p in request.products:
+            try:
+                weight = float(p.product_weight) if p.product_weight else 0.0
+            except (ValueError, TypeError):
+                weight = 0.0
+
+            if weight > 0:
+                # product_idx로 YOLO class_id 조회
+                class_id = product_db.get_yolo_class_id_by_product_idx(p.product_idx)
+                if class_id is not None:
+                    old_weight = product_db.get_weight(class_id)
+                    if old_weight != weight:
+                        product_db.update_weight(class_id, weight)
+                        weights_updated = True
+                        updated_product_ids.append(class_id)
+                        logger.info(
+                            f"[MULTI-ZONE] Weight updated: product_idx={p.product_idx}, "
+                            f"class_id={class_id}, {old_weight}g -> {weight}g"
+                        )
+
+        # 무게가 업데이트되었으면 개수 재계산
+        if weights_updated and session_data.status == "complete":
+            logger.info(
+                f"[MULTI-ZONE] Recalculating counts with updated weights: "
+                f"updated_ids={updated_product_ids}"
+            )
+
+            # vision_candidates를 EnsembleResult로 복원
+            vision_candidates = [
+                EnsembleResult(
+                    class_id=vc["class_id"],
+                    class_name=vc["class_name"],
+                    top_confidence=vc.get("top_confidence", 0.0),
+                    side_confidence=vc.get("side_confidence", 0.0),
+                    combined_confidence=vc.get("combined_confidence", 0.0),
+                    vote_count=vc.get("vote_count", 1),
+                )
+                for vc in session_data.vision_candidates
+            ]
+
+            # 재판단
+            result = engine.judge(
+                vision_candidates=vision_candidates,
+                delta_weight=session_data.delta_weight,
+                vision_only=False,
+            )
+
+            # 세션 데이터 업데이트
+            def get_product_idx(product_id: int) -> Optional[str]:
+                """YOLO class_id로 IF11 product_idx 조회."""
+                product_info = product_db.get_by_yolo_class_id(product_id)
+                if product_info and product_info.product_idx:
+                    return product_info.product_idx
+                return None
+
+            new_products = [
+                ProductResult(
+                    product_id=p.product_id,
+                    product_idx=get_product_idx(p.product_id),
+                    name=p.name,
+                    count=p.count,
+                    price=p.unit_price,
+                    confidence=p.confidence,
+                )
+                for p in result.products
+            ]
+
+            # 세션 업데이트
+            session_data.products = new_products
+            session_data.total_price = result.total_price
+            session_data.confidence = result.confidence
+            session_data.processing_stage_detail = f"무게 보정 후 재계산: 상품 {len(new_products)}개"
+
+            # 세션 저장소에 저장
+            session_store.save(session_data.session_id, session_data)
+
+            logger.info(
+                f"[MULTI-ZONE] Recalculation complete: "
+                f"products={len(new_products)}, total_price={result.total_price}"
+            )
 
     # 결과가 있으면 complete 응답
     # 개수가 0인 상품은 제외 (Node.js에서 요청한 상품 목록에 포함되지 않음)
@@ -374,6 +581,7 @@ async def get_session_status(
 @router.get("/sessions/stats")
 async def get_sessions_stats(
     session_store: SessionStore = Depends(get_session_store),
+    door_session_store: DoorSessionStore | None = Depends(get_door_session_store_optional),
 ):
     """
     세션 저장소 통계 조회.
@@ -381,7 +589,118 @@ async def get_sessions_stats(
     Returns:
         총 세션 수, 활성 세션 수 등
     """
-    return {
+    result = {
         **session_store.get_stats(),
         "timestamp": time.time(),
+    }
+
+    if door_session_store is not None:
+        result["door_session_store"] = door_session_store.get_stats()
+
+    return result
+
+
+# ============================================================================
+# Door Session Endpoints (v4.1)
+# ============================================================================
+
+
+@router.get("/door-sessions/stats")
+async def get_door_sessions_stats(
+    door_session_store: DoorSessionStore | None = Depends(get_door_session_store_optional),
+):
+    """
+    Door Session 저장소 통계 조회.
+
+    Returns:
+        활성 Door Session 수, YAML 저장 현황 등
+    """
+    if door_session_store is None:
+        return {
+            "enabled": False,
+            "message": "DoorSessionStore is not enabled",
+        }
+
+    return {
+        "enabled": True,
+        **door_session_store.get_stats(),
+        "timestamp": time.time(),
+    }
+
+
+@router.get("/door-session/{zone}")
+async def get_door_session_status(
+    zone: int,
+    door_session_store: DoorSessionStore | None = Depends(get_door_session_store_optional),
+):
+    """
+    특정 Zone의 Door Session 상태 조회.
+
+    Args:
+        zone: Zone 번호
+
+    Returns:
+        Door Session 상세 정보 or 404
+    """
+    if door_session_store is None:
+        return {
+            "found": False,
+            "zone": zone,
+            "message": "DoorSessionStore is not enabled",
+        }
+
+    door_session = door_session_store.get_session(zone)
+
+    if door_session is None:
+        return {
+            "found": False,
+            "zone": zone,
+            "message": "No active door session for this zone",
+        }
+
+    return {
+        "found": True,
+        "zone": zone,
+        "data": door_session.to_dict(),
+    }
+
+
+@router.post("/door-session/{zone}/finalize")
+async def finalize_door_session(
+    zone: int,
+    door_session_store: DoorSessionStore | None = Depends(get_door_session_store_optional),
+):
+    """
+    Door Session 강제 종료.
+
+    Args:
+        zone: Zone 번호
+
+    Returns:
+        종료된 Door Session 정보
+    """
+    if door_session_store is None:
+        return {
+            "success": False,
+            "zone": zone,
+            "message": "DoorSessionStore is not enabled",
+        }
+
+    door_session = door_session_store.finalize_session(zone)
+
+    if door_session is None:
+        return {
+            "success": False,
+            "zone": zone,
+            "message": "No active door session to finalize",
+        }
+
+    return {
+        "success": True,
+        "zone": zone,
+        "door_session_id": door_session.door_session_id,
+        "trigger_count": door_session.trigger_count,
+        "product_count": door_session.product_count,
+        "total_price": door_session.total_price,
+        "message": "Door session finalized successfully",
     }

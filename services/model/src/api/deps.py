@@ -12,7 +12,7 @@ v4.0 변경사항:
 import logging
 from typing import Optional
 
-from session import SessionStore
+from session import SessionStore, DoorSessionStore
 from vision import YOLOWrapper
 from database.product_db import ProductDatabase
 from engine import ProductDecisionEngine
@@ -30,6 +30,7 @@ def init_dependencies(
     engine: ProductDecisionEngine,
     product_db: ProductDatabase,
     video_processor: Optional[VideoProcessor] = None,
+    door_session_store: Optional[DoorSessionStore] = None,
 ):
     """
     의존성 초기화 (lifespan에서 호출).
@@ -40,11 +41,13 @@ def init_dependencies(
         engine: ProductDecisionEngine 인스턴스
         product_db: ProductDatabase 인스턴스
         video_processor: VideoProcessor 인스턴스 (선택)
+        door_session_store: DoorSessionStore 인스턴스 (선택, v4.1)
     """
     _instances["session_store"] = session_store
     _instances["yolo"] = yolo
     _instances["engine"] = engine
     _instances["db"] = product_db
+    _instances["door_session_store"] = door_session_store
 
     # VideoProcessor는 yolo를 공유
     if video_processor is not None:
@@ -58,7 +61,8 @@ def init_dependencies(
         f"yolo={yolo is not None}, "
         f"engine={engine is not None}, "
         f"db={product_db is not None}, "
-        f"video_processor={_instances.get('video_processor') is not None}"
+        f"video_processor={_instances.get('video_processor') is not None}, "
+        f"door_session_store={door_session_store is not None}"
     )
 
 
@@ -66,6 +70,9 @@ def cleanup_dependencies():
     """의존성 정리 (shutdown 시 호출)."""
     if "session_store" in _instances:
         _instances["session_store"].clear_all()
+
+    if "door_session_store" in _instances and _instances["door_session_store"] is not None:
+        _instances["door_session_store"].clear_all()
 
     _instances.clear()
     logger.info("Dependencies cleaned up")
@@ -116,6 +123,14 @@ def get_video_processor() -> VideoProcessor:
     return processor
 
 
+def get_door_session_store() -> DoorSessionStore:
+    """DoorSessionStore 인스턴스 반환."""
+    store = _instances.get("door_session_store")
+    if store is None:
+        raise RuntimeError("DoorSessionStore not initialized. Call init_dependencies() first.")
+    return store
+
+
 # ============================================================================
 # Optional Getters (may return None)
 # ============================================================================
@@ -146,6 +161,11 @@ def get_video_processor_optional() -> Optional[VideoProcessor]:
     return _instances.get("video_processor")
 
 
+def get_door_session_store_optional() -> Optional[DoorSessionStore]:
+    """DoorSessionStore 인스턴스 반환 (None 허용)."""
+    return _instances.get("door_session_store")
+
+
 # ============================================================================
 # Status Check
 # ============================================================================
@@ -154,12 +174,14 @@ def get_video_processor_optional() -> Optional[VideoProcessor]:
 def is_initialized() -> bool:
     """의존성 초기화 상태 확인."""
     required_keys = ["session_store", "yolo", "engine", "db", "video_processor"]
+    # door_session_store는 선택적 (설정으로 비활성화 가능)
     return all(key in _instances for key in required_keys)
 
 
 def get_status() -> dict:
     """의존성 상태 반환."""
     yolo = _instances.get("yolo")
+    door_store = _instances.get("door_session_store")
     return {
         "initialized": is_initialized(),
         "session_store": _instances.get("session_store") is not None,
@@ -169,4 +191,6 @@ def get_status() -> dict:
         "engine": _instances.get("engine") is not None,
         "db": _instances.get("db") is not None,
         "video_processor": _instances.get("video_processor") is not None,
+        "door_session_store": door_store is not None,
+        "door_session_store_instance": door_store,
     }

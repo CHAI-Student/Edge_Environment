@@ -10,6 +10,10 @@ Memory-efficient design for Jetson Orin Nano:
 - Immediate memory release after inference
 - Only vote counts are accumulated (not images)
 
+v4.1 추가:
+- Bounding box 중심점 이동 추적 (Motion Tracking)
+- 이동이 감지된 객체만 후보에 포함
+
 Usage:
     processor = VideoProcessor(yolo=yolo_wrapper)
     results = processor.process_videos(
@@ -19,9 +23,10 @@ Usage:
 """
 
 import logging
+import math
 import time
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
 from .frame_extractor import create_frame_extractor
 from .voting_ensemble import VotingEnsemble, VoteResult
@@ -29,6 +34,66 @@ from vision import YOLOWrapper
 from core.config import config
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BboxTracker:
+    """
+    Bounding box 중심점 이동 추적.
+
+    각 class_id별로 첫 번째/마지막 bbox 중심점과 최대 이동 거리를 추적.
+
+    Attributes:
+        first_center: 첫 번째 감지 시 중심점 (x, y)
+        last_center: 마지막 감지 시 중심점 (x, y)
+        max_distance: 관찰된 최대 이동 거리 (픽셀)
+        detection_count: 총 감지 횟수
+        frame_indices: 감지된 프레임 인덱스 목록
+    """
+    first_center: Optional[Tuple[float, float]] = None
+    last_center: Optional[Tuple[float, float]] = None
+    max_distance: float = 0.0
+    detection_count: int = 0
+    frame_indices: List[int] = field(default_factory=list)
+
+    def update(self, center: Tuple[float, float], frame_idx: int) -> None:
+        """bbox 중심점 업데이트."""
+        if self.first_center is None:
+            self.first_center = center
+
+        # 이전 중심점과의 거리 계산
+        if self.last_center is not None:
+            distance = math.sqrt(
+                (center[0] - self.last_center[0]) ** 2 +
+                (center[1] - self.last_center[1]) ** 2
+            )
+            self.max_distance = max(self.max_distance, distance)
+
+        self.last_center = center
+        self.detection_count += 1
+        self.frame_indices.append(frame_idx)
+
+    @property
+    def total_displacement(self) -> float:
+        """첫 번째와 마지막 위치 간 총 이동 거리."""
+        if self.first_center is None or self.last_center is None:
+            return 0.0
+        return math.sqrt(
+            (self.last_center[0] - self.first_center[0]) ** 2 +
+            (self.last_center[1] - self.first_center[1]) ** 2
+        )
+
+    def has_motion(self, min_displacement: float = 30.0) -> bool:
+        """
+        이동이 있었는지 여부.
+
+        Args:
+            min_displacement: 최소 이동 거리 임계값 (픽셀)
+
+        Returns:
+            이동이 감지되었으면 True
+        """
+        return self.total_displacement >= min_displacement or self.max_distance >= min_displacement
 
 
 @dataclass
@@ -42,12 +107,14 @@ class VideoProcessingStats:
         top_detections: Total detections from top camera
         side_detections: Total detections from side camera
         processing_time_ms: Total processing time in milliseconds
+        motion_filtered_classes: Number of classes filtered out due to no motion
     """
     top_frames: int = 0
     side_frames: int = 0
     top_detections: int = 0
     side_detections: int = 0
     processing_time_ms: float = 0.0
+    motion_filtered_classes: int = 0
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -59,6 +126,7 @@ class VideoProcessingStats:
             "total_frames": self.top_frames + self.side_frames,
             "total_detections": self.top_detections + self.side_detections,
             "processing_time_ms": round(self.processing_time_ms, 1),
+            "motion_filtered_classes": self.motion_filtered_classes,
         }
 
 
@@ -102,6 +170,8 @@ class VideoProcessor:
         min_vote_ratio: float = 0.05,
         confidence_threshold: float = 0.3,
         use_hwaccel: bool = True,
+        motion_filter_enabled: bool = True,
+        min_motion_displacement: float = 30.0,
     ):
         """
         Initialize video processor.
@@ -111,11 +181,15 @@ class VideoProcessor:
             min_vote_ratio: Minimum vote ratio to include in results (default: 5%)
             confidence_threshold: Minimum confidence for detection (default: 0.3)
             use_hwaccel: Use hardware acceleration for video decoding (default: True)
+            motion_filter_enabled: Enable motion-based filtering (default: True)
+            min_motion_displacement: Minimum bbox center displacement to consider as motion (default: 30 pixels)
         """
         self.yolo = yolo
         self.min_vote_ratio = min_vote_ratio
         self.confidence_threshold = confidence_threshold
         self.use_hwaccel = use_hwaccel
+        self.motion_filter_enabled = motion_filter_enabled
+        self.min_motion_displacement = min_motion_displacement
 
     def process_videos(
         self,
@@ -152,6 +226,7 @@ class VideoProcessor:
             top_stats = self._process_single_video(top_path, top_ensemble, "top")
             stats.top_frames = top_stats["frames"]
             stats.top_detections = top_stats["detections"]
+            stats.motion_filtered_classes += top_stats.get("motion_filtered", 0)
             logger.info(
                 f"[VIDEO] Top 완료: 총 {stats.top_frames}프레임, "
                 f"탐지={stats.top_detections}개, 고유클래스={len(top_ensemble.votes)}개"
@@ -163,6 +238,7 @@ class VideoProcessor:
             side_stats = self._process_single_video(side_path, side_ensemble, "side")
             stats.side_frames = side_stats["frames"]
             stats.side_detections = side_stats["detections"]
+            stats.motion_filtered_classes += side_stats.get("motion_filtered", 0)
             logger.info(
                 f"[VIDEO] Side 완료: 총 {stats.side_frames}프레임, "
                 f"탐지={stats.side_detections}개, 고유클래스={len(side_ensemble.votes)}개"
@@ -201,21 +277,34 @@ class VideoProcessor:
         camera_type: str = "unknown",
     ) -> dict:
         """
-        Process a single video file.
+        Process a single video file with motion-based filtering.
 
         Uses FFmpeg for hardware-accelerated decoding (NVDEC on Jetson).
         Streams frames one at a time to minimize memory usage.
         Each frame is immediately released after YOLO inference.
 
+        Motion Tracking (v4.1):
+        - Tracks bbox center points for each class across frames
+        - Only includes classes with significant center movement in final results
+        - Filters out stationary background objects
+
         Args:
             video_path: Path to video file
             ensemble: VotingEnsemble to accumulate votes
+            camera_type: Camera type for logging ("top" or "side")
 
         Returns:
-            Statistics dict with frames and detections count
+            Statistics dict with frames, detections, and motion_filtered count
         """
         frame_count = 0
         detection_count = 0
+
+        # Motion tracking: class_id -> BboxTracker
+        bbox_trackers: Dict[int, BboxTracker] = {}
+
+        # Temporary storage for votes (applied after motion filtering)
+        # class_id -> list of (confidence, class_name) tuples
+        pending_votes: Dict[int, List[Tuple[float, str]]] = {}
 
         # Use factory to get appropriate extractor (ffmpeg or cv2 fallback)
         extractor = create_frame_extractor(
@@ -238,16 +327,22 @@ class VideoProcessor:
                 if det.conf < self.confidence_threshold:
                     continue
 
-                # Add vote
-                ensemble.add_vote(
-                    class_id=det.cls,
-                    confidence=det.conf,
-                    class_name=det.name,
-                )
-                detection_count += 1
+                class_id = det.cls
 
-            # Frame is automatically released when loop continues
-            ensemble.increment_frame_count()
+                # Use YOLODetection's center property
+                center = det.center
+
+                # Update bbox tracker
+                if class_id not in bbox_trackers:
+                    bbox_trackers[class_id] = BboxTracker()
+                bbox_trackers[class_id].update(center, frame_count)
+
+                # Store vote for later (will be applied after motion filtering)
+                if class_id not in pending_votes:
+                    pending_votes[class_id] = []
+                pending_votes[class_id].append((det.conf, det.name))
+
+                detection_count += 1
 
             # Log progress every 50 frames
             if frame_count % 50 == 0:
@@ -256,9 +351,57 @@ class VideoProcessor:
                     f"탐지={detection_count}개"
                 )
 
+        # Set frame count
+        ensemble.set_frame_count(frame_count)
+
+        # Apply motion filtering and add votes to ensemble
+        motion_filtered_count = 0
+        motion_passed_count = 0
+
+        for class_id, votes in pending_votes.items():
+            tracker = bbox_trackers.get(class_id)
+
+            # Check motion
+            has_motion = True
+            if self.motion_filter_enabled and tracker is not None:
+                has_motion = tracker.has_motion(self.min_motion_displacement)
+
+            if has_motion:
+                # Add all votes for this class
+                for conf, class_name in votes:
+                    ensemble.add_vote(
+                        class_id=class_id,
+                        confidence=conf,
+                        class_name=class_name,
+                    )
+                motion_passed_count += 1
+
+                if tracker:
+                    logger.debug(
+                        f"[MOTION] {camera_type} class {class_id}: PASSED "
+                        f"(displacement={tracker.total_displacement:.1f}px, "
+                        f"max_dist={tracker.max_distance:.1f}px, "
+                        f"detections={tracker.detection_count})"
+                    )
+            else:
+                motion_filtered_count += 1
+                if tracker:
+                    logger.info(
+                        f"[MOTION] {camera_type} class {class_id}: FILTERED "
+                        f"(displacement={tracker.total_displacement:.1f}px < {self.min_motion_displacement}px, "
+                        f"detections={tracker.detection_count})"
+                    )
+
+        logger.info(
+            f"[MOTION] {camera_type} 필터링 결과: "
+            f"통과={motion_passed_count}개, 제외={motion_filtered_count}개 "
+            f"(임계값={self.min_motion_displacement}px)"
+        )
+
         return {
             "frames": frame_count,
             "detections": detection_count,
+            "motion_filtered": motion_filtered_count,
         }
 
     def process_single_video_file(

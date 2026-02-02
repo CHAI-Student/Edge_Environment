@@ -42,6 +42,7 @@ class WeightBasedCountCalculator:
         self,
         product_db: ProductDatabase,
         tolerance_percent: float = 0.10,
+        tolerance_grams: float = 5.0,
         max_count: int = 10,
         min_weight_change: float = 5.0,
     ):
@@ -50,12 +51,14 @@ class WeightBasedCountCalculator:
 
         Args:
             product_db: 상품 데이터베이스
-            tolerance_percent: 기본 허용 오차 비율 (기본값 10%)
+            tolerance_percent: 기본 허용 오차 비율 (기본값 10%, 사용 안함)
+            tolerance_grams: 고정 허용 오차 (기본값 5g)
             max_count: 최대 개수 제한 (기본값 10)
             min_weight_change: 최소 무게 변화량 (기본값 5g)
         """
         self.product_db = product_db
         self.tolerance_percent = tolerance_percent
+        self.tolerance_grams = tolerance_grams
         self.max_count = max_count
         self.min_weight_change = min_weight_change
 
@@ -111,16 +114,8 @@ class WeightBasedCountCalculator:
             expected_weight = product.weight * count
             weight_error = abs(abs_weight - expected_weight)
 
-            # 허용 오차 결정
-            if use_category_tolerance:
-                tolerance = self.product_db.get_tolerance(
-                    product.product_id,
-                    default=self.tolerance_percent
-                )
-            else:
-                tolerance = self.tolerance_percent
-
-            tolerance_amount = expected_weight * tolerance
+            # 허용 오차: 고정 5g 사용
+            tolerance_amount = self.tolerance_grams
 
             # 검증
             validated = weight_error <= tolerance_amount
@@ -129,7 +124,6 @@ class WeightBasedCountCalculator:
             match_score = self._calculate_match_score(
                 weight_error=weight_error,
                 expected_weight=expected_weight,
-                tolerance=tolerance,
                 vision_confidence=candidate.combined_confidence,
             )
 
@@ -193,7 +187,6 @@ class WeightBasedCountCalculator:
         self,
         weight_error: float,
         expected_weight: float,
-        tolerance: float,
         vision_confidence: float,
     ) -> float:
         """
@@ -207,19 +200,18 @@ class WeightBasedCountCalculator:
         Args:
             weight_error: 무게 오차 (g)
             expected_weight: 예상 무게 (g)
-            tolerance: 허용 오차 비율
             vision_confidence: Vision 신뢰도
 
         Returns:
             매칭 점수 (0.0 ~ 1.0)
         """
         # 1. 무게 매칭 점수 (0.0 ~ 1.0)
+        # tolerance_grams 기준으로 계산 (고정 5g)
         if expected_weight <= 0:
             weight_score = 0.0
         else:
-            error_rate = weight_error / expected_weight
-            # 허용 오차의 2배까지 선형 감소
-            weight_score = max(0.0, 1.0 - (error_rate / (2 * tolerance)))
+            # 허용 오차(5g)의 2배(10g)까지 선형 감소
+            weight_score = max(0.0, 1.0 - (weight_error / (2 * self.tolerance_grams)))
 
         # 2. Vision 신뢰도 (0.0 ~ 1.0)
         vision_score = min(max(vision_confidence, 0.0), 1.0)
@@ -287,7 +279,7 @@ class WeightBasedCountCalculator:
                 for count1, count2 in iterproduct(range(1, 4), range(1, 4)):
                     combined_weight = prod1.weight * count1 + prod2.weight * count2
                     error = abs(abs_weight - combined_weight)
-                    tolerance = combined_weight * self.tolerance_percent
+                    tolerance = self.tolerance_grams  # 고정 5g
 
                     if error <= tolerance:
                         # 매칭 점수 계산 (오차 적을수록 + 개수 적을수록 높음)
@@ -316,7 +308,6 @@ class WeightBasedCountCalculator:
                                     match_score=self._calculate_match_score(
                                         weight_error=error * (weight1 / total_expected),
                                         expected_weight=weight1,
-                                        tolerance=self.tolerance_percent,
                                         vision_confidence=cand1.combined_confidence,
                                     ),
                                     vision_confidence=cand1.combined_confidence,
@@ -332,7 +323,6 @@ class WeightBasedCountCalculator:
                                     match_score=self._calculate_match_score(
                                         weight_error=error * (weight2 / total_expected),
                                         expected_weight=weight2,
-                                        tolerance=self.tolerance_percent,
                                         vision_confidence=cand2.combined_confidence,
                                     ),
                                     vision_confidence=cand2.combined_confidence,
@@ -368,10 +358,5 @@ class WeightBasedCountCalculator:
         if estimate.count > self.max_count:
             return False
 
-        # 오차율 검증
-        tolerance = self.product_db.get_tolerance(
-            estimate.product_id,
-            default=self.tolerance_percent
-        )
-
-        return estimate.error_rate <= tolerance
+        # 오차 검증 (고정 5g)
+        return estimate.weight_error <= self.tolerance_grams

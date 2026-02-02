@@ -100,7 +100,11 @@ class WeightModel(BaseModel):
 
     tolerance_percent: float = Field(
         default=0.10,
-        description="Weight tolerance percentage (0.10 = 10%)",
+        description="Weight tolerance percentage (0.10 = 10%), 레거시 용도",
+    )
+    tolerance_grams: float = Field(
+        default=5.0,
+        description="Fixed weight tolerance in grams (고정 허용 오차)",
     )
     min_weight_change: float = Field(
         default=5.0,
@@ -125,6 +129,31 @@ class BufferModel(BaseModel):
     )
 
 
+class DoorSessionModel(BaseModel):
+    """Door Session configuration settings (v4.1)."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Door Session 기능 활성화 여부",
+    )
+    yaml_dir: str = Field(
+        default="data/sessions",
+        description="YAML 저장 디렉토리",
+    )
+    session_timeout_seconds: float = Field(
+        default=30.0,
+        description="마지막 trigger 후 타임아웃 (초)",
+    )
+    weight_tolerance_grams: float = Field(
+        default=3.0,
+        description="반환 매칭 무게 허용 오차 (g)",
+    )
+    max_duration_seconds: float = Field(
+        default=600.0,
+        description="최대 세션 지속 시간 (초, 10분)",
+    )
+
+
 class Settings(BaseSettings):
     """
     Global application settings.
@@ -146,6 +175,7 @@ class Settings(BaseSettings):
     vision: VisionModel = VisionModel()
     weight: WeightModel = WeightModel()
     buffer: BufferModel = BufferModel()
+    door_session: DoorSessionModel = DoorSessionModel()
 
     # Node.js Orchestrator settings
     nodejs_url: str = Field(

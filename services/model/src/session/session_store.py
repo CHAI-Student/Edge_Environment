@@ -58,6 +58,7 @@ class SessionData:
         top_frames: Top 카메라 프레임 수
         side_frames: Side 카메라 프레임 수
         processing_time_ms: 처리 시간 (ms)
+        vision_candidates: YOLO 비전 후보군 (재계산용, EnsembleResult의 dict 목록)
     """
     session_id: str
     zone: int
@@ -72,10 +73,11 @@ class SessionData:
     top_frames: int = 0
     side_frames: int = 0
     processing_time_ms: float = 0.0
+    vision_candidates: Optional[List[dict]] = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for API response."""
-        return {
+        result = {
             "session_id": self.session_id,
             "zone": self.zone,
             "products": [
@@ -102,6 +104,10 @@ class SessionData:
                 "processing_time_ms": round(self.processing_time_ms, 1),
             },
         }
+        # vision_candidates는 디버깅용으로만 포함 (있을 경우)
+        if self.vision_candidates:
+            result["vision_candidates_count"] = len(self.vision_candidates)
+        return result
 
 
 class SessionStore:
@@ -112,7 +118,7 @@ class SessionStore:
     TTL 기반 자동 정리 기능 포함.
     """
 
-    def __init__(self, ttl_seconds: int = 300, max_sessions: int = 100):
+    def __init__(self, ttl_seconds: float = 300.0, max_sessions: int = 100):
         """
         Initialize session store.
 

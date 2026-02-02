@@ -24,9 +24,15 @@ from pydantic import BaseModel, Field
 
 from video import VideoProcessor, VoteResult
 from engine import ProductDecisionEngine, EnsembleResult
-from session import SessionStore, SessionData, ProductResult
+from session import SessionStore, SessionData, ProductResult, DoorSessionStore, TriggerResult
 from session.session_store import generate_session_id
-from api.deps import get_decision_engine, get_video_processor, get_session_store, get_product_db
+from api.deps import (
+    get_decision_engine,
+    get_video_processor,
+    get_session_store,
+    get_product_db,
+    get_door_session_store_optional,
+)
 from database.product_db import ProductDatabase
 from core.exceptions import (
     VideoProcessingError,
@@ -296,6 +302,7 @@ async def trigger_judgment(
     engine: ProductDecisionEngine = Depends(get_decision_engine),
     session_store: SessionStore = Depends(get_session_store),
     product_db: ProductDatabase = Depends(get_product_db),
+    door_session_store: DoorSessionStore | None = Depends(get_door_session_store_optional),
 ):
     """
     Camera에서 녹화 완료 시 호출되는 트리거 API.
@@ -415,6 +422,11 @@ async def trigger_judgment(
             for p in result.products
         ]
 
+        # vision_candidates를 dict로 변환 (재계산용)
+        vision_candidates_dicts = [
+            vc.to_dict() for vc in vision_candidates
+        ]
+
         session_data = SessionData(
             session_id=session_id,
             zone=request.zone,
@@ -428,9 +440,38 @@ async def trigger_judgment(
             top_frames=stats.top_frames,
             side_frames=stats.side_frames,
             processing_time_ms=stats.processing_time_ms,
+            vision_candidates=vision_candidates_dicts,
         )
 
         session_store.save(session_id, session_data)
+
+        # 7. DoorSessionStore에 trigger 결과 추가 (v4.1)
+        door_session = None
+        if door_session_store is not None:
+            elapsed_ms_for_trigger = (time.time() - start_time) * 1000
+            trigger_result = TriggerResult(
+                trigger_id="",  # DoorSessionStore에서 자동 할당
+                session_id=session_id,
+                timestamp=time.time(),
+                products=products,
+                delta_weight=delta_weight,
+                confidence=result.confidence,
+                video_paths={
+                    "top": str(request.videos.top) if request.videos.top else "",
+                    "side": str(request.videos.side) if request.videos.side else "",
+                },
+                is_return=delta_weight > 0,
+                processing_time_ms=elapsed_ms_for_trigger,
+            )
+            door_session = door_session_store.add_trigger(
+                zone=request.zone,
+                result=trigger_result,
+            )
+            logger.info(
+                f"[TRIGGER] Door session: {door_session.door_session_id}, "
+                f"triggers={door_session.trigger_count}, "
+                f"aggregated_products={len(door_session.aggregated_products)}"
+            )
 
         elapsed_ms = (time.time() - start_time) * 1000
         logger.info(f"[TRIGGER] ========== 판단 결과 ==========")
@@ -450,10 +491,20 @@ async def trigger_judgment(
             f"[TRIGGER ERROR] session_id={session_id}, "
             f"status={e.status_code}, detail={e.detail}"
         )
+        session_store.update_stage(
+            session_id,
+            processing_stage="error",
+            processing_stage_detail=f"HTTP 오류: {e.status_code}",
+        )
         raise
 
     except FileNotFoundError as e:
         logger.error(f"[TRIGGER ERROR] session_id={session_id}, video file not found: {e}")
+        session_store.update_stage(
+            session_id,
+            processing_stage="error",
+            processing_stage_detail=f"비디오 파일 없음: {e}",
+        )
         raise HTTPException(
             status_code=400,
             detail={
@@ -464,6 +515,11 @@ async def trigger_judgment(
 
     except (VideoCorruptedError, FFmpegError) as e:
         logger.error(f"[TRIGGER ERROR] session_id={session_id}, video processing: {e}", exc_info=True)
+        session_store.update_stage(
+            session_id,
+            processing_stage="error",
+            processing_stage_detail=f"비디오 처리 오류: {e.error_code}",
+        )
         raise HTTPException(
             status_code=500,
             detail={
@@ -475,6 +531,11 @@ async def trigger_judgment(
 
     except VideoProcessingError as e:
         logger.error(f"[TRIGGER ERROR] session_id={session_id}, video processing: {e}", exc_info=True)
+        session_store.update_stage(
+            session_id,
+            processing_stage="error",
+            processing_stage_detail=f"비디오 처리 오류: {e.error_code}",
+        )
         raise HTTPException(
             status_code=500,
             detail={
@@ -485,6 +546,11 @@ async def trigger_judgment(
 
     except YOLOModelNotLoadedError as e:
         logger.error(f"[TRIGGER ERROR] session_id={session_id}, YOLO model not loaded: {e}")
+        session_store.update_stage(
+            session_id,
+            processing_stage="error",
+            processing_stage_detail="YOLO 모델 미로드",
+        )
         raise HTTPException(
             status_code=503,  # Service Unavailable
             detail={
@@ -495,6 +561,11 @@ async def trigger_judgment(
 
     except YOLOGPUError as e:
         logger.error(f"[TRIGGER ERROR] session_id={session_id}, YOLO GPU: {e}", exc_info=True)
+        session_store.update_stage(
+            session_id,
+            processing_stage="error",
+            processing_stage_detail=f"YOLO GPU 오류: {e.error_code}",
+        )
         raise HTTPException(
             status_code=500,
             detail={
@@ -505,6 +576,11 @@ async def trigger_judgment(
 
     except YOLOInferenceError as e:
         logger.error(f"[TRIGGER ERROR] session_id={session_id}, YOLO inference: {e}", exc_info=True)
+        session_store.update_stage(
+            session_id,
+            processing_stage="error",
+            processing_stage_detail=f"YOLO 추론 오류: {e.error_code}",
+        )
         raise HTTPException(
             status_code=500,
             detail={
@@ -515,6 +591,11 @@ async def trigger_judgment(
 
     except Exception as e:
         logger.error(f"[TRIGGER ERROR] session_id={session_id}, unexpected: {e}", exc_info=True)
+        session_store.update_stage(
+            session_id,
+            processing_stage="error",
+            processing_stage_detail=f"내부 오류: {type(e).__name__}",
+        )
         raise HTTPException(
             status_code=500,
             detail={

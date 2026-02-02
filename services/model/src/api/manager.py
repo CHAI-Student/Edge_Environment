@@ -25,7 +25,7 @@ from core.logging_config import get_logger
 from database.product_db import ProductDatabase
 from engine import ProductDecisionEngine
 from vision import YOLOWrapper
-from session import SessionStore
+from session import SessionStore, DoorSessionStore
 from api.deps import init_dependencies, cleanup_dependencies
 from api.routes import (
     health_router,
@@ -147,12 +147,27 @@ def create_lifespan(settings: Settings):
         # 6. ProductDecisionEngine 초기화
         decision_engine = ProductDecisionEngine(product_db=product_db)
 
-        # 7. 의존성 주입 초기화
+        # 7. DoorSessionStore 초기화 (v4.1)
+        door_session_store = None
+        if settings.door_session.enabled:
+            door_session_store = DoorSessionStore(
+                yaml_dir=settings.door_session.yaml_dir,
+                session_timeout=settings.door_session.session_timeout_seconds,
+                weight_tolerance=settings.door_session.weight_tolerance_grams,
+                max_duration=settings.door_session.max_duration_seconds,
+                get_product_weight=lambda pid: product_db.get_weight(pid),
+            )
+            # 활성 세션 복구
+            recovered = door_session_store.recover_active_sessions()
+            logger.info(f"DoorSessionStore: recovered {recovered} active sessions")
+
+        # 8. 의존성 주입 초기화
         init_dependencies(
             session_store=session_store,
             yolo=yolo,
             engine=decision_engine,
             product_db=product_db,
+            door_session_store=door_session_store,
         )
 
         logger.info(f"Model service ready on port {settings.port}")
@@ -164,6 +179,12 @@ def create_lifespan(settings: Settings):
             f"SessionStore: ttl={settings.buffer.ttl_seconds}s, "
             f"max_sessions={settings.buffer.max_sessions}"
         )
+        if settings.door_session.enabled:
+            logger.info(
+                f"DoorSessionStore: timeout={settings.door_session.session_timeout_seconds}s, "
+                f"tolerance={settings.door_session.weight_tolerance_grams}g, "
+                f"max_duration={settings.door_session.max_duration_seconds}s"
+            )
 
         yield
 

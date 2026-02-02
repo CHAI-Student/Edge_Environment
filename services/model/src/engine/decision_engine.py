@@ -94,6 +94,7 @@ class ProductDecisionEngine:
         self.count_calculator = WeightBasedCountCalculator(
             product_db=self.product_db,
             tolerance_percent=self.tolerance_percent,
+            tolerance_grams=config.weight.tolerance_grams,  # 고정 허용 오차 (기본 5g)
         )
 
     def judge(

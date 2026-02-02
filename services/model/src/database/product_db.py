@@ -710,6 +710,30 @@ class ProductDatabase:
                     loaded_count += 1
                     continue
 
+                # YOLO 클래스명과 정확히 일치하는 상품이 있는지 확인 (100% 매칭)
+                existing_by_yolo_name = self._find_exact_yolo_match(name)
+                if existing_by_yolo_name:
+                    # YOLO 클래스와 IF11 상품 연결
+                    product = existing_by_yolo_name
+                    product.product_idx = product_idx
+                    self._product_idx_to_id[product_idx] = product.product_id
+
+                    # 가격, 무게, 재고 업데이트
+                    self.update_product(
+                        product_id=product.product_id,
+                        price=price,
+                        weight=weight,
+                        stock=stock,
+                    )
+
+                    logger.info(
+                        f"IF11 product linked to YOLO class: "
+                        f"'{name}' -> yolo_class_id={product.yolo_class_id}, "
+                        f"product_id={product.product_id}"
+                    )
+                    loaded_count += 1
+                    continue
+
                 # product_idx에서 숫자 ID 추출 시도 (예: "P17355176364813008" → 해시)
                 # 간단히 인덱스 기반 ID 할당
                 product_id = self._get_or_create_id_for_idx(product_idx)
@@ -756,6 +780,39 @@ class ProductDatabase:
             logger.info(f"Auto-matched {matched} YOLO classes to IF11 products")
 
         return loaded_count
+
+    def _find_exact_yolo_match(self, name: str) -> Optional[ProductInfo]:
+        """
+        IF11 상품명과 정확히 일치하는 YOLO 클래스 찾기.
+
+        매칭 우선순위:
+        1. 정확한 이름 매칭 (대소문자 무시)
+        2. 정규화 후 매칭 (밑줄/공백 무시)
+
+        Args:
+            name: IF11 상품명
+
+        Returns:
+            매칭된 ProductInfo 또는 None
+        """
+        # 1. 정확한 이름 매칭 (대소문자 무시)
+        name_upper = name.upper()
+        for product in self._products.values():
+            if product.yolo_class_id is not None and product.product_idx is None:
+                # YOLO 클래스가 있고 아직 IF11 연결 안 된 상품
+                yolo_name = product.yolo_class_name or product.name
+                if yolo_name.upper() == name_upper:
+                    return product
+
+        # 2. 정규화 후 매칭
+        name_normalized = self._normalize_name_for_matching(name)
+        for product in self._products.values():
+            if product.yolo_class_id is not None and product.product_idx is None:
+                yolo_name = product.yolo_class_name or product.name
+                if self._normalize_name_for_matching(yolo_name) == name_normalized:
+                    return product
+
+        return None
 
     def _get_or_create_id_for_idx(self, product_idx: str) -> int:
         """
@@ -1007,11 +1064,10 @@ class ProductDatabase:
         """
         YOLO 클래스명과 IF11 상품명을 자동 매칭.
 
-        매칭 전략:
-        1. 정규화: 대소문자, 공백, 특수문자 제거
-        2. 키워드 추출: 숫자(용량), 브랜드명 분리
-        3. 유사도 계산: 공통 키워드 비율
-        4. 무게 일치 확인
+        매칭 전략 (우선순위 순서):
+        1. 정확한 이름 매칭 (100% 일치) - 대소문자 무시
+        2. 정규화 후 정확 매칭 (밑줄/공백 무시)
+        3. 키워드 유사도 기반 매칭 (90% 이상)
 
         Returns:
             매칭된 상품 수
@@ -1036,28 +1092,53 @@ class ProductDatabase:
             f"{len(if11_products)} IF11 products"
         )
 
+        # IF11 상품명 → 상품 매핑 (빠른 조회용)
+        if11_name_map: Dict[str, ProductInfo] = {}
+        if11_normalized_map: Dict[str, ProductInfo] = {}
+        for p in if11_products:
+            # 원본 이름 (대소문자 무시)
+            if11_name_map[p.name.upper()] = p
+            # 정규화된 이름 (밑줄/공백/특수문자 제거, 대소문자 무시)
+            normalized = self._normalize_name_for_matching(p.name)
+            if11_normalized_map[normalized] = p
+
         for yolo_class_id, yolo_class_name in unlinked_yolo_classes:
             best_match: Optional[ProductInfo] = None
-            best_score = 0.0
+            match_type = ""
 
-            yolo_keywords = self._extract_keywords(yolo_class_name)
-            yolo_weight = self._extract_weight_from_name(yolo_class_name)
+            # 1. 정확한 이름 매칭 (대소문자 무시)
+            yolo_upper = yolo_class_name.upper()
+            if yolo_upper in if11_name_map:
+                best_match = if11_name_map[yolo_upper]
+                match_type = "exact"
+            else:
+                # 2. 정규화 후 정확 매칭
+                yolo_normalized = self._normalize_name_for_matching(yolo_class_name)
+                if yolo_normalized in if11_normalized_map:
+                    best_match = if11_normalized_map[yolo_normalized]
+                    match_type = "normalized"
+                else:
+                    # 3. 키워드 유사도 기반 매칭 (fallback)
+                    best_score = 0.0
+                    yolo_keywords = self._extract_keywords(yolo_class_name)
+                    yolo_weight = self._extract_weight_from_name(yolo_class_name)
 
-            for if11_product in if11_products:
-                if11_keywords = self._extract_keywords(if11_product.name)
-                score = self._calculate_keyword_similarity(yolo_keywords, if11_keywords)
+                    for if11_product in if11_products:
+                        if11_keywords = self._extract_keywords(if11_product.name)
+                        score = self._calculate_keyword_similarity(yolo_keywords, if11_keywords)
 
-                # 무게 일치 보너스
-                if yolo_weight is not None and if11_product.weight > 0:
-                    weight_diff = abs(yolo_weight - if11_product.weight)
-                    if weight_diff <= 5:  # 5g 이내
-                        score += 0.3
-                    elif weight_diff <= 10:  # 10g 이내
-                        score += 0.1
+                        # 무게 일치 보너스
+                        if yolo_weight is not None and if11_product.weight > 0:
+                            weight_diff = abs(yolo_weight - if11_product.weight)
+                            if weight_diff <= 5:  # 5g 이내
+                                score += 0.3
+                            elif weight_diff <= 10:  # 10g 이내
+                                score += 0.1
 
-                if score > best_score and score >= 0.9:  # 최소 90% 일치
-                    best_score = score
-                    best_match = if11_product
+                        if score > best_score and score >= 0.9:  # 최소 90% 일치
+                            best_score = score
+                            best_match = if11_product
+                            match_type = f"similarity({best_score:.2f})"
 
             if best_match is not None:
                 # 매칭 수행
@@ -1070,15 +1151,40 @@ class ProductDatabase:
                     self._yolo_name_to_id[yolo_class_name] = best_match.product_id
                     if yolo_product.product_id != best_match.product_id:
                         self.delete_product(yolo_product.product_id)
-                    if11_products.remove(best_match)  # 이미 매칭된 상품 제거
+
+                    # 매칭된 상품 제거 (중복 매칭 방지)
+                    if best_match in if11_products:
+                        if11_products.remove(best_match)
+                    if best_match.name.upper() in if11_name_map:
+                        del if11_name_map[best_match.name.upper()]
+                    normalized_key = self._normalize_name_for_matching(best_match.name)
+                    if normalized_key in if11_normalized_map:
+                        del if11_normalized_map[normalized_key]
+
                     matched_count += 1
                     logger.info(
-                        f"Auto-matched: YOLO '{yolo_class_name}' -> IF11 '{best_match.name}' "
-                        f"(score={best_score:.2f})"
+                        f"Auto-matched [{match_type}]: YOLO '{yolo_class_name}' (id={yolo_class_id}) "
+                        f"-> IF11 '{best_match.name}' (product_id={best_match.product_id})"
                     )
 
         logger.info(f"Auto-matching completed: {matched_count} products matched")
         return matched_count
+
+    def _normalize_name_for_matching(self, name: str) -> str:
+        """
+        매칭을 위한 이름 정규화.
+
+        밑줄, 공백, 특수문자를 제거하고 대문자로 변환.
+
+        Args:
+            name: 상품 이름
+
+        Returns:
+            정규화된 이름
+        """
+        # 밑줄, 하이픈, 공백 등을 모두 제거
+        normalized = re.sub(r'[_\-\.\s\/\\]', '', name)
+        return normalized.upper()
 
     def _extract_keywords(self, name: str) -> List[str]:
         """
@@ -1324,3 +1430,60 @@ class ProductDatabase:
             "price": product.price,
             "is_linked": product.product_idx is not None,
         }
+
+    # =========================================================================
+    # 무게 업데이트 (Node.js 연동)
+    # =========================================================================
+
+    def update_weight(self, product_id: int, weight: float) -> bool:
+        """
+        상품 무게 업데이트.
+
+        Node.js가 /api/judge/multi-zone으로 전송하는 product_weight를
+        사용하여 YOLO 매핑 파일의 무게를 보정합니다.
+
+        Args:
+            product_id: 상품 ID (YOLO class_id)
+            weight: 새 무게 (g)
+
+        Returns:
+            업데이트 성공 여부
+        """
+        if product_id not in self._products:
+            logger.warning(f"Product not found for weight update: {product_id}")
+            return False
+
+        old_weight = self._products[product_id].weight
+        self._products[product_id].weight = weight
+        logger.info(
+            f"Weight updated: product_id={product_id}, "
+            f"old={old_weight}g -> new={weight}g"
+        )
+        return True
+
+    def get_yolo_class_id_by_product_idx(self, product_idx: str) -> Optional[int]:
+        """
+        IF11 product_idx로 YOLO class_id 조회.
+
+        Args:
+            product_idx: IF11 상품 ID (예: "26", "P17689508539755305")
+
+        Returns:
+            YOLO class_id 또는 None
+        """
+        # product_idx로 직접 매핑된 상품 찾기
+        product = self.get_by_product_idx(product_idx)
+        if product is not None:
+            # yolo_class_id가 있으면 반환, 없으면 product_id 반환
+            return product.yolo_class_id if product.yolo_class_id is not None else product.product_id
+
+        # product_idx가 숫자 형태면 직접 product_id로 조회
+        try:
+            product_id = int(product_idx)
+            if product_id in self._products:
+                return product_id
+        except ValueError:
+            pass
+
+        logger.debug(f"YOLO class_id not found for product_idx: {product_idx}")
+        return None
