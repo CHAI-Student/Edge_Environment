@@ -73,14 +73,19 @@ class StreamingFrameExtractor:
         if self._initialized:
             return True
 
-        if not Path(self.video_path).exists():
+        video_file = Path(self.video_path)
+        if not video_file.exists():
             logger.error(f"Video file not found: {self.video_path}")
             return False
+
+        # 파일 크기 로깅
+        file_size = video_file.stat().st_size
+        logger.info(f"[FFPROBE] path={self.video_path}, size={file_size} bytes")
 
         try:
             cmd = [
                 "ffprobe",
-                "-v", "quiet",
+                "-v", "error",  # 에러 메시지만 stderr로 출력
                 "-print_format", "json",
                 "-show_format",
                 "-show_streams",
@@ -96,7 +101,10 @@ class StreamingFrameExtractor:
             )
 
             if result.returncode != 0:
-                logger.error(f"ffprobe failed: {result.stderr}")
+                logger.error(
+                    f"ffprobe failed: returncode={result.returncode}, "
+                    f"stderr={result.stderr!r}, stdout={result.stdout!r}"
+                )
                 return False
 
             info = json.loads(result.stdout)
