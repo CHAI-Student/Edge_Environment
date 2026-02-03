@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 import logging
 
 from engine.models import EnsembleResult, CountEstimate
-
+from session.active_product_store import ActiveProductStore
 logger = logging.getLogger(__name__)
 
 
@@ -76,7 +76,7 @@ class WeightBasedCountCalculator:
         candidates: List[EnsembleResult],
         delta_weight: float,
         use_category_tolerance: bool = True,
-        active_products: Optional[List[Any]] = None,
+        active_products: Optional[ActiveProductStore] = None,
     ) -> List[CountEstimate]:
         """
         각 후보에 대한 개수 추정.

@@ -542,9 +542,9 @@ def _handle_door_close(
     global_session = store.finalize_global_session()
 
     # v4.5: ActiveProductStore 정리 (전역)
-    if active_product_store is not None:
-        if active_product_store.clear():
-            logger.info("[MULTI-ZONE CLOSE] Cleared global products from ActiveProductStore")
+    # if active_product_store is not None:
+    #     if active_product_store.clear():
+    #         logger.info("[MULTI-ZONE CLOSE] Cleared global products from ActiveProductStore")
 
     # Zone 1~5 최종 결과 구성
     zones = []

@@ -27,6 +27,7 @@ from .models import (
     JudgmentStatus,
 )
 from core.config import config
+from session.active_product_store import ActiveProductStore
 
 # Lazy import to avoid circular dependency
 if TYPE_CHECKING:
@@ -61,7 +62,7 @@ class ProductDecisionEngine:
 
     def __init__(
         self,
-        product_db: Optional[ProductDatabase] = None,
+        product_db: Optional[ActiveProductStore] = None,
         tolerance_percent: Optional[float] = None,
         confidence_threshold: float = 0.3,
         max_combination_size: Optional[int] = None,
@@ -79,11 +80,11 @@ class ProductDecisionEngine:
             min_weight_change: 최소 무게 변화량 (기본값 5g)
             partial_threshold: PARTIAL/UNCERTAIN 구분 임계값 (기본값 0.7)
         """
-        if product_db is None:
-            ProductDatabase = _get_product_database()
-            self.product_db = ProductDatabase()
-        else:
-            self.product_db = product_db
+        # if product_db is None:
+        #     ProductDatabase = _get_product_database()
+        #     self.product_db = ProductDatabase()
+        # else:
+        self.product_db = product_db
         self.tolerance_percent = tolerance_percent or config.weight.tolerance_percent
         self.confidence_threshold = confidence_threshold
         self.max_combination_size = max_combination_size or config.weight.max_combination_size
@@ -380,9 +381,7 @@ class ProductDecisionEngine:
                     f"from active_products (Node.js latest weights)"
                 )
 
-        # v4.9: ProductDatabase fallback 비활성화
-        # Node.js에서 active_products를 받지 못한 상태에서 ProductDB fallback 사용 시
-        # 잘못된 상품 정보(stock 값 등)로 판단될 수 있음 → no_detection 반환
+        # v4.9: active_products가 없으면 no_detection 반환
         if not candidate_products:
             logger.warning(
                 "[LOADCELL-ONLY] v4.9: No active_products available, "

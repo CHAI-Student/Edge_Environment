@@ -288,12 +288,18 @@ class TriggerService:
             processing_stage_detail="비디오에서 프레임 추출 중",
         )
 
-        # v4.6: product_weights 생성 (로그용)
+        # v4.11: 비디오 처리 전에 active_products 캐시 (조회 시점 통일)
+        # 문제: 비디오 처리 중(~22초) Door session finalize 콜백이 active_product_store.clear() 호출
+        # 해결: 비디오 처리 전에 캐시하여 처리 후에도 동일한 데이터 사용
         product_weights: Dict[int, float] = {}
+        cached_active_products: List = []  # v4.11: 캐시
         if self._active_product_store is not None:
-            for product_info in self._active_product_store.get_all_products():
+            cached_active_products = self._active_product_store.get_all_products()
+            for product_info in cached_active_products:
                 if product_info.yolo_class_id is not None:
                     product_weights[product_info.yolo_class_id] = product_info.product_weight
+            if cached_active_products:
+                logger.info(f"[TRIGGER] v4.11: active_products {len(cached_active_products)}개 캐시됨")
 
         processing_result = await asyncio.to_thread(
             self._video_processor.process_videos,
@@ -329,12 +335,10 @@ class TriggerService:
         # 7. 최종 상품 판단 - v4.7: active_products 전달
         vision_only = delta_weight == 0.0 and len(input_data.loadcells) == 0
 
-        # v4.7: ActiveProductStore에서 상품 정보 조회
-        active_products = []
-        if self._active_product_store is not None:
-            active_products = self._active_product_store.get_all_products()
-            if active_products:
-                logger.info(f"[TRIGGER] v4.7: active_products {len(active_products)}개 → engine.judge()에 전달")
+        # v4.11: 캐시된 active_products 사용 (비디오 처리 중 store가 clear될 수 있음)
+        active_products = cached_active_products  # v4.11: 캐시된 값 사용
+        if active_products:
+            logger.info(f"[TRIGGER] v4.7: active_products {len(active_products)}개 → engine.judge()에 전달")
 
         result = self._engine.judge(
             vision_candidates=vision_candidates,

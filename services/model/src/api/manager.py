@@ -265,9 +265,9 @@ def create_lifespan(settings: Settings):
                 get_product_weight=lambda pid: product_db.get_weight(pid),
             )
             # v4.5: 세션 종료 시 ActiveProductStore 정리 콜백 등록
-            door_session_store.set_session_finalize_callback(
-                lambda zone: active_product_store.clear()
-            )
+            # door_session_store.set_session_finalize_callback(
+            #     lambda zone: active_product_store.clear()
+            # )
             # 활성 세션 복구
             recovered = door_session_store.recover_active_sessions()
             logger.info(f"DoorSessionStore: recovered {recovered} active sessions")
@@ -319,6 +319,7 @@ def create_lifespan(settings: Settings):
         # 11. 백그라운드 태스크 종료 (v4.5)
         cleanup_stop_event.set()
         cleanup_task.cancel()
+        active_product_store.clear()
         try:
             await cleanup_task
         except asyncio.CancelledError:
