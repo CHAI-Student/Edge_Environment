@@ -1,16 +1,21 @@
 """
-Trigger Service (v4.2).
+Trigger Service (v4.5).
 
 트리거 비즈니스 로직 - YOLO 추론 및 세션 저장.
 라우터에서 분리된 핵심 비즈니스 로직.
+
+v4.5 변경사항:
+- Idempotency key 기반 중복 체크 (5초 이내 동일 요청 스킵)
 """
 
 import asyncio
+import hashlib
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -18,6 +23,8 @@ from video import VideoProcessor, VoteResult
 from engine import ProductDecisionEngine, EnsembleResult
 from session import SessionStore, SessionData, ProductResult, DoorSessionStore, TriggerResult
 from session.session_store import generate_session_id
+from session.active_product_store import ActiveProductStore
+from session.pending_trigger_store import PendingTriggerStore
 from database.product_db import ProductDatabase
 
 logger = logging.getLogger(__name__)
@@ -49,6 +56,8 @@ class TriggerOutput:
     door_session_id: Optional[str]
     message: str
     error_code: Optional[str] = None
+    status: str = "complete"  # "complete", "pending"
+    waiting_for: Optional[str] = None  # "products" if pending
 
 
 class TriggerService:
@@ -56,7 +65,12 @@ class TriggerService:
     트리거 비즈니스 로직 서비스.
 
     YOLO 추론, 무게 계산, 상품 판단, 세션 저장을 담당.
+
+    v4.5: Idempotency key 기반 중복 체크 추가
     """
+
+    # v4.5: 중복 체크 TTL (초)
+    DEDUP_TTL_SECONDS = 5.0
 
     def __init__(
         self,
@@ -65,6 +79,8 @@ class TriggerService:
         session_store: SessionStore,
         product_db: ProductDatabase,
         door_session_store: Optional[DoorSessionStore] = None,
+        active_product_store: Optional[ActiveProductStore] = None,
+        pending_trigger_store: Optional[PendingTriggerStore] = None,
     ):
         """
         Initialize trigger service.
@@ -75,16 +91,86 @@ class TriggerService:
             session_store: SessionStore 인스턴스
             product_db: ProductDatabase 인스턴스
             door_session_store: DoorSessionStore 인스턴스 (선택)
+            active_product_store: ActiveProductStore 인스턴스 (v4.4)
+            pending_trigger_store: PendingTriggerStore 인스턴스 (v4.4)
         """
         self._video_processor = video_processor
         self._engine = engine
         self._session_store = session_store
         self._product_db = product_db
         self._door_session_store = door_session_store
+        self._active_product_store = active_product_store
+        self._pending_trigger_store = pending_trigger_store
+
+        # v4.5: Deduplication 캐시 (idempotency_key -> (timestamp, session_id))
+        self._dedup_cache: Dict[str, Tuple[float, str]] = {}
+        self._dedup_lock = threading.Lock()
+
+    def _generate_idempotency_key(self, input_data: TriggerInput) -> str:
+        """
+        Idempotency key 생성 (v4.5).
+
+        zone + video paths를 기반으로 고유 키 생성.
+
+        Args:
+            input_data: TriggerInput
+
+        Returns:
+            Idempotency key (MD5 hash)
+        """
+        key_parts = [
+            str(input_data.zone),
+            input_data.top_video_path or "",
+            input_data.side_video_path or "",
+        ]
+        key_str = "|".join(key_parts)
+        return hashlib.md5(key_str.encode()).hexdigest()
+
+    def _check_duplicate(self, idempotency_key: str) -> Optional[str]:
+        """
+        중복 요청 체크 (v4.5).
+
+        Args:
+            idempotency_key: Idempotency key
+
+        Returns:
+            이전 session_id (중복인 경우) 또는 None
+        """
+        now = time.time()
+
+        with self._dedup_lock:
+            # 만료된 항목 정리
+            expired_keys = [
+                k for k, (ts, _) in self._dedup_cache.items()
+                if now - ts > self.DEDUP_TTL_SECONDS
+            ]
+            for k in expired_keys:
+                del self._dedup_cache[k]
+
+            # 중복 체크
+            if idempotency_key in self._dedup_cache:
+                ts, session_id = self._dedup_cache[idempotency_key]
+                if now - ts <= self.DEDUP_TTL_SECONDS:
+                    return session_id
+
+            return None
+
+    def _register_request(self, idempotency_key: str, session_id: str) -> None:
+        """
+        요청 등록 (v4.5).
+
+        Args:
+            idempotency_key: Idempotency key
+            session_id: Session ID
+        """
+        with self._dedup_lock:
+            self._dedup_cache[idempotency_key] = (time.time(), session_id)
 
     async def process_trigger(self, input_data: TriggerInput) -> TriggerOutput:
         """
         트리거 요청 처리.
+
+        v4.5: Idempotency key 기반 중복 체크 추가
 
         Args:
             input_data: 트리거 입력 데이터
@@ -93,6 +179,24 @@ class TriggerService:
             TriggerOutput: 처리 결과
         """
         start_time = time.time()
+
+        # v4.5: 중복 요청 체크
+        idempotency_key = self._generate_idempotency_key(input_data)
+        duplicate_session_id = self._check_duplicate(idempotency_key)
+        if duplicate_session_id is not None:
+            logger.warning(
+                f"[TRIGGER] Duplicate request detected: "
+                f"zone={input_data.zone}, idempotency_key={idempotency_key[:8]}..., "
+                f"returning previous session_id={duplicate_session_id}"
+            )
+            return TriggerOutput(
+                success=True,
+                session_id=duplicate_session_id,
+                door_session_id=None,
+                message="중복 요청 (이전 결과 반환)",
+                status="duplicate",
+            )
+
         session_id = generate_session_id(input_data.zone)
 
         logger.info(f"[TRIGGER] ========== 추론 시작 ==========")
@@ -114,6 +218,61 @@ class TriggerService:
                 error_code="VIDEO_VALIDATION_ERROR",
             )
 
+        # 1-B. 상품 정보 확인 (v4.4 사전 필터링)
+        # products가 없으면 pending으로 대기
+        allowed_class_ids = None
+        if self._active_product_store is not None:
+            if not self._active_product_store.has_products(input_data.zone):
+                # 상품 정보 없음 → pending 처리
+                logger.info(
+                    f"[TRIGGER] zone={input_data.zone}: "
+                    f"No products available, adding to pending queue"
+                )
+                if self._pending_trigger_store is not None:
+                    videos_dict = {
+                        "top": input_data.top_video_path or "",
+                        "side": input_data.side_video_path or "",
+                    }
+                    # loadcells를 dict로 변환
+                    loadcells_list = [
+                        {
+                            "timestamp": lc.timestamp,
+                            "raw_value": lc.raw_value,
+                            "filtered_value": lc.filtered_value,
+                            "filter_method": lc.filter_method,
+                        }
+                        for lc in input_data.loadcells
+                    ]
+                    trigger_id = self._pending_trigger_store.add(
+                        zone=input_data.zone,
+                        videos=videos_dict,
+                        loadcells=loadcells_list,
+                    )
+                    return TriggerOutput(
+                        success=True,
+                        session_id=session_id,
+                        door_session_id=None,
+                        message="Trigger pending, waiting for products",
+                        status="pending",
+                        waiting_for="products",
+                    )
+                else:
+                    logger.warning(
+                        f"[TRIGGER] zone={input_data.zone}: "
+                        f"No pending store, proceeding without product filtering"
+                    )
+            else:
+                # 상품 정보 있음 → allowed_class_ids 조회
+                allowed_class_ids = self._active_product_store.get_allowed_class_ids(
+                    input_data.zone
+                )
+                if allowed_class_ids is not None:
+                    logger.info(
+                        f"[TRIGGER] zone={input_data.zone}: "
+                        f"YOLO pre-filtering with {len(allowed_class_ids)} classes: "
+                        f"{allowed_class_ids[:10]}{'...' if len(allowed_class_ids) > 10 else ''}"
+                    )
+
         # 2. 초기 세션 저장 (processing 상태)
         initial_session = SessionData(
             session_id=session_id,
@@ -124,7 +283,7 @@ class TriggerService:
         )
         self._session_store.save(session_id, initial_session)
 
-        # 3. 비디오 처리 (비동기)
+        # 3. 비디오 처리 (비동기) - allowed_class_ids 전달 (v4.4)
         self._session_store.update_stage(
             session_id,
             processing_stage="extracting_frames",
@@ -135,6 +294,7 @@ class TriggerService:
             self._video_processor.process_videos,
             top_path=input_data.top_video_path,
             side_path=input_data.side_video_path,
+            allowed_class_ids=allowed_class_ids,
         )
 
         vote_results = processing_result.vote_results
@@ -236,6 +396,9 @@ class TriggerService:
         for p in result.products:
             logger.info(f"  - {p.name} x{p.count}: {p.total_price}원")
         logger.info(f"[TRIGGER] total_price={result.total_price}원, elapsed={elapsed_ms:.1f}ms")
+
+        # v4.5: 요청 등록 (중복 방지용)
+        self._register_request(idempotency_key, session_id)
 
         return TriggerOutput(
             success=True,
@@ -385,3 +548,66 @@ class TriggerService:
             )
             ensemble_results.append(ensemble)
         return ensemble_results
+
+    async def process_pending_trigger(self, zone: int) -> Optional[TriggerOutput]:
+        """
+        대기 중인 trigger 처리 (v4.4).
+
+        products가 도착한 후 호출되어 대기 중인 trigger를 처리.
+
+        Args:
+            zone: Zone 번호
+
+        Returns:
+            TriggerOutput 또는 None (대기 trigger 없으면)
+        """
+        if self._pending_trigger_store is None:
+            return None
+
+        pending = self._pending_trigger_store.get_pending(zone)
+        if pending is None:
+            return None
+
+        logger.info(
+            f"[TRIGGER] Processing pending trigger for zone={zone}, "
+            f"trigger_id={pending.trigger_id}, age={pending.age_seconds:.1f}s"
+        )
+
+        # loadcells를 LoadcellReading으로 변환
+        loadcells = [
+            LoadcellReading(
+                timestamp=lc.get("timestamp", ""),
+                raw_value=lc.get("raw_value", []),
+                filtered_value=lc.get("filtered_value", []),
+                filter_method=lc.get("filter_method", "none"),
+            )
+            for lc in pending.loadcells
+        ]
+
+        # TriggerInput 생성
+        input_data = TriggerInput(
+            zone=zone,
+            loadcells=loadcells,
+            top_video_path=pending.videos.get("top") or None,
+            side_video_path=pending.videos.get("side") or None,
+        )
+
+        # 대기 trigger 제거
+        self._pending_trigger_store.remove(zone)
+
+        # 정상 trigger 처리 (이제 products 있음)
+        return await self.process_trigger(input_data)
+
+    def has_pending_trigger(self, zone: int) -> bool:
+        """
+        대기 중인 trigger가 있는지 확인 (v4.4).
+
+        Args:
+            zone: Zone 번호
+
+        Returns:
+            대기 중인 trigger 존재 여부
+        """
+        if self._pending_trigger_store is None:
+            return False
+        return self._pending_trigger_store.has_pending(zone)

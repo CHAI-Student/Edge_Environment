@@ -29,17 +29,25 @@ Service Container for Dependency Injection.
         c.init(...)
         yield c
         c.cleanup()  # 테스트 간 격리 보장
+
+v4.5 변경사항:
+- Global container에 threading.Lock() 추가 (race condition 방지)
+- Double-checked locking 패턴 적용
 """
 
 import logging
+import threading
 from typing import Callable, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from session import SessionStore, DoorSessionStore
+    from session.active_product_store import ActiveProductStore
+    from session.pending_trigger_store import PendingTriggerStore
     from vision import YOLOWrapper
     from database.product_db import ProductDatabase
     from engine import ProductDecisionEngine
     from video import VideoProcessor
+    from service.trigger_service import TriggerService
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +64,13 @@ class ServiceContainer:
         """Initialize empty container."""
         self._session_store: Optional["SessionStore"] = None
         self._door_session_store: Optional["DoorSessionStore"] = None
+        self._active_product_store: Optional["ActiveProductStore"] = None
+        self._pending_trigger_store: Optional["PendingTriggerStore"] = None
         self._yolo: Optional["YOLOWrapper"] = None
         self._engine: Optional["ProductDecisionEngine"] = None
         self._product_db: Optional["ProductDatabase"] = None
         self._video_processor: Optional["VideoProcessor"] = None
+        self._trigger_service: Optional["TriggerService"] = None
         self._initialized: bool = False
 
     def init(
@@ -70,6 +81,8 @@ class ServiceContainer:
         product_db: "ProductDatabase",
         video_processor: Optional["VideoProcessor"] = None,
         door_session_store: Optional["DoorSessionStore"] = None,
+        active_product_store: Optional["ActiveProductStore"] = None,
+        pending_trigger_store: Optional["PendingTriggerStore"] = None,
     ) -> None:
         """
         의존성 초기화.
@@ -81,20 +94,36 @@ class ServiceContainer:
             product_db: ProductDatabase 인스턴스
             video_processor: VideoProcessor 인스턴스 (선택, 없으면 자동 생성)
             door_session_store: DoorSessionStore 인스턴스 (선택, v4.1)
+            active_product_store: ActiveProductStore 인스턴스 (선택, v4.4)
+            pending_trigger_store: PendingTriggerStore 인스턴스 (선택, v4.4)
         """
         from video import VideoProcessor
+        from service.trigger_service import TriggerService
 
         self._session_store = session_store
         self._yolo = yolo
         self._engine = engine
         self._product_db = product_db
         self._door_session_store = door_session_store
+        self._active_product_store = active_product_store
+        self._pending_trigger_store = pending_trigger_store
 
         # VideoProcessor는 yolo를 공유
         if video_processor is not None:
             self._video_processor = video_processor
         else:
             self._video_processor = VideoProcessor(yolo=yolo)
+
+        # TriggerService 생성 (v4.4)
+        self._trigger_service = TriggerService(
+            video_processor=self._video_processor,
+            engine=engine,
+            session_store=session_store,
+            product_db=product_db,
+            door_session_store=door_session_store,
+            active_product_store=active_product_store,
+            pending_trigger_store=pending_trigger_store,
+        )
 
         self._initialized = True
 
@@ -105,7 +134,9 @@ class ServiceContainer:
             f"engine={engine is not None}, "
             f"db={product_db is not None}, "
             f"video_processor={self._video_processor is not None}, "
-            f"door_session_store={door_session_store is not None}"
+            f"door_session_store={door_session_store is not None}, "
+            f"active_product_store={active_product_store is not None}, "
+            f"pending_trigger_store={pending_trigger_store is not None}"
         )
 
     def cleanup(self) -> None:
@@ -116,12 +147,21 @@ class ServiceContainer:
         if self._door_session_store is not None:
             self._door_session_store.clear_all()
 
+        if self._active_product_store is not None:
+            self._active_product_store.clear_all()
+
+        if self._pending_trigger_store is not None:
+            self._pending_trigger_store.clear_all()
+
         self._session_store = None
         self._door_session_store = None
+        self._active_product_store = None
+        self._pending_trigger_store = None
         self._yolo = None
         self._engine = None
         self._product_db = None
         self._video_processor = None
+        self._trigger_service = None
         self._initialized = False
 
         logger.info("ServiceContainer cleaned up")
@@ -166,6 +206,24 @@ class ServiceContainer:
             raise RuntimeError("DoorSessionStore not initialized. Call init() first.")
         return self._door_session_store
 
+    def get_active_product_store(self) -> "ActiveProductStore":
+        """ActiveProductStore 인스턴스 반환 (v4.4)."""
+        if self._active_product_store is None:
+            raise RuntimeError("ActiveProductStore not initialized. Call init() first.")
+        return self._active_product_store
+
+    def get_pending_trigger_store(self) -> "PendingTriggerStore":
+        """PendingTriggerStore 인스턴스 반환 (v4.4)."""
+        if self._pending_trigger_store is None:
+            raise RuntimeError("PendingTriggerStore not initialized. Call init() first.")
+        return self._pending_trigger_store
+
+    def get_trigger_service(self) -> "TriggerService":
+        """TriggerService 인스턴스 반환 (v4.4)."""
+        if self._trigger_service is None:
+            raise RuntimeError("TriggerService not initialized. Call init() first.")
+        return self._trigger_service
+
     # ========================================================================
     # Optional Getters (may return None)
     # ========================================================================
@@ -194,6 +252,18 @@ class ServiceContainer:
         """DoorSessionStore 인스턴스 반환 (None 허용)."""
         return self._door_session_store
 
+    def get_active_product_store_optional(self) -> Optional["ActiveProductStore"]:
+        """ActiveProductStore 인스턴스 반환 (None 허용, v4.4)."""
+        return self._active_product_store
+
+    def get_pending_trigger_store_optional(self) -> Optional["PendingTriggerStore"]:
+        """PendingTriggerStore 인스턴스 반환 (None 허용, v4.4)."""
+        return self._pending_trigger_store
+
+    def get_trigger_service_optional(self) -> Optional["TriggerService"]:
+        """TriggerService 인스턴스 반환 (None 허용, v4.4)."""
+        return self._trigger_service
+
     # ========================================================================
     # Status
     # ========================================================================
@@ -218,6 +288,9 @@ class ServiceContainer:
             "video_processor": self._video_processor is not None,
             "door_session_store": door_store is not None,
             "door_session_store_instance": door_store,
+            "active_product_store": self._active_product_store is not None,
+            "pending_trigger_store": self._pending_trigger_store is not None,
+            "trigger_service": self._trigger_service is not None,
         }
 
 
@@ -228,25 +301,39 @@ class ServiceContainer:
 # 전역 컨테이너 인스턴스 (FastAPI Depends 호환성 유지)
 # 테스트에서는 이 인스턴스를 사용하지 말고 새로 생성할 것
 _global_container: Optional[ServiceContainer] = None
+_global_container_lock = threading.Lock()
 
 
 def get_global_container() -> ServiceContainer:
-    """전역 컨테이너 인스턴스 반환 (없으면 생성)."""
+    """
+    전역 컨테이너 인스턴스 반환 (없으면 생성).
+
+    Thread-safe: Double-checked locking 패턴 적용 (v4.5).
+    """
     global _global_container
-    if _global_container is None:
-        _global_container = ServiceContainer()
-    return _global_container
+    # First check (without lock) - fast path
+    if _global_container is not None:
+        return _global_container
+
+    # Second check (with lock) - slow path for initialization
+    with _global_container_lock:
+        if _global_container is None:
+            _global_container = ServiceContainer()
+            logger.debug("Global container created (thread-safe)")
+        return _global_container
 
 
 def set_global_container(container: ServiceContainer) -> None:
-    """전역 컨테이너 설정 (테스트용)."""
+    """전역 컨테이너 설정 (테스트용). Thread-safe (v4.5)."""
     global _global_container
-    _global_container = container
+    with _global_container_lock:
+        _global_container = container
 
 
 def reset_global_container() -> None:
-    """전역 컨테이너 리셋 (테스트 격리용)."""
+    """전역 컨테이너 리셋 (테스트 격리용). Thread-safe (v4.5)."""
     global _global_container
-    if _global_container is not None:
-        _global_container.cleanup()
-    _global_container = None
+    with _global_container_lock:
+        if _global_container is not None:
+            _global_container.cleanup()
+        _global_container = None

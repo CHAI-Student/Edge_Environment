@@ -1,7 +1,11 @@
 """
-YAML Persistence for Door Session.
+YAML Persistence for Door Session (v4.5).
 
 Door Session을 YAML 파일로 저장하고 복구합니다.
+
+v4.5 변경사항:
+- Atomic write 패턴 적용 (temp file → rename)
+- threading.Lock() 추가로 동시 쓰기 방지
 
 저장 경로:
     data/sessions/
@@ -26,6 +30,8 @@ Door Session을 YAML 파일로 저장하고 복구합니다.
 
 import logging
 import os
+import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
@@ -43,10 +49,13 @@ logger = logging.getLogger(__name__)
 
 class YamlPersistence:
     """
-    Door Session YAML 영속화.
+    Door Session YAML 영속화 (v4.5).
 
     활성 세션은 active/ 디렉토리에,
     완료 세션은 completed/{날짜}/ 디렉토리에 저장합니다.
+
+    Thread-safe: 동시 쓰기 방지를 위한 Lock 사용.
+    Atomic write: temp file → rename 패턴으로 파일 손상 방지.
     """
 
     def __init__(self, base_dir: str = "data/sessions"):
@@ -65,6 +74,7 @@ class YamlPersistence:
         self._base_dir = Path(base_dir)
         self._active_dir = self._base_dir / "active"
         self._completed_dir = self._base_dir / "completed"
+        self._lock = threading.Lock()  # v4.5: 동시 쓰기 방지
 
         # 디렉토리 생성
         self._active_dir.mkdir(parents=True, exist_ok=True)
@@ -75,6 +85,9 @@ class YamlPersistence:
     def save(self, session: DoorSession) -> Path:
         """
         Door Session을 YAML 파일로 저장.
+
+        v4.5: Atomic write 패턴 (temp file → rename)
+              Thread-safe (Lock 사용)
 
         활성 세션은 active/, 완료 세션은 completed/{날짜}/에 저장.
 
@@ -89,12 +102,14 @@ class YamlPersistence:
         if session.status == "active":
             # 활성 세션: active/
             file_path = self._active_dir / filename
+            target_dir = self._active_dir
         else:
             # 완료 세션: completed/{날짜}/
             date_str = datetime.fromtimestamp(session.created_at).strftime("%Y-%m-%d")
             date_dir = self._completed_dir / date_str
             date_dir.mkdir(parents=True, exist_ok=True)
             file_path = date_dir / filename
+            target_dir = date_dir
 
             # 활성 디렉토리에서 제거
             active_path = self._active_dir / filename
@@ -105,19 +120,57 @@ class YamlPersistence:
                 except Exception as e:
                     logger.warning(f"Failed to remove active session file: {e}")
 
-        # YAML 저장
+        # v4.5: Atomic write with Lock
         data = session.to_dict()
-        with open(file_path, "w", encoding="utf-8") as f:
-            yaml.dump(
-                data,
-                f,
-                default_flow_style=False,
-                allow_unicode=True,
-                sort_keys=False,
-            )
+        with self._lock:
+            self._atomic_write(file_path, data, target_dir)
 
-        logger.debug(f"Session saved: {file_path}")
+        logger.debug(f"Session saved (atomic): {file_path}")
         return file_path
+
+    def _atomic_write(self, file_path: Path, data: dict, target_dir: Path) -> None:
+        """
+        Atomic write (temp file → rename).
+
+        파일 손상 방지를 위해 임시 파일에 먼저 쓴 후 rename.
+
+        Args:
+            file_path: 최종 파일 경로
+            data: 저장할 데이터
+            target_dir: 임시 파일 생성 디렉토리
+        """
+        # 같은 디렉토리에 임시 파일 생성 (rename이 원자적이 되도록)
+        fd, temp_path = tempfile.mkstemp(
+            suffix=".yaml.tmp",
+            prefix="door_session_",
+            dir=str(target_dir),
+        )
+        try:
+            # 임시 파일에 쓰기
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                yaml.dump(
+                    data,
+                    f,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                    sort_keys=False,
+                )
+
+            # 원자적 rename (Windows에서는 기존 파일 먼저 삭제 필요)
+            temp_path_obj = Path(temp_path)
+            if os.name == "nt" and file_path.exists():
+                # Windows: 기존 파일 삭제 후 rename
+                file_path.unlink()
+            temp_path_obj.rename(file_path)
+
+        except Exception as e:
+            # 실패 시 임시 파일 정리
+            try:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+            except Exception:
+                pass
+            raise e
 
     def load(self, path: Path) -> Optional[DoorSession]:
         """

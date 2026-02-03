@@ -1,8 +1,12 @@
 """
-Session Store for YOLO Inference Results.
+Session Store for YOLO Inference Results (v4.5).
 
 YOLO 추론 결과를 세션별로 저장하고 관리.
 TTL 기반 자동 정리 기능 포함.
+
+v4.5 변경사항:
+- _cleanup_to_capacity() 메서드 추가 (max_sessions의 80%까지 정리)
+- 동시 요청 시 용량 초과 방지
 
 사용법:
     store = SessionStore(ttl_seconds=300)
@@ -139,6 +143,8 @@ class SessionStore:
         """
         세션 데이터 저장.
 
+        v4.5: 용량 초과 시 80%까지 정리 (동시 요청 대응)
+
         Args:
             session_id: 세션 ID
             data: 세션 데이터
@@ -148,9 +154,9 @@ class SessionStore:
             if session_id in self._store:
                 logger.warning(f"Session overwritten: {session_id}")
 
-            # 용량 초과 시 오래된 세션 정리
+            # v4.5: 용량 초과 시 80%까지 정리 (1개만 제거하면 동시 요청 시 한계 초과)
             if len(self._store) >= self._max_sessions:
-                self._cleanup_oldest()
+                self._cleanup_to_capacity()
 
             self._store[session_id] = data
             logger.debug(f"Session saved: {session_id}")
@@ -277,7 +283,7 @@ class SessionStore:
             return len(expired_keys)
 
     def _cleanup_oldest(self) -> None:
-        """가장 오래된 세션 정리 (lock 내부에서 호출)."""
+        """가장 오래된 세션 1개 정리 (lock 내부에서 호출)."""
         if not self._store:
             return
 
@@ -288,6 +294,49 @@ class SessionStore:
         )
         del self._store[oldest_key]
         logger.debug(f"Removed oldest session: {oldest_key}")
+
+    def _cleanup_to_capacity(self) -> int:
+        """
+        max_sessions의 80%까지 정리 (v4.5).
+
+        동시 요청 시 한계 초과를 방지하기 위해 여유 공간 확보.
+        lock 내부에서 호출됩니다.
+
+        Returns:
+            정리된 세션 수
+        """
+        if not self._store:
+            return 0
+
+        # 목표: max_sessions의 80%
+        target_count = int(self._max_sessions * 0.8)
+        current_count = len(self._store)
+
+        if current_count <= target_count:
+            return 0
+
+        # 정리해야 할 개수
+        to_remove = current_count - target_count
+
+        # 생성 시간 기준으로 정렬하여 가장 오래된 것부터 제거
+        sorted_keys = sorted(
+            self._store.keys(),
+            key=lambda k: self._store[k].created_at
+        )
+
+        removed_count = 0
+        for key in sorted_keys[:to_remove]:
+            del self._store[key]
+            removed_count += 1
+            logger.debug(f"Removed session (capacity): {key}")
+
+        if removed_count > 0:
+            logger.info(
+                f"Session store capacity cleanup: removed {removed_count} sessions "
+                f"({current_count} -> {len(self._store)}, target={target_count})"
+            )
+
+        return removed_count
 
     def clear_all(self) -> None:
         """모든 세션 삭제."""

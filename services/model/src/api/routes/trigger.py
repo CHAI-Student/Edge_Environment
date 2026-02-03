@@ -1,8 +1,13 @@
 """
-Trigger API Routes (v4.3).
+Trigger API Routes (v4.4).
 
 POST /trigger - Camera에서 녹화 완료 시 호출
 즉시 YOLO 추론 실행 후 결과를 SessionStore에 저장.
+
+v4.4 변경사항:
+- TriggerService 사용: ActiveProductStore, PendingTriggerStore 연동
+- YOLO classes 파라미터로 사전 필터링 적용
+- products 없으면 pending 처리
 
 v4.3 변경사항:
 - add_trigger_with_global 사용: GlobalSession 연동 지원
@@ -13,11 +18,12 @@ v4.2 변경사항:
 
 사용 흐름:
 1. Camera Driver가 녹화 완료 후 /trigger 호출
-2. Model 서비스가 YOLO 추론 실행 (비동기)
-3. 결과를 SessionStore에 저장
-4. DoorSessionStore에 결과 추가 (GlobalSession 연동)
-5. session_id 반환
-6. Node.js가 /api/judge/multi-zone으로 결과 폴링
+2. products 확인 (없으면 pending 처리)
+3. Model 서비스가 YOLO 추론 실행 (allowed_class_ids 적용)
+4. 결과를 SessionStore에 저장
+5. DoorSessionStore에 결과 추가 (GlobalSession 연동)
+6. session_id 반환
+7. Node.js가 /api/judge/multi-zone으로 결과 폴링
 """
 
 import asyncio
@@ -35,12 +41,14 @@ from video import VideoProcessor, VoteResult
 from engine import ProductDecisionEngine, EnsembleResult
 from session import SessionStore, SessionData, ProductResult, DoorSessionStore, TriggerResult
 from session.session_store import generate_session_id
+from service.trigger_service import TriggerService, TriggerInput, TriggerOutput, LoadcellReading
 from api.deps import (
     get_decision_engine,
     get_video_processor,
     get_session_store,
     get_product_db,
     get_door_session_store_optional,
+    get_trigger_service_optional,
 )
 from database.product_db import ProductDatabase
 from core.exceptions import (
@@ -98,7 +106,10 @@ class TriggerResponse(BaseModel):
 
     success: bool
     session_id: str
+    door_session_id: Optional[str] = None
     message: str
+    status: str = "complete"  # "complete" or "pending"
+    waiting_for: Optional[str] = None  # "products" if pending
 
 
 # ============================================================================
@@ -312,30 +323,29 @@ async def trigger_judgment(
     session_store: SessionStore = Depends(get_session_store),
     product_db: ProductDatabase = Depends(get_product_db),
     door_session_store: DoorSessionStore | None = Depends(get_door_session_store_optional),
+    trigger_service: TriggerService | None = Depends(get_trigger_service_optional),
 ):
     """
-    Camera에서 녹화 완료 시 호출되는 트리거 API.
+    Camera에서 녹화 완료 시 호출되는 트리거 API (v4.4).
 
-    1. 비디오 파일 경로 검증
-    2. 전체 프레임 YOLO 추론 (스트리밍)
-    3. 투표 기반 앙상블
-    4. 로드셀 데이터에서 무게 변화량 계산
-    5. 최종 상품 판단
-    6. SessionStore에 결과 저장
-    7. session_id 반환
+    v4.4: TriggerService를 통한 처리
+    1. products 확인 (없으면 pending 처리)
+    2. 비디오 파일 경로 검증
+    3. YOLO 추론 (allowed_class_ids 적용)
+    4. 최종 상품 판단
+    5. SessionStore, DoorSessionStore에 저장
+    6. session_id 반환
 
     Args:
         request: 트리거 요청
-        video_processor: VideoProcessor 의존성
-        engine: ProductDecisionEngine 의존성
-        session_store: SessionStore 의존성
+        trigger_service: TriggerService 의존성 (v4.4)
 
     Returns:
-        TriggerResponse: session_id 포함
+        TriggerResponse: session_id, door_session_id, status 포함
     """
     start_time = time.time()
 
-    # 세션 ID 생성
+    # 세션 ID (로깅용)
     session_id = generate_session_id(request.zone)
 
     logger.info(f"[TRIGGER] ========== 추론 시작 ==========")
@@ -344,6 +354,59 @@ async def trigger_judgment(
     logger.info(f"[TRIGGER] loadcells: {len(request.loadcells)}개")
 
     try:
+        # v4.4: TriggerService 사용
+        if trigger_service is not None:
+            # TriggerInput 생성
+            loadcells = [
+                LoadcellReading(
+                    timestamp=lc.timestamp,
+                    raw_value=lc.raw_value,
+                    filtered_value=lc.filtered_value,
+                    filter_method=lc.filter_method,
+                )
+                for lc in request.loadcells
+            ]
+
+            trigger_input = TriggerInput(
+                zone=request.zone,
+                loadcells=loadcells,
+                top_video_path=request.videos.top,
+                side_video_path=request.videos.side,
+            )
+
+            # TriggerService로 처리 위임
+            output: TriggerOutput = await trigger_service.process_trigger(trigger_input)
+
+            elapsed_ms = (time.time() - start_time) * 1000
+            logger.info(f"[TRIGGER] TriggerService 완료: elapsed={elapsed_ms:.1f}ms")
+
+            # v4.5: 에러 응답 처리 - success=False면 HTTP 400 반환
+            if not output.success:
+                logger.error(
+                    f"[TRIGGER ERROR] session_id={output.session_id}, "
+                    f"error_code={output.error_code}, message={output.message}"
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error_code": output.error_code or "TRIGGER_ERROR",
+                        "message": output.message,
+                        "session_id": output.session_id,
+                    },
+                )
+
+            return TriggerResponse(
+                success=output.success,
+                session_id=output.session_id,
+                door_session_id=output.door_session_id,
+                message=output.message,
+                status=output.status,
+                waiting_for=output.waiting_for,
+            )
+
+        # Fallback: TriggerService가 없으면 기존 로직 실행
+        logger.warning("[TRIGGER] TriggerService not available, using fallback logic")
+
         # 1. 비디오 파일 경로 검증
         _validate_video_paths(request.videos)
 
@@ -498,7 +561,9 @@ async def trigger_judgment(
         return TriggerResponse(
             success=True,
             session_id=session_id,
+            door_session_id=door_session.door_session_id if door_session else None,
             message="추론 완료",
+            status="complete",
         )
 
     except HTTPException as e:

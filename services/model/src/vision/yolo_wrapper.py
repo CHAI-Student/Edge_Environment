@@ -1,8 +1,12 @@
 """
-YOLO Wrapper for Product Detection (TensorRT Only).
+YOLO Wrapper for Product Detection (TensorRT Only, v4.5).
 
 Jetson Orin Nano (JetPack 6.2) 전용 TensorRT 엔진 래퍼.
 .engine 파일만 지원하며, CUDA가 필수입니다.
+
+v4.5 변경사항:
+- 100회 추론마다 GPU 캐시 자동 정리
+- clear_gpu_cache() 메서드 추가
 
 실제 YOLO 출력 형식:
     det[0] xyxy=[258.72, 47.65, 315.12, 113.97] conf=0.788 cls=0 name=hand
@@ -138,10 +142,12 @@ class YOLODetection:
 
 class YOLOWrapper:
     """
-    YOLO TensorRT 모델 래퍼 (Jetson Orin Nano 전용).
+    YOLO TensorRT 모델 래퍼 (Jetson Orin Nano 전용, v4.5).
 
     YOLO 추론 결과를 YOLODetection 리스트로 변환.
     TensorRT (.engine) 모델만 지원하며, CUDA가 필수입니다.
+
+    v4.5: 100회 추론마다 GPU 캐시 자동 정리
 
     Attributes:
         model: YOLO 모델 (ultralytics)
@@ -156,6 +162,9 @@ class YOLOWrapper:
     INPUT_SIZE = 480  # 480x480 입력 크기
     CROP_WIDTH = 480  # 640x480 AVI에서 오른쪽 160px 제거
     MAX_DETECTIONS = 20  # 최대 탐지 개수 제한
+
+    # v4.5: GPU 캐시 정리 주기
+    CACHE_CLEANUP_INTERVAL = 100  # 100회 추론마다 정리
 
     def __init__(
         self,
@@ -179,6 +188,7 @@ class YOLOWrapper:
         self._loaded = False
         self.is_tensorrt = True  # Always TensorRT
         self._cuda_available = False  # load() 시 검증됨
+        self._inference_count = 0  # v4.5: 추론 횟수 카운터
 
     def load(self) -> bool:
         """
@@ -350,7 +360,11 @@ class YOLOWrapper:
         logger.debug(f"Resolved relative path: {original_path} -> {full_path}")
         return full_path
 
-    def detect(self, image: np.ndarray) -> List[YOLODetection]:
+    def detect(
+        self,
+        image: np.ndarray,
+        allowed_class_ids: Optional[List[int]] = None,
+    ) -> List[YOLODetection]:
         """
         이미지에서 객체 감지.
 
@@ -361,6 +375,10 @@ class YOLOWrapper:
 
         Args:
             image: numpy array (BGR), 640x480 또는 480x480
+            allowed_class_ids: 허용된 클래스 ID 리스트 (v4.4)
+                               None이면 모든 클래스 탐지
+                               빈 리스트면 탐지 안함 (빈 결과 반환)
+                               리스트가 있으면 해당 클래스만 탐지
 
         Returns:
             YOLODetection 리스트
@@ -371,6 +389,11 @@ class YOLOWrapper:
 
         if self.model is None:
             logger.error("YOLO model not loaded")
+            return []
+
+        # v4.4: 빈 allowed_class_ids면 탐지 안함
+        if allowed_class_ids is not None and len(allowed_class_ids) == 0:
+            logger.debug("[YOLO] allowed_class_ids is empty, skipping detection")
             return []
 
         try:
@@ -385,16 +408,29 @@ class YOLOWrapper:
                     f"(오른쪽 {original_width - self.CROP_WIDTH}px 제거)"
                 )
 
-            results = self.model.predict(
-                image,
-                conf=self.conf_threshold,
-                verbose=False,
-                imgsz=self.INPUT_SIZE,  # 480x480 입력
-                half=True,  # FP16 추론
-                max_det=self.MAX_DETECTIONS,  # 최대 20개 탐지
-                device=self.device,  # 문자열 '0' (Jetson GPU)
-            )
+            # v4.4: classes 파라미터로 사전 필터링
+            predict_kwargs = {
+                "conf": self.conf_threshold,
+                "verbose": False,
+                "imgsz": self.INPUT_SIZE,  # 480x480 입력
+                "half": True,  # FP16 추론
+                "max_det": self.MAX_DETECTIONS,  # 최대 20개 탐지
+                "device": self.device,  # 문자열 '0' (Jetson GPU)
+            }
+
+            if allowed_class_ids is not None:
+                predict_kwargs["classes"] = allowed_class_ids
+                logger.debug(
+                    f"[YOLO] Filtered detect: {len(allowed_class_ids)} classes allowed"
+                )
+
+            results = self.model.predict(image, **predict_kwargs)
             detections = self.parse_results(results[0], self.class_names)
+
+            # v4.5: 추론 횟수 증가 및 주기적 캐시 정리
+            self._inference_count += 1
+            if self._inference_count >= self.CACHE_CLEANUP_INTERVAL:
+                self._periodic_cache_cleanup()
 
             # 탐지 결과 로깅 (상위 3개만)
             if detections:
@@ -408,6 +444,44 @@ class YOLOWrapper:
         except Exception as e:
             logger.error(f"YOLO detection failed: {e}")
             return []
+
+    def _periodic_cache_cleanup(self) -> None:
+        """
+        주기적 GPU 캐시 정리 (v4.5).
+
+        CACHE_CLEANUP_INTERVAL마다 호출됩니다.
+        """
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.debug(
+                    f"[YOLO] GPU cache cleaned after {self._inference_count} inferences"
+                )
+        except Exception as e:
+            logger.warning(f"[YOLO] GPU cache cleanup failed: {e}")
+        finally:
+            self._inference_count = 0
+
+    def clear_gpu_cache(self) -> bool:
+        """
+        GPU 캐시 수동 정리 (v4.5).
+
+        외부에서 명시적으로 GPU 메모리를 해제할 때 사용.
+
+        Returns:
+            성공 여부
+        """
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.info("[YOLO] GPU cache manually cleared")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"[YOLO] GPU cache clear failed: {e}")
+            return False
 
     @staticmethod
     def parse_results(

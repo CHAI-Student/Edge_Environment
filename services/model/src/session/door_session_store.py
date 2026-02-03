@@ -1,8 +1,13 @@
 """
-Door Session Store (v4.3).
+Door Session Store (v4.5).
 
 Door Session을 관리하는 저장소.
 여러 번의 /trigger 호출을 하나의 Door Session으로 통합 관리합니다.
+
+v4.5 변경사항:
+- Callback deadlock 방지: Lock 해제 후 callback 실행 (deferred 패턴)
+- GlobalSession max_duration 파라미터 추가
+- cleanup_timed_out_sessions() 메서드 추가
 
 v4.3 변경사항:
 - GlobalDoorSession 추가: session_id="OPEN"/"CLOSE" 기반 문 상태 관리
@@ -81,7 +86,9 @@ class DoorSessionStore:
         session_timeout: float = 30.0,
         weight_tolerance: float = 3.0,
         max_duration: float = 600.0,
+        global_session_max_duration: float = 600.0,
         get_product_weight: Optional[Callable[[int], float]] = None,
+        on_session_finalize: Optional[Callable[[int], None]] = None,
     ):
         """
         Initialize DoorSessionStore.
@@ -91,7 +98,9 @@ class DoorSessionStore:
             session_timeout: 마지막 trigger 후 타임아웃 (초)
             weight_tolerance: 무게 매칭 허용 오차 (g)
             max_duration: 최대 세션 지속 시간 (초)
+            global_session_max_duration: GlobalSession 최대 지속 시간 (초, v4.5)
             get_product_weight: product_id -> weight 조회 함수
+            on_session_finalize: 세션 종료 시 콜백 (zone 전달, v4.4)
         """
         self._active_sessions: Dict[int, DoorSession] = {}  # zone -> session
         self._lock = threading.Lock()
@@ -102,7 +111,9 @@ class DoorSessionStore:
         self._session_timeout = session_timeout
         self._weight_tolerance = weight_tolerance
         self._max_duration = max_duration
+        self._global_session_max_duration = global_session_max_duration  # v4.5
         self._get_product_weight = get_product_weight
+        self._on_session_finalize = on_session_finalize  # v4.4
 
         # 컴포넌트 초기화
         self._persistence = YamlPersistence(base_dir=yaml_dir)
@@ -168,6 +179,22 @@ class DoorSessionStore:
             get_product_weight=get_product_weight,
         )
 
+    def set_session_finalize_callback(
+        self,
+        callback: Callable[[int], None],
+    ) -> None:
+        """
+        세션 종료 콜백 설정 (v4.4).
+
+        세션이 finalize될 때 호출됩니다.
+        예: ActiveProductStore.clear(zone)
+
+        Args:
+            callback: zone를 인자로 받는 콜백 함수
+        """
+        self._on_session_finalize = callback
+        logger.debug("Session finalize callback registered")
+
     def add_trigger(
         self,
         zone: int,
@@ -179,6 +206,7 @@ class DoorSessionStore:
         활성 세션이 없으면 새로 생성하고,
         있으면 기존 세션에 trigger를 추가합니다.
 
+        v4.5: Callback deferred 패턴 적용 (deadlock 방지)
         v4.2: Copy-on-Write 패턴 - Lock 내에서 데이터 수정, Lock 해제 후 YAML 저장
 
         Args:
@@ -190,6 +218,7 @@ class DoorSessionStore:
         """
         session_to_save: Optional[DoorSession] = None
         session_to_finalize: Optional[DoorSession] = None
+        deferred_callback: Optional[Callable[[], None]] = None  # v4.5
 
         with self._lock:
             now = time.time()
@@ -213,7 +242,7 @@ class DoorSessionStore:
                             f"(duration={now - session.created_at:.1f}s)"
                         )
                     # Lock 내에서 finalize 처리 (메모리 상태만)
-                    self._finalize_session_in_memory(session)
+                    deferred_callback = self._finalize_session_in_memory(session)
                     session_to_finalize = session  # Lock 해제 후 YAML 저장
                     session = None
 
@@ -250,7 +279,10 @@ class DoorSessionStore:
 
             return_session = session
 
-        # Lock 해제 후 YAML 저장 (I/O 작업)
+        # Lock 해제 후 I/O 및 콜백 실행 (v4.5)
+        if deferred_callback is not None:
+            deferred_callback()
+
         if session_to_finalize is not None:
             self._persistence.save(session_to_finalize)
 
@@ -266,6 +298,7 @@ class DoorSessionStore:
         """
         세션 조회. 타임아웃 시 자동 finalize.
 
+        v4.5: Callback deferred 패턴 적용 (deadlock 방지)
         v4.3: GlobalSession 활성 시 타임아웃 무시
         v4.2: Copy-on-Write 패턴, 통합 타임아웃 체크
 
@@ -279,6 +312,7 @@ class DoorSessionStore:
         """
         session_to_save: Optional[DoorSession] = None
         return_session: Optional[DoorSession] = None
+        deferred_callback: Optional[Callable[[], None]] = None  # v4.5
         is_finalized = False
 
         with self._lock:
@@ -307,14 +341,17 @@ class DoorSessionStore:
                         f"Door session finalized (max duration): {session.door_session_id} "
                         f"(duration={now - session.created_at:.1f}s)"
                     )
-                self._finalize_session_in_memory(session)
+                deferred_callback = self._finalize_session_in_memory(session)
                 session_to_save = copy.deepcopy(session)
                 return_session = session
                 is_finalized = True
             else:
                 return_session = session
 
-        # Lock 해제 후 YAML 저장 (I/O 작업)
+        # Lock 해제 후 콜백 및 YAML 저장 (v4.5)
+        if deferred_callback is not None:
+            deferred_callback()
+
         if session_to_save is not None:
             self._persistence.save(session_to_save)
 
@@ -360,10 +397,13 @@ class DoorSessionStore:
         session_id="CLOSE" 시 호출됩니다.
         모든 활성 zone의 DoorSession을 finalize하고 결과를 반환합니다.
 
+        v4.5: Callback deferred 패턴 적용 (deadlock 방지)
+
         Returns:
             종료된 GlobalDoorSession 또는 None (활성 세션이 없는 경우)
         """
         sessions_to_save: List[DoorSession] = []
+        deferred_callbacks: List[Callable[[], None]] = []  # v4.5
 
         with self._lock:
             if self._global_session is None:
@@ -373,7 +413,9 @@ class DoorSessionStore:
             # 모든 활성 zone 세션 finalize
             for zone in list(self._active_sessions.keys()):
                 session = self._active_sessions[zone]
-                self._finalize_session_in_memory(session)
+                callback = self._finalize_session_in_memory(session)
+                if callback is not None:
+                    deferred_callbacks.append(callback)
                 self._global_session.zone_sessions[zone] = session
                 sessions_to_save.append(copy.deepcopy(session))
 
@@ -390,7 +432,10 @@ class DoorSessionStore:
                 f"total_products={result.total_product_count}"
             )
 
-        # Lock 해제 후 YAML 저장 (I/O 작업)
+        # Lock 해제 후 콜백 및 YAML 저장 (v4.5)
+        for callback in deferred_callbacks:
+            callback()
+
         for session in sessions_to_save:
             self._persistence.save(session)
 
@@ -469,6 +514,7 @@ class DoorSessionStore:
         """
         세션 강제 종료.
 
+        v4.5: Callback deferred 패턴 적용 (deadlock 방지)
         v4.2: Copy-on-Write 패턴
 
         Args:
@@ -478,36 +524,48 @@ class DoorSessionStore:
             종료된 DoorSession 또는 None
         """
         session_to_save: Optional[DoorSession] = None
+        deferred_callback: Optional[Callable[[], None]] = None  # v4.5
 
         with self._lock:
             session = self._active_sessions.get(zone)
             if session is not None:
-                self._finalize_session_in_memory(session)
+                deferred_callback = self._finalize_session_in_memory(session)
                 session_to_save = copy.deepcopy(session)
             else:
                 return None
 
-        # Lock 해제 후 YAML 저장 (I/O 작업)
+        # Lock 해제 후 콜백 및 YAML 저장 (v4.5)
+        if deferred_callback is not None:
+            deferred_callback()
+
         if session_to_save is not None:
             self._persistence.save(session_to_save)
 
         return session_to_save
 
-    def _finalize_session_in_memory(self, session: DoorSession) -> None:
+    def _finalize_session_in_memory(
+        self, session: DoorSession
+    ) -> Optional[Callable[[], None]]:
         """
         세션 종료 처리 - 메모리 상태만 변경 (내부용, lock 내에서 호출).
 
+        v4.5: callback을 반환하여 lock 해제 후 실행 (deadlock 방지)
         v4.2: YAML 저장은 Lock 해제 후 별도로 수행
 
         Args:
             session: 종료할 DoorSession
+
+        Returns:
+            콜백 함수 (lock 해제 후 실행) 또는 None
         """
         session.status = "complete"
         session.finalized_at = time.time()
 
+        zone = session.zone
+
         # 활성 세션에서 제거
-        if session.zone in self._active_sessions:
-            del self._active_sessions[session.zone]
+        if zone in self._active_sessions:
+            del self._active_sessions[zone]
 
         logger.info(
             f"Door session finalized: {session.door_session_id}, "
@@ -515,6 +573,31 @@ class DoorSessionStore:
             f"products={session.product_count}, "
             f"total_price={session.total_price}"
         )
+
+        # v4.5: 콜백을 반환하여 lock 해제 후 실행 (deadlock 방지)
+        if self._on_session_finalize is not None:
+            callback_fn = self._on_session_finalize
+            return lambda: self._execute_finalize_callback(callback_fn, zone)
+
+        return None
+
+    def _execute_finalize_callback(
+        self,
+        callback: Callable[[int], None],
+        zone: int,
+    ) -> None:
+        """
+        Finalize 콜백 실행 (lock 해제 후 호출).
+
+        Args:
+            callback: 콜백 함수
+            zone: Zone 번호
+        """
+        try:
+            callback(zone)
+            logger.debug(f"Session finalize callback invoked for zone={zone}")
+        except Exception as e:
+            logger.error(f"Session finalize callback failed for zone={zone}: {e}")
 
     def _finalize_session(self, session: DoorSession) -> None:
         """
@@ -625,22 +708,102 @@ class DoorSessionStore:
                 "session_timeout": self._session_timeout,
                 "weight_tolerance": self._weight_tolerance,
                 "max_duration": self._max_duration,
+                "global_session_max_duration": self._global_session_max_duration,
                 "global_session_active": self._global_session is not None,
                 "global_session": global_session_info,
                 **persistence_stats,
             }
 
-    def clear_all(self) -> None:
-        """모든 활성 세션 정리 (v4.2: Copy-on-Write)."""
+    def cleanup_timed_out_sessions(self) -> int:
+        """
+        타임아웃된 세션 정리 (v4.5).
+
+        cleanup task에서 주기적으로 호출됩니다.
+        - GlobalSession max_duration 초과 시 자동 finalize
+        - 개별 DoorSession 타임아웃 체크
+
+        Returns:
+            정리된 세션 수
+        """
         sessions_to_save: List[DoorSession] = []
+        deferred_callbacks: List[Callable[[], None]] = []
+        global_session_finalized = False
+        cleaned_count = 0
+
+        with self._lock:
+            now = time.time()
+
+            # 1. GlobalSession max_duration 체크
+            if self._global_session is not None:
+                duration = self._global_session.duration_seconds
+                if duration > self._global_session_max_duration:
+                    logger.warning(
+                        f"GlobalSession timed out (max_duration): "
+                        f"{self._global_session.global_session_id} "
+                        f"(duration={duration:.1f}s > {self._global_session_max_duration}s)"
+                    )
+                    # 모든 활성 zone 세션 finalize
+                    for zone in list(self._active_sessions.keys()):
+                        session = self._active_sessions[zone]
+                        callback = self._finalize_session_in_memory(session)
+                        if callback is not None:
+                            deferred_callbacks.append(callback)
+                        self._global_session.zone_sessions[zone] = session
+                        sessions_to_save.append(copy.deepcopy(session))
+                        cleaned_count += 1
+
+                    self._global_session.status = "complete"
+                    self._global_session.finalized_at = now
+                    self._global_session = None
+                    global_session_finalized = True
+
+            # 2. GlobalSession이 없을 때만 개별 DoorSession 타임아웃 체크
+            if not global_session_finalized and self._global_session is None:
+                for zone in list(self._active_sessions.keys()):
+                    session = self._active_sessions[zone]
+                    timeout_result = self._check_timeout(session, now)
+
+                    if timeout_result.is_timed_out:
+                        logger.info(
+                            f"DoorSession timed out (cleanup): {session.door_session_id} "
+                            f"(reason={timeout_result.reason})"
+                        )
+                        callback = self._finalize_session_in_memory(session)
+                        if callback is not None:
+                            deferred_callbacks.append(callback)
+                        sessions_to_save.append(copy.deepcopy(session))
+                        cleaned_count += 1
+
+        # Lock 해제 후 콜백 및 YAML 저장 (v4.5)
+        for callback in deferred_callbacks:
+            callback()
+
+        for session in sessions_to_save:
+            self._persistence.save(session)
+
+        if cleaned_count > 0:
+            logger.info(f"Cleaned up {cleaned_count} timed out door sessions")
+
+        return cleaned_count
+
+    def clear_all(self) -> None:
+        """모든 활성 세션 정리 (v4.5: Callback deferred 패턴)."""
+        sessions_to_save: List[DoorSession] = []
+        deferred_callbacks: List[Callable[[], None]] = []  # v4.5
 
         with self._lock:
             for session in list(self._active_sessions.values()):
-                self._finalize_session_in_memory(session)
+                callback = self._finalize_session_in_memory(session)
+                if callback is not None:
+                    deferred_callbacks.append(callback)
                 sessions_to_save.append(copy.deepcopy(session))
             self._active_sessions.clear()
+            self._global_session = None  # GlobalSession도 정리
 
-        # Lock 해제 후 YAML 저장 (I/O 작업)
+        # Lock 해제 후 콜백 및 YAML 저장 (v4.5)
+        for callback in deferred_callbacks:
+            callback()
+
         for session in sessions_to_save:
             self._persistence.save(session)
 
