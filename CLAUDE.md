@@ -706,3 +706,11 @@ pytest services/model/tests --cov=services/model/src --cov-report=html
 | POST /api/frame | 제거 (AVI Trigger만 사용) |
 | POST /api/judge | POST /api/judge/multi-zone 사용 |
 | GET /api/frame/stats | GET /trigger/stats 사용 |
+
+## 기타 서비스 디렉토리 위치
+
+'현위치': "~\VOICE\2026\crk\win_pc_test_sw2io_board\Edge_Environment"
+'camera': "~\VOICE\2026\crk\CRK-CAMERA"
+'io board': "~\VOICE\2026\crk\CRK-IO-BOARD"
+'payment': "~\VOICE\2026\crk\CRK-PAYMENT"
+'node': "~\VOICE\2026\crk\Edge_Environment"

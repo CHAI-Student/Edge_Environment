@@ -20,11 +20,14 @@ v4.3 변경사항:
 5. Model이 zones 배열로 zone 1~5 최종 결과 반환
 """
 
+import json
 import logging
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from session import (
@@ -165,6 +168,198 @@ def _parse_request(body: Any) -> MultiZoneRequest:
 
 
 # ============================================================================
+# Product Validation Helper
+# ============================================================================
+
+
+class ProductValidationError:
+    """상품 유효성 검사 에러 정보."""
+
+    def __init__(self, product_idx: str, field: str, message: str):
+        self.product_idx = product_idx
+        self.field = field
+        self.message = message
+
+    def to_dict(self) -> dict:
+        return {
+            "product_idx": self.product_idx,
+            "field": self.field,
+            "message": self.message,
+        }
+
+
+def _validate_products(
+    products: List[ProductInfo],
+    product_db: Optional[ProductDatabase] = None,
+) -> List[ProductValidationError]:
+    """
+    상품 목록 유효성 검사.
+
+    Args:
+        products: 상품 목록
+        product_db: ProductDatabase 인스턴스 (매핑 검사용, 선택)
+
+    Returns:
+        에러 목록 (빈 리스트면 유효)
+    """
+    errors = []
+
+    for i, p in enumerate(products):
+        product_idx = p.product_idx or f"index_{i}"
+
+        # 1. product_idx 검사
+        if not p.product_idx or not p.product_idx.strip():
+            errors.append(ProductValidationError(
+                product_idx=product_idx,
+                field="product_idx",
+                message="상품 ID가 비어있습니다",
+            ))
+
+        # 2. product_name 검사
+        if not p.product_name or not p.product_name.strip():
+            errors.append(ProductValidationError(
+                product_idx=product_idx,
+                field="product_name",
+                message="상품명이 비어있습니다",
+            ))
+
+        # 3. sale_price 검사
+        if p.sale_price < 0:
+            errors.append(ProductValidationError(
+                product_idx=product_idx,
+                field="sale_price",
+                message=f"판매가격이 음수입니다: {p.sale_price}",
+            ))
+
+        # 4. product_weight 검사
+        try:
+            weight = float(p.product_weight) if p.product_weight else 0.0
+            if weight < 0:
+                errors.append(ProductValidationError(
+                    product_idx=product_idx,
+                    field="product_weight",
+                    message=f"상품 무게가 음수입니다: {p.product_weight}",
+                ))
+        except (ValueError, TypeError):
+            errors.append(ProductValidationError(
+                product_idx=product_idx,
+                field="product_weight",
+                message=f"상품 무게 형식이 잘못되었습니다: {p.product_weight}",
+            ))
+
+        # 5. stock_qty 검사
+        if p.stock_qty < 0:
+            errors.append(ProductValidationError(
+                product_idx=product_idx,
+                field="stock_qty",
+                message=f"재고 수량이 음수입니다: {p.stock_qty}",
+            ))
+
+        # 6. DB 매핑 검사 (product_db가 제공된 경우)
+        if product_db is not None and p.product_idx and p.product_idx.strip():
+            # product_idx로 DB 조회
+            db_product = product_db.get_by_product_idx(p.product_idx)
+
+            # product_idx가 숫자인 경우 product_id로도 조회 시도
+            if db_product is None:
+                try:
+                    product_id = int(p.product_idx)
+                    db_product = product_db.get_product(product_id)
+                except ValueError:
+                    pass
+
+            if db_product is None:
+                errors.append(ProductValidationError(
+                    product_idx=product_idx,
+                    field="product_mapping",
+                    message=f"상품이 DB에 매핑되지 않았습니다: '{p.product_name}' (product_idx={p.product_idx})",
+                ))
+
+    return errors
+
+
+def _raise_validation_error(
+    errors: List[ProductValidationError],
+    request: MultiZoneRequest,
+) -> None:
+    """
+    유효성 검사 에러 발생 시 HTTP 400 예외를 발생시킵니다.
+
+    Args:
+        errors: 유효성 검사 에러 목록
+        request: 요청 객체 (로깅용)
+    """
+    error_details = [e.to_dict() for e in errors]
+
+    logger.error(
+        f"[MULTI-ZONE VALIDATION ERROR] session_id={request.session_id}, "
+        f"products_count={len(request.products)}, errors={len(errors)}"
+    )
+    for e in errors:
+        logger.error(f"  - {e.product_idx}: {e.field} - {e.message}")
+
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "error_code": "PRODUCT_VALIDATION_ERROR",
+            "message": f"상품 정보 유효성 검사 실패: {len(errors)}개 오류",
+            "errors": error_details,
+            "products_received": len(request.products),
+        },
+    )
+
+
+# ============================================================================
+# Request Logging Helper (디버깅용)
+# ============================================================================
+
+
+def _log_request_to_file(request: MultiZoneRequest, response: dict) -> None:
+    """
+    Node.js 요청/응답을 로그 파일에 저장 (디버깅용).
+
+    로그 파일: services/model/logs/multi_zone_YYYYMMDD.jsonl
+    """
+    try:
+        log_dir = Path(__file__).parent.parent.parent.parent / "logs"
+        log_dir.mkdir(exist_ok=True)
+
+        log_file = log_dir / f"multi_zone_{datetime.now().strftime('%Y%m%d')}.jsonl"
+
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "request": {
+                "session_id": request.session_id,
+                "zone": request.zone,
+                "products_count": len(request.products),
+                "products": [
+                    {
+                        "product_idx": p.product_idx,
+                        "product_name": p.product_name,
+                        "sale_price": p.sale_price,
+                        "product_weight": p.product_weight,
+                        "stock_qty": p.stock_qty,
+                    }
+                    for p in request.products[:10]  # 최대 10개만 로깅
+                ],
+            },
+            "response_summary": {
+                "status": response.get("status"),
+                "success": response.get("success"),
+                "zones_count": len(response.get("zones", [])),
+                "total_price": response.get("totalPrice") or response.get("totalInterimPrice") or response.get("interimTotalPrice"),
+                "product_count": response.get("productCount") or response.get("totalProductCount") or response.get("interimProductCount"),
+            },
+        }
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+
+    except Exception as e:
+        logger.warning(f"[LOG] Failed to write request log: {e}")
+
+
+# ============================================================================
 # Door State Helper Functions (v4.3)
 # ============================================================================
 
@@ -211,15 +406,21 @@ def _build_zone_result(
             return {
                 "zone": zone,
                 "products": [],
+                "productNames": [],
+                "productCounts": [],
                 "totalPrice": 0,
                 "productCount": 0,
+                "weightDelta": 0.0,
             }
         else:
             return {
                 "zone": zone,
                 "interim_products": [],
+                "interimProductNames": [],
+                "interimProductCounts": [],
                 "interimTotalPrice": 0,
                 "interimProductCount": 0,
+                "weightDelta": 0.0,
             }
 
     # 활성 상품 조회 (count > 0)
@@ -236,12 +437,22 @@ def _build_zone_result(
         for p in active_products
     ]
 
+    # 새로 추가할 배열들
+    product_names = [p.name for p in active_products]
+    product_counts = [p.count for p in active_products]
+
+    # zone별 무게 변화량 계산
+    weight_delta = sum(t.delta_weight for t in door_session.triggers)
+
     if is_complete:
         return {
             "zone": zone,
             "products": products_list,
+            "productNames": product_names,
+            "productCounts": product_counts,
             "totalPrice": door_session.total_price,
             "productCount": door_session.product_count,
+            "weightDelta": round(weight_delta, 1),
             "door_session_id": door_session.door_session_id,
             "triggerCount": door_session.trigger_count,
         }
@@ -249,8 +460,11 @@ def _build_zone_result(
         return {
             "zone": zone,
             "interim_products": products_list,
+            "interimProductNames": product_names,
+            "interimProductCounts": product_counts,
             "interimTotalPrice": door_session.total_price,
             "interimProductCount": door_session.product_count,
+            "weightDelta": round(weight_delta, 1),
             "triggerCount": door_session.trigger_count,
         }
 
@@ -287,6 +501,11 @@ def _handle_door_open(store: DoorSessionStore) -> dict:
     total_interim_price = sum(z.get("interimTotalPrice", 0) for z in zones)
     total_interim_count = sum(z.get("interimProductCount", 0) for z in zones)
 
+    # Node.js 하위 호환: 모든 zone의 interim_products를 합친 products 배열
+    all_products = []
+    for z in zones:
+        all_products.extend(z.get("interim_products", []))
+
     logger.info(
         f"[MULTI-ZONE OPEN] global_session_id={global_session.global_session_id}, "
         f"total_triggers={global_session.total_trigger_count}, "
@@ -298,8 +517,10 @@ def _handle_door_open(store: DoorSessionStore) -> dict:
         "status": "in_progress",
         "global_session_id": global_session.global_session_id,
         "zones": zones,
+        "products": all_products,  # Node.js 하위 호환
         "totalInterimPrice": total_interim_price,
         "totalInterimProductCount": total_interim_count,
+        "interimProductCount": total_interim_count,  # Node.js 하위 호환
         "globalSessionInfo": {
             "totalTriggerCount": global_session.total_trigger_count,
             "durationSeconds": round(global_session.duration_seconds, 1),
@@ -327,6 +548,9 @@ def _handle_door_close(store: DoorSessionStore) -> dict:
             "success": False,
             "status": "error",
             "message": "DoorSessionStore not enabled",
+            "products": [],  # Node.js 하위 호환
+            "totalPrice": 0,
+            "productCount": 0,
         }
 
     global_session = store.finalize_global_session()
@@ -336,6 +560,9 @@ def _handle_door_close(store: DoorSessionStore) -> dict:
             "success": False,
             "status": "error",
             "message": "No active door session to close",
+            "products": [],  # Node.js 하위 호환
+            "totalPrice": 0,
+            "productCount": 0,
         }
 
     # Zone 1~5 최종 결과 구성
@@ -346,6 +573,11 @@ def _handle_door_close(store: DoorSessionStore) -> dict:
 
     total_price = global_session.total_price
     total_product_count = global_session.total_product_count
+
+    # Node.js 하위 호환: 모든 zone의 products를 합친 배열
+    all_products = []
+    for z in zones:
+        all_products.extend(z.get("products", []))
 
     logger.info(
         f"[MULTI-ZONE CLOSE] global_session_id={global_session.global_session_id}, "
@@ -358,8 +590,10 @@ def _handle_door_close(store: DoorSessionStore) -> dict:
         "status": "complete",
         "global_session_id": global_session.global_session_id,
         "zones": zones,
+        "products": all_products,  # Node.js 하위 호환
         "totalPrice": total_price,
         "totalProductCount": total_product_count,
+        "productCount": total_product_count,  # Node.js 하위 호환
         "globalSessionInfo": {
             "totalTriggerCount": global_session.total_trigger_count,
             "durationSeconds": round(global_session.duration_seconds, 1),
@@ -390,6 +624,7 @@ def _handle_global_polling(store: DoorSessionStore) -> dict:
             "success": False,
             "status": "processing",
             "message": "No active global session",
+            "products": [],  # Node.js 하위 호환
         }
 
     # Zone 1~5 현재 상태 반환
@@ -401,13 +636,20 @@ def _handle_global_polling(store: DoorSessionStore) -> dict:
     total_interim_price = sum(z.get("interimTotalPrice", 0) for z in zones)
     total_interim_count = sum(z.get("interimProductCount", 0) for z in zones)
 
+    # Node.js 하위 호환: 모든 zone의 interim_products를 합친 products 배열
+    all_products = []
+    for z in zones:
+        all_products.extend(z.get("interim_products", []))
+
     return {
         "success": False,
         "status": "in_progress",
         "global_session_id": global_session.global_session_id,
         "zones": zones,
+        "products": all_products,  # Node.js 하위 호환
         "totalInterimPrice": total_interim_price,
         "totalInterimProductCount": total_interim_count,
+        "interimProductCount": total_interim_count,  # Node.js 하위 호환
         "globalSessionInfo": {
             "totalTriggerCount": global_session.total_trigger_count,
             "durationSeconds": round(global_session.duration_seconds, 1),
@@ -475,21 +717,35 @@ async def judge_multi_zone(
     )
 
     # ========================================================================
+    # 상품 정보 유효성 검사 (products가 있는 경우에만)
+    # ========================================================================
+    if request.products:
+        validation_errors = _validate_products(request.products, product_db)
+        if validation_errors:
+            _raise_validation_error(validation_errors, request)
+
+    # ========================================================================
     # v4.3: Door State (OPEN/CLOSE) 처리
     # ========================================================================
     door_state = _parse_door_state(request.session_id)
 
     # OPEN 처리 (반복 호출됨 - 기존 세션 유지)
     if door_state == "OPEN":
-        return _handle_door_open(door_session_store)
+        response = _handle_door_open(door_session_store)
+        _log_request_to_file(request, response)
+        return response
 
     # CLOSE 처리 (최종 결과 반환)
     if door_state == "CLOSE":
-        return _handle_door_close(door_session_store)
+        response = _handle_door_close(door_session_store)
+        _log_request_to_file(request, response)
+        return response
 
     # 폴링 (session_id가 null이고 GlobalSession이 활성인 경우)
     if door_session_store is not None and door_session_store.is_global_session_active():
-        return _handle_global_polling(door_session_store)
+        response = _handle_global_polling(door_session_store)
+        _log_request_to_file(request, response)
+        return response
 
     # ========================================================================
     # 기존 로직 (v4.2 하위 호환) - zone 기반 DoorSession
@@ -552,7 +808,12 @@ async def judge_multi_zone(
                         ],
                     }
 
-                return {
+                # 새 필드: 상품명/개수 배열, 무게 변화량
+                product_names = [p.name for p in active_products]
+                product_counts_list = [p.count for p in active_products]
+                weight_delta = sum(t.delta_weight for t in door_session.triggers)
+
+                response = {
                     "success": product_count > 0,
                     "status": "complete",
                     "device_id": device_id,
@@ -562,19 +823,19 @@ async def judge_multi_zone(
                     "processing_stage": "complete",
                     "processing_stage_detail": f"Door session 완료: {door_session.trigger_count}개 trigger 통합",
                     "products": products_response,
+                    "productNames": product_names,
+                    "productCounts": product_counts_list,
                     "productCount": product_count,
                     "totalPrice": total_price,
+                    "weightDelta": round(weight_delta, 1),
                     "confidence": round(
                         sum(p.average_confidence for p in active_products) / len(active_products)
                         if active_products else 0.0,
                         4,
                     ),
                     "weightInfo": {
-                        "delta": round(
-                            sum(t.delta_weight for t in door_session.triggers),
-                            1,
-                        ),
-                        "isRemoval": sum(t.delta_weight for t in door_session.triggers) < 0,
+                        "delta": round(weight_delta, 1),
+                        "isRemoval": weight_delta < 0,
                     },
                     "doorSessionInfo": {
                         "triggerCount": door_session.trigger_count,
@@ -592,6 +853,8 @@ async def judge_multi_zone(
                         ),
                     },
                 }
+                _log_request_to_file(request, response)
+                return response
             else:
                 # 세션 진행 중 (in_progress)
                 logger.info(
@@ -600,7 +863,13 @@ async def judge_multi_zone(
                     f"triggers={door_session.trigger_count}, "
                     f"interim_products={product_count}"
                 )
-                return {
+
+                # 새 필드: 상품명/개수 배열, 무게 변화량
+                interim_product_names = [p.name for p in active_products]
+                interim_product_counts_list = [p.count for p in active_products]
+                interim_weight_delta = sum(t.delta_weight for t in door_session.triggers)
+
+                response = {
                     "success": False,
                     "status": "in_progress",
                     "device_id": device_id,
@@ -610,8 +879,11 @@ async def judge_multi_zone(
                     "processing_stage": "door_session_active",
                     "processing_stage_detail": f"Door session 활성: {door_session.trigger_count}개 trigger 수신",
                     "interim_products": products_response,
+                    "interimProductNames": interim_product_names,
+                    "interimProductCounts": interim_product_counts_list,
                     "interimProductCount": product_count,
                     "interimTotalPrice": total_price,
+                    "weightDelta": round(interim_weight_delta, 1),
                     "doorSessionInfo": {
                         "triggerCount": door_session.trigger_count,
                         "durationSeconds": round(door_session.duration_seconds, 1),
@@ -627,6 +899,8 @@ async def judge_multi_zone(
                         ),
                     },
                 }
+                _log_request_to_file(request, response)
+                return response
 
     # 기존 SessionStore 기반 응답 (DoorSession이 없거나 비활성화된 경우)
     # session_id 유효성 검사: zone_으로 시작하면 실제 세션 ID, 아니면 device_id
@@ -826,6 +1100,10 @@ async def judge_multi_zone(
         if p.count > 0  # 개수 0인 상품 필터링
     ]
 
+    # 새 필드: 상품명/개수 배열
+    product_names = [p["name"] for p in products]
+    product_counts_list = [p["count"] for p in products]
+
     # 총 상품 개수 계산 (count > 0인 상품만)
     product_count = sum(p.count for p in session_data.products if p.count > 0)
 
@@ -839,7 +1117,7 @@ async def judge_multi_zone(
         f"success={is_success}"
     )
 
-    return {
+    response = {
         "success": is_success,
         "status": "complete",
         "device_id": device_id,
@@ -848,8 +1126,11 @@ async def judge_multi_zone(
         "processing_stage": session_data.processing_stage,
         "processing_stage_detail": session_data.processing_stage_detail,
         "products": products,
+        "productNames": product_names,
+        "productCounts": product_counts_list,
         "productCount": product_count,
         "totalPrice": session_data.total_price,
+        "weightDelta": round(session_data.delta_weight, 1),
         "confidence": round(session_data.confidence, 4),
         "weightInfo": {
             "delta": round(session_data.delta_weight, 1),
@@ -861,6 +1142,8 @@ async def judge_multi_zone(
             "processingTimeMs": round(session_data.processing_time_ms, 1),
         },
     }
+    _log_request_to_file(request, response)
+    return response
 
 
 # ============================================================================
