@@ -1,9 +1,14 @@
 """
-Door Session Data Models (v4.2).
+Door Session Data Models (v4.9).
 
 Door Session은 문이 열리고 닫힐 때까지의 모든 trigger를 통합 관리합니다.
 여러 번의 /trigger 호출이 하나의 DoorSession으로 묶이며,
 상품 제거/반환이 누적되어 최종 결과가 계산됩니다.
+
+v4.9 변경사항:
+- CrossZoneReturn 추가: 크로스 존 반환 매칭 기록
+- DoorSession에 cross_zone_returns 필드 추가
+- Zone A에서 꺼낸 상품을 Zone B에 넣으면 Zone A에서 차감
 
 v4.2 변경사항:
 - UnmatchedReturn 추가: 무게 매칭 실패 시 추적
@@ -153,6 +158,60 @@ class UnmatchedReturn:
 
 
 @dataclass
+class CrossZoneReturn:
+    """
+    크로스 존 반환 매칭 기록 (v4.9).
+
+    무게 증가(반환)가 다른 zone의 상품과 매칭된 경우.
+
+    Attributes:
+        trigger_id: 반환 trigger ID
+        source_zone: 반환 발생 zone (무게 증가)
+        target_zone: 매칭된 zone (상품 차감)
+        product_id: 매칭된 상품 ID (YOLO class_id)
+        product_name: 상품명
+        matched_weight: 매칭된 상품 무게 (g)
+        delta_weight: 실제 반환 무게 (g)
+        timestamp: 매칭 시각 (epoch)
+    """
+    trigger_id: str
+    source_zone: int
+    target_zone: int
+    product_id: int
+    product_name: str
+    matched_weight: float
+    delta_weight: float
+    timestamp: float
+
+    def to_dict(self) -> dict:
+        """딕셔너리 변환."""
+        return {
+            "trigger_id": self.trigger_id,
+            "source_zone": self.source_zone,
+            "target_zone": self.target_zone,
+            "product_id": self.product_id,
+            "product_name": self.product_name,
+            "matched_weight": self.matched_weight,
+            "delta_weight": self.delta_weight,
+            "timestamp": self.timestamp,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CrossZoneReturn":
+        """딕셔너리에서 복원."""
+        return cls(
+            trigger_id=data["trigger_id"],
+            source_zone=data["source_zone"],
+            target_zone=data["target_zone"],
+            product_id=data["product_id"],
+            product_name=data["product_name"],
+            matched_weight=data["matched_weight"],
+            delta_weight=data["delta_weight"],
+            timestamp=data["timestamp"],
+        )
+
+
+@dataclass
 class AggregatedProduct:
     """
     통합 상품 결과.
@@ -231,6 +290,7 @@ class DoorSession:
         triggers: TriggerResult 목록 (시간순)
         aggregated_products: 통합 상품 결과 (product_id -> AggregatedProduct)
         unmatched_returns: 무게 매칭 실패한 반환 목록 (v4.2)
+        cross_zone_returns: 크로스 존 반환 매칭 기록 (v4.9)
         created_at: 세션 생성 시각 (epoch)
         last_trigger_at: 마지막 trigger 시각 (타임아웃 계산용)
         finalized_at: 세션 종료 시각 (complete일 때만)
@@ -241,6 +301,7 @@ class DoorSession:
     triggers: List[TriggerResult] = field(default_factory=list)
     aggregated_products: Dict[int, AggregatedProduct] = field(default_factory=dict)
     unmatched_returns: List[UnmatchedReturn] = field(default_factory=list)
+    cross_zone_returns: List[CrossZoneReturn] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
     last_trigger_at: float = field(default_factory=time.time)
     finalized_at: Optional[float] = None
@@ -293,6 +354,16 @@ class DoorSession:
         """매칭 실패한 반환 총 무게 (g) (v4.2)."""
         return sum(r.delta_weight for r in self.unmatched_returns)
 
+    @property
+    def has_cross_zone_returns(self) -> bool:
+        """크로스 존 반환이 있는지 여부 (v4.9)."""
+        return len(self.cross_zone_returns) > 0
+
+    @property
+    def cross_zone_returns_count(self) -> int:
+        """크로스 존 반환 횟수 (v4.9)."""
+        return len(self.cross_zone_returns)
+
     def to_dict(self) -> dict:
         """딕셔너리 변환 (YAML 저장용)."""
         return {
@@ -305,6 +376,7 @@ class DoorSession:
                 for pid, p in self.aggregated_products.items()
             },
             "unmatched_returns": [r.to_dict() for r in self.unmatched_returns],
+            "cross_zone_returns": [r.to_dict() for r in self.cross_zone_returns],
             "created_at": self.created_at,
             "last_trigger_at": self.last_trigger_at,
             "finalized_at": self.finalized_at,
@@ -315,6 +387,7 @@ class DoorSession:
                 "duration_seconds": round(self.duration_seconds, 1),
                 "unmatched_returns_count": len(self.unmatched_returns),
                 "unmatched_returns_weight": round(self.unmatched_returns_weight, 1),
+                "cross_zone_returns_count": self.cross_zone_returns_count,
             },
         }
 
@@ -333,6 +406,10 @@ class DoorSession:
             UnmatchedReturn.from_dict(r)
             for r in data.get("unmatched_returns", [])
         ]
+        cross_zone_returns = [
+            CrossZoneReturn.from_dict(r)
+            for r in data.get("cross_zone_returns", [])
+        ]
         return cls(
             door_session_id=data["door_session_id"],
             zone=data["zone"],
@@ -340,6 +417,7 @@ class DoorSession:
             triggers=triggers,
             aggregated_products=aggregated_products,
             unmatched_returns=unmatched_returns,
+            cross_zone_returns=cross_zone_returns,
             created_at=data.get("created_at", time.time()),
             last_trigger_at=data.get("last_trigger_at", time.time()),
             finalized_at=data.get("finalized_at"),

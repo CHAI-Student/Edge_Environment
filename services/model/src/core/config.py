@@ -169,7 +169,7 @@ class DoorSessionModel(BaseModel):
         description="마지막 trigger 후 타임아웃 (초)",
     )
     weight_tolerance_grams: float = Field(
-        default=3.0,
+        default=5.0,
         description="반환 매칭 무게 허용 오차 (g)",
     )
     max_duration_seconds: float = Field(

@@ -1,8 +1,13 @@
 """
-Door Session Store (v4.8).
+Door Session Store (v4.9).
 
 Door Session을 관리하는 저장소.
 여러 번의 /trigger 호출을 하나의 Door Session으로 통합 관리합니다.
+
+v4.9 변경사항:
+- 크로스 존 반환 처리 추가 (_handle_cross_zone_returns)
+- Zone A에서 꺼낸 상품을 Zone B에 넣으면 Zone A에서 차감
+- weight_tolerance 기본값 5g으로 변경
 
 v4.8 변경사항:
 - YAML 저장 백그라운드 비동기화 (ThreadPoolExecutor)
@@ -60,6 +65,8 @@ from .door_session import (
     DoorSession,
     TriggerResult,
     AggregatedProduct,
+    CrossZoneReturn,
+    UnmatchedReturn,
     generate_door_session_id,
 )
 from .global_door_session import GlobalDoorSession, generate_global_session_id
@@ -270,6 +277,7 @@ class DoorSessionStore:
         활성 세션이 없으면 새로 생성하고,
         있으면 기존 세션에 trigger를 추가합니다.
 
+        v4.9: 크로스 존 반환 처리 추가
         v4.5: Callback deferred 패턴 적용 (deadlock 방지)
         v4.2: Copy-on-Write 패턴 - Lock 내에서 데이터 수정, Lock 해제 후 YAML 저장
 
@@ -283,6 +291,7 @@ class DoorSessionStore:
         session_to_save: Optional[DoorSession] = None
         session_to_finalize: Optional[DoorSession] = None
         deferred_callback: Optional[Callable[[], None]] = None  # v4.5
+        other_sessions_to_save: List[DoorSession] = []  # v4.9 추가
 
         with self._lock:
             now = time.time()
@@ -334,8 +343,14 @@ class DoorSessionStore:
             session.triggers.append(result)
             session.last_trigger_at = now
 
-            # 상품 재집계
-            self._reaggregate_products(session)
+            # 상품 재집계 + 크로스 존 반환 처리 (v4.9)
+            modified_zones = self._reaggregate_products(session)
+
+            # v4.9: 크로스 존으로 변경된 다른 zone 세션 복사
+            for other_zone in modified_zones:
+                other_session = self._active_sessions.get(other_zone)
+                if other_session:
+                    other_sessions_to_save.append(copy.deepcopy(other_session))
 
             # 저장할 세션 복사 (Lock 해제 후 저장)
             session_to_save = copy.deepcopy(session)
@@ -359,6 +374,10 @@ class DoorSessionStore:
 
         if session_to_save is not None:
             self._save_yaml_background(session_to_save)
+
+        # v4.9: 크로스 존으로 변경된 다른 zone도 저장
+        for other_session in other_sessions_to_save:
+            self._save_yaml_background(other_session)
 
         return return_session
 
@@ -769,14 +788,18 @@ class DoorSessionStore:
         self._finalize_session_in_memory(session)
         self._persistence.save(session)
 
-    def _reaggregate_products(self, session: DoorSession) -> None:
+    def _reaggregate_products(self, session: DoorSession) -> List[int]:
         """
         세션의 상품 재집계 (내부용, lock 내에서 호출).
 
+        v4.9: 크로스 존 반환 처리 추가
         v4.2: unmatched_returns 추적 추가
 
         Args:
             session: 재집계할 DoorSession
+
+        Returns:
+            v4.9: 크로스 존으로 변경된 다른 zone 번호 목록
         """
         # 전체 trigger에서 상품 재집계 (unmatched_returns 포함)
         result = self._aggregator.aggregate_with_unmatched(session.triggers)
@@ -789,6 +812,83 @@ class DoorSessionStore:
                 session.aggregated_products,
                 self._get_product_weight,
             )
+
+        # v4.9: 크로스 존 반환 처리
+        modified_zones = self._handle_cross_zone_returns(session)
+        return modified_zones
+
+    def _handle_cross_zone_returns(self, session: DoorSession) -> List[int]:
+        """
+        크로스 존 반환 처리 (v4.9).
+
+        현재 zone에서 매칭 실패한 반환(unmatched_returns)을
+        다른 zone의 aggregated_products에서 무게 매칭 시도.
+
+        Lock 내에서 호출됨 - 다른 zone 세션 접근 안전함.
+
+        Args:
+            session: 반환이 발생한 DoorSession
+
+        Returns:
+            변경된 다른 zone 번호 목록 (YAML 저장 필요)
+        """
+        if not session.unmatched_returns:
+            return []
+
+        modified_zones: List[int] = []
+        still_unmatched: List[UnmatchedReturn] = []
+
+        for unmatched in session.unmatched_returns:
+            matched = False
+
+            # 다른 모든 zone에서 무게 매칭 시도
+            for other_zone, other_session in self._active_sessions.items():
+                if other_zone == session.zone:
+                    continue  # 현재 zone 건너뜀
+
+                # 다른 zone의 aggregated_products에서 무게 매칭
+                matched_product_id = self._aggregator.find_product_by_weight(
+                    other_session.aggregated_products,
+                    unmatched.delta_weight,
+                )
+
+                if matched_product_id is not None:
+                    product = other_session.aggregated_products[matched_product_id]
+                    if product.count > 0:
+                        # 매칭 성공: 다른 zone에서 차감
+                        product.count -= 1
+
+                        # 크로스 존 기록 생성
+                        record = CrossZoneReturn(
+                            trigger_id=unmatched.trigger_id,
+                            source_zone=session.zone,
+                            target_zone=other_zone,
+                            product_id=matched_product_id,
+                            product_name=product.name,
+                            matched_weight=product.weight,
+                            delta_weight=unmatched.delta_weight,
+                            timestamp=time.time(),
+                        )
+                        session.cross_zone_returns.append(record)
+
+                        # 변경된 zone 기록
+                        if other_zone not in modified_zones:
+                            modified_zones.append(other_zone)
+
+                        logger.info(
+                            f"Cross-zone return: zone {session.zone} -> zone {other_zone}, "
+                            f"product={product.name}, weight={unmatched.delta_weight:.1f}g"
+                        )
+                        matched = True
+                        break
+
+            if not matched:
+                still_unmatched.append(unmatched)
+
+        # 매칭 실패 항목 업데이트
+        session.unmatched_returns = still_unmatched
+
+        return modified_zones
 
     def recover_active_sessions(self) -> int:
         """
