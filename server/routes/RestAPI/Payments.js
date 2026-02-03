@@ -40,6 +40,13 @@ function playDoorOpenVoice() {
     console.log("[VOICE] Door is still open over 1 minute. (play audio)");
 }
 
+// 
+function playDeviceRunningVoice() {
+    const audioPath = path.resolve(__dirname, '../Sounds/device_is_running.mp3');
+    playMp3(audioPath);
+    // console.log("[VOICE] Door is still open over 1 minute. (play audio)");
+}
+
 let graceTimer = null;   // 1분 후 시작용 (setTimeout)
 let repeatTimer = null;  // 1분마다 반복용 (setInterval)
 let startedAt = null;
@@ -356,6 +363,7 @@ async function startProcess(token, CardMethod) {
     if (isProcessing) {
         console.warn('[SYSTEM] Device is busy. Ignoring new request');
         // 필요 시 사용자에게 "사용 중입니다" 음성 안내 추가 가능
+        playDeviceRunningVoice()
         return; 
     }
     // [수정] 2. 프로세스 잠금 (Lock)
