@@ -48,6 +48,7 @@ class ProductInfo:
     product_weight: float
     stock_qty: int
     yolo_class_id: Optional[int] = None  # 매핑된 YOLO 클래스 ID
+    has_loadcell: str = "true"  # v4.8: 추가
 
 
 @dataclass
@@ -212,6 +213,7 @@ class ActiveProductStore:
             product_idx = p.get("product_idx", "")
             sale_price = int(p.get("sale_price", 0))
             stock_qty = int(p.get("stock_qty", 0))
+            has_loadcell = p.get("has_loadcell", "true")  # v4.8: 추가
 
             # product_weight는 문자열일 수 있음
             weight_str = p.get("product_weight", "0")
@@ -235,6 +237,7 @@ class ActiveProductStore:
                 product_weight=product_weight,
                 stock_qty=stock_qty,
                 yolo_class_id=yolo_class_id,
+                has_loadcell=has_loadcell,  # v4.8: 추가
             )
             mapped_products.append(product_info)
             class_to_product[yolo_class_id] = product_info

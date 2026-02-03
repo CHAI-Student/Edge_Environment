@@ -25,6 +25,7 @@ class ProductInfo:
     sale_price: int
     product_weight: str
     stock_qty: int = 0
+    has_loadcell: str = "true"  # v4.8: 추가
 
 
 @dataclass
@@ -164,7 +165,7 @@ class JudgmentService:
         )
 
     def _sync_product_database(self, products: List[ProductInfo]) -> None:
-        """[추가] Node.js로부터 받은 실시간 상품 정보를 DB에 동기화."""
+        """Node.js로부터 받은 실시간 상품 정보를 DB에 동기화 (v4.8: has_loadcell 추가)."""
         for p in products:
             class_id = self._product_db.get_yolo_class_id_by_product_idx(p.product_idx)
             if class_id is not None:
@@ -173,16 +174,19 @@ class JudgmentService:
                     weight = float(p.product_weight) if p.product_weight else 0.0
                     if weight > 0:
                         self._product_db.update_weight(class_id, weight)
-                    
-                    # 2. 재고 및 가격 업데이트
-                    # update_product를 통해 DB 내의 stock 값을 0보다 크게 만들어 필터링 방지
+
+                    # 2. 재고/가격/has_loadcell 업데이트 (v4.8)
                     self._product_db.update_product(
                         product_id=class_id,
                         price=p.sale_price,
                         stock=p.stock_qty,
-                        weight=weight if weight > 0 else None
+                        weight=weight if weight > 0 else None,
+                        has_loadcell=p.has_loadcell,  # v4.8: 추가
                     )
-                    logger.debug(f"[SYNC] Product {p.product_idx} (ID:{class_id}) updated: weight={weight}g, stock={p.stock_qty}")
+                    logger.debug(
+                        f"[SYNC] Product {p.product_idx} (ID:{class_id}) updated: "
+                        f"weight={weight}g, stock={p.stock_qty}, has_loadcell={p.has_loadcell}"
+                    )
                 except (ValueError, TypeError) as e:
                     logger.warning(f"[SYNC] Failed to update product {p.product_idx}: {e}")
 

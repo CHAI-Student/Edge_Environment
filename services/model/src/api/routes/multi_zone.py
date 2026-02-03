@@ -73,7 +73,7 @@ class ProductInfo(BaseModel):
     sale_price: int = Field(..., description="판매가격")
     product_weight: Optional[str] = Field(default="0", description="상품 무게 (g), 없으면 0")
     stock_qty: Optional[int] = Field(default=None, description="재고 수량 (v4.6: None이면 무제한)")
-    loadcell: str = Field(default="false", description="로드셀 사용 여부")
+    has_loadcell: str = Field(default="true", description="로드셀 사용 여부 (v4.8)")
 
 
 class MultiZoneRequest(BaseModel):
@@ -738,6 +738,7 @@ async def judge_multi_zone(
                 "sale_price": p.sale_price,
                 "product_weight": p.product_weight or "0",
                 "stock_qty": stock,
+                "has_loadcell": p.has_loadcell,  # v4.8: 추가
             })
             logger.debug(
                 f"[MULTI-ZONE] Product: {p.product_name}, "

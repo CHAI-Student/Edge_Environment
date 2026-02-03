@@ -138,7 +138,7 @@ class ProductDecisionEngine:
         # 1. 후보군이 없는 경우 → Loadcell-only 폴백
         if not vision_candidates:
             logger.warning("No vision candidates provided, trying loadcell-only fallback")
-            return self.judge_by_weight_only(delta_weight, timestamp)
+            return self.judge_by_weight_only(delta_weight, timestamp, active_products=active_products)
 
         # 2. 무게 변화가 없는 경우
         if abs_weight < self.min_weight_change:
@@ -152,7 +152,7 @@ class ProductDecisionEngine:
 
         if not estimates:
             logger.warning("No valid count estimates, trying loadcell-only fallback")
-            return self.judge_by_weight_only(delta_weight, timestamp)
+            return self.judge_by_weight_only(delta_weight, timestamp, active_products=active_products)
 
         # 4. 단일 상품 매칭 시도
         logger.info(f"[ENGINE] 전략: single_product_match 시도...")
@@ -322,16 +322,18 @@ class ProductDecisionEngine:
         self,
         delta_weight: float,
         timestamp: Optional[float] = None,
+        active_products: Optional[List] = None,  # v4.8: 추가
     ) -> JudgmentResult:
         """
         무게만으로 가장 가까운 상품 추정 (Vision 실패 시 폴백).
 
-        모든 상품 중 무게 변화량과 가장 유사한 무게를 가진 상품을 찾습니다.
-        tolerance_percent 범위 내에서 매칭하며, 개수도 추정합니다.
+        v4.8: active_products가 있으면 Node.js에서 보낸 최신 무게 정보 우선 사용.
+        has_loadcell 필드도 확인하여 로드셀 없는 상품은 제외.
 
         Args:
             delta_weight: 무게 변화량 (음수 = 제거)
             timestamp: 판단 시각 (기본값: 현재 시각)
+            active_products: ActiveProductStore에서 가져온 상품 정보 (v4.8)
 
         Returns:
             JudgmentResult (status: PARTIAL 또는 UNCERTAIN)
@@ -348,18 +350,59 @@ class ProductDecisionEngine:
             logger.info(f"Weight change too small for fallback: {abs_weight:.1f}g")
             return self._create_no_detection_result(delta_weight, timestamp)
 
-        # 모든 상품에서 가장 가까운 무게 찾기
-        all_products = self.product_db.get_all_products()
+        # v4.8: active_products 우선 사용 (Node.js 최신 무게)
+        candidate_products = []
+        if active_products:
+            for ap in active_products:
+                # has_loadcell 확인: "false"/"null"이면 제외
+                has_loadcell = getattr(ap, 'has_loadcell', 'true')
+                if has_loadcell in ['false', 'null']:
+                    logger.debug(
+                        f"[LOADCELL-ONLY] v4.8: Skip no-loadcell product: {ap.product_name}"
+                    )
+                    continue
 
-        if not all_products:
-            logger.warning("No products in database for fallback")
-            return self._create_no_detection_result(delta_weight, timestamp)
+                if ap.yolo_class_id is not None and ap.product_weight > 0 and ap.stock_qty > 0:
+                    # ProductInfo를 ProductDB 형식으로 변환
+                    pseudo_product = type('PseudoProduct', (), {
+                        'product_id': ap.yolo_class_id,
+                        'product_idx': ap.product_idx,
+                        'name': ap.product_name,
+                        'weight': ap.product_weight,  # Node.js 최신 무게
+                        'price': ap.sale_price,
+                        'stock': ap.stock_qty,
+                        'has_loadcell': has_loadcell,
+                    })()
+                    candidate_products.append(pseudo_product)
 
+            if candidate_products:
+                logger.info(
+                    f"[LOADCELL-ONLY] v4.8: Using {len(candidate_products)} products "
+                    f"from active_products (Node.js latest weights)"
+                )
+
+        # Fallback: ProductDatabase에서 조회
+        if not candidate_products:
+            all_products = self.product_db.get_all_products()
+            # has_loadcell 필터링
+            candidate_products = [
+                p for p in all_products
+                if p.weight > 0 and getattr(p, 'has_loadcell', 'true') not in ['false', 'null']
+            ]
+            if not candidate_products:
+                logger.warning("No loadcell-enabled products for fallback")
+                return self._create_no_detection_result(delta_weight, timestamp)
+            logger.info(
+                f"[LOADCELL-ONLY] v4.8: Using {len(candidate_products)} products "
+                f"from ProductDB (fallback)"
+            )
+
+        # 기존 로직: 가장 가까운 무게 찾기
         best_match = None
         best_error = float('inf')
         best_count = 0
 
-        for product in all_products:
+        for product in candidate_products:
             if product.weight <= 0:
                 continue
 
@@ -378,7 +421,7 @@ class ProductDecisionEngine:
         if best_match is None:
             # tolerance 범위 밖이라도 가장 가까운 상품 반환 (UNCERTAIN)
             logger.info("No product within tolerance, finding closest match")
-            for product in all_products:
+            for product in candidate_products:
                 if product.weight <= 0:
                     continue
 

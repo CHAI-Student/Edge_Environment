@@ -133,12 +133,14 @@ class WeightBasedCountCalculator:
                     logger.debug(f"[COUNT] Skipping product with zero weight: {product_name}")
                     continue
 
-                # v4.7: active_products는 이미 stock 필터링 완료 (stock > 0)
-                # 따라서 재고 필터링 스킵
-
-                # 개수 추정 (v4.7: stock 상한 적용하지 않음, 이미 필터링됨)
-                count = self._estimate_count(abs_weight, product_weight, stock=0)
+                # v4.8: active_products의 실제 stock_qty를 사용하여 상한 적용
+                # stock=0이면 재고 소진 상태이므로 count=0 처리
+                count = self._estimate_count(abs_weight, product_weight, stock=stock)
                 if count <= 0:
+                    logger.info(
+                        f"[COUNT] v4.8: Stock depleted: {product_name} "
+                        f"(stock={stock}, vision detected but filtered)"
+                    )
                     continue
 
                 # 예상 무게 계산
@@ -201,27 +203,41 @@ class WeightBasedCountCalculator:
                     logger.debug(f"Skipping product with zero weight: {product.name}")
                     continue
 
-                # 개수 추정 (v4.3: 재고 상한 적용)
-                count = self._estimate_count(abs_weight, product.weight, stock=product.stock)
-                if count <= 0:
-                    continue
+                # v4.8: has_loadcell 필드 지원 (Vision-only 모드)
+                has_loadcell = getattr(product, 'has_loadcell', 'true')  # 기본값: true
+                if has_loadcell in ['false', 'null']:
+                    # 로드셀 없음 → 무게 검증 스킵, Vision 신뢰도만 사용
+                    logger.info(
+                        f"[COUNT] v4.8: Vision-only mode: {product.name} (has_loadcell={has_loadcell})"
+                    )
+                    count = 1  # Vision이 감지했으면 1개로 간주
+                    validated = True  # 무게 검증 스킵
+                    match_score = candidate.combined_confidence  # Vision 신뢰도만 사용
+                    expected_weight = 0.0
+                    weight_error = 0.0
+                else:
+                    # 로드셀 있음 → 기존 무게 검증 로직
+                    # 개수 추정 (v4.3: 재고 상한 적용)
+                    count = self._estimate_count(abs_weight, product.weight, stock=product.stock)
+                    if count <= 0:
+                        continue
 
-                # 예상 무게 계산
-                expected_weight = product.weight * count
-                weight_error = abs(abs_weight - expected_weight)
+                    # 예상 무게 계산
+                    expected_weight = product.weight * count
+                    weight_error = abs(abs_weight - expected_weight)
 
-                # 허용 오차: 고정 5g 사용
-                tolerance_amount = self.tolerance_grams
+                    # 허용 오차: 고정 5g 사용
+                    tolerance_amount = self.tolerance_grams
 
-                # 검증
-                validated = weight_error <= tolerance_amount
+                    # 검증
+                    validated = weight_error <= tolerance_amount
 
-                # 매칭 점수 계산
-                match_score = self._calculate_match_score(
-                    weight_error=weight_error,
-                    expected_weight=expected_weight,
-                    vision_confidence=candidate.combined_confidence,
-                )
+                    # 매칭 점수 계산
+                    match_score = self._calculate_match_score(
+                        weight_error=weight_error,
+                        expected_weight=expected_weight,
+                        vision_confidence=candidate.combined_confidence,
+                    )
 
                 estimate = CountEstimate(
                     product_id=candidate.class_id,

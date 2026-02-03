@@ -249,6 +249,7 @@ class ProductInfo:
         yolo_class_id: YOLO 모델의 클래스 ID (선택)
         yolo_class_name: YOLO 모델의 클래스 이름 (선택)
         product_idx: IF11 상품 ID (선택, 예: "P17689508539755305")
+        has_loadcell: 로드셀 사용 여부 (v4.8, "true"/"false"/"null")
     """
     product_id: int
     name: str
@@ -262,6 +263,7 @@ class ProductInfo:
     yolo_class_id: Optional[int] = None
     yolo_class_name: Optional[str] = None
     product_idx: Optional[str] = None
+    has_loadcell: str = "true"  # v4.8: 추가 (기본값: true)
 
     def to_dict(self) -> dict:
         """딕셔너리 변환."""
@@ -277,4 +279,5 @@ class ProductInfo:
             "yolo_class_id": self.yolo_class_id,
             "yolo_class_name": self.yolo_class_name,
             "product_idx": self.product_idx,
+            "has_loadcell": self.has_loadcell,  # v4.8
         }

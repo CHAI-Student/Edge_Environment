@@ -372,6 +372,7 @@ class ProductDatabase:
         price: Optional[int] = None,
         barcode: Optional[str] = None,
         stock: Optional[int] = None,
+        has_loadcell: Optional[str] = None,  # v4.8: 추가
     ) -> bool:
         """
         상품 정보 수정.
@@ -384,6 +385,7 @@ class ProductDatabase:
             price: 새 가격 (None이면 유지)
             barcode: 새 바코드 (None이면 유지)
             stock: 새 재고 (None이면 유지)
+            has_loadcell: 로드셀 사용 여부 (None이면 유지, v4.8)
 
         Returns:
             수정 성공 여부
@@ -419,6 +421,8 @@ class ProductDatabase:
             product.barcode = barcode
         if stock is not None:
             product.stock = int(stock)
+        if has_loadcell is not None:  # v4.8: 추가
+            product.has_loadcell = has_loadcell
 
         logger.info(f"Product updated: id={product_id}")
         return True
