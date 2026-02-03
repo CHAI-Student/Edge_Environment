@@ -20,6 +20,8 @@ from typing import Iterator, Optional, Tuple
 
 import numpy as np
 
+from core.config import config
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,7 +79,7 @@ class StreamingFrameExtractor:
         if self._initialized:
             return True
 
-        MAX_RETRIES = 6
+        MAX_RETRIES = 3
         RETRY_INTERVAL = 10  # seconds
 
         for attempt in range(1, MAX_RETRIES + 1):
@@ -269,6 +271,7 @@ class StreamingFrameExtractor:
         Jetson Orin Nano 최적화:
         - MJPEG 코덱 명시 (-c:v mjpeg)
         - NVDEC 하드웨어 가속 (가능한 경우)
+        - Gamma/Contrast 보정 필터 (v4.4)
         """
         cmd = ["ffmpeg"]
 
@@ -281,6 +284,11 @@ class StreamingFrameExtractor:
 
         # Input
         cmd.extend(["-i", self.video_path])
+
+        # Gamma/Contrast 보정 필터 (config에서 값 로드, v4.4)
+        gamma = config.vision.ffmpeg_gamma
+        contrast = config.vision.ffmpeg_contrast
+        cmd.extend(["-vf", f"eq=gamma={gamma}:contrast={contrast}"])
 
         # Output format: raw video to pipe
         cmd.extend([
