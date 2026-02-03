@@ -48,6 +48,7 @@ class GlobalDoorSession:
     zone_sessions: Dict[int, DoorSession] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     finalized_at: Optional[float] = None
+    last_trigger_at: Optional[float] = None  # 마지막 trigger 시각 (v4.6)
 
     @property
     def total_price(self) -> int:
@@ -79,6 +80,23 @@ class GlobalDoorSession:
     def active_zones(self) -> list:
         """활성 zone 목록 (trigger가 있는 zone)."""
         return sorted(self.zone_sessions.keys())
+
+    def is_ready_to_finalize(self, wait_seconds: float = 10.0) -> bool:
+        """
+        Finalize 준비 완료 여부 (v4.6).
+
+        마지막 trigger 후 wait_seconds 이상 지났으면 True.
+        trigger가 없으면 True (빈 세션).
+
+        Args:
+            wait_seconds: 대기 시간 (초)
+
+        Returns:
+            True if ready to finalize
+        """
+        if self.last_trigger_at is None:
+            return True  # trigger 없음 → 바로 종료 가능
+        return time.time() - self.last_trigger_at >= wait_seconds
 
     def get_zone_session(self, zone: int) -> Optional[DoorSession]:
         """특정 zone의 DoorSession 반환."""

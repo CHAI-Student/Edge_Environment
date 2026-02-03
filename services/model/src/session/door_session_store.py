@@ -482,10 +482,11 @@ class DoorSessionStore:
         # 기존 add_trigger 호출
         door_session = self.add_trigger(zone=zone, result=result)
 
-        # GlobalSession에 연동
+        # GlobalSession에 연동 + last_trigger_at 업데이트 (v4.6)
         with self._lock:
             if self._global_session is not None:
                 self._global_session.zone_sessions[zone] = door_session
+                self._global_session.last_trigger_at = time.time()  # v4.6
                 logger.debug(
                     f"Door session linked to GlobalSession: zone={zone}, "
                     f"global_id={self._global_session.global_session_id}"

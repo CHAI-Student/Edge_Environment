@@ -239,9 +239,12 @@ class ActiveProductStore:
             mapped_products.append(product_info)
             class_to_product[yolo_class_id] = product_info
 
-            # stock > 0이면 allowed_class_ids에 추가
-            if stock_qty > 0:
+            # stock > 0이면 (또는 None이면) allowed_class_ids에 추가 (v4.6)
+            if stock_qty is None or stock_qty > 0:
                 allowed_class_ids.append(yolo_class_id)
+                logger.debug(f"[ActiveProductStore] Allowed: {product_name} (stock={stock_qty})")
+            else:
+                logger.warning(f"[ActiveProductStore] Filtered out: {product_name} (stock={stock_qty})")
 
         # 전역 데이터 저장 (v4.5)
         with self._lock:

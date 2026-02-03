@@ -72,7 +72,7 @@ class ProductInfo(BaseModel):
     product_name: str = Field(..., description="상품명")
     sale_price: int = Field(..., description="판매가격")
     product_weight: Optional[str] = Field(default="0", description="상품 무게 (g), 없으면 0")
-    stock_qty: int = Field(default=0, description="재고 수량")
+    stock_qty: Optional[int] = Field(default=None, description="재고 수량 (v4.6: None이면 무제한)")
     loadcell: str = Field(default="false", description="로드셀 사용 여부")
 
 
@@ -468,15 +468,22 @@ def _handle_door_open(store: DoorSessionStore) -> dict:
     }
 
 
+# CLOSE 대기 시간 (초) - 마지막 trigger 후 이 시간이 지나야 완료 처리 (v4.6)
+CLOSE_WAIT_SECONDS = 10.0
+
+
 def _handle_door_close(
     store: DoorSessionStore,
     active_product_store: Optional[ActiveProductStore] = None,
 ) -> dict:
     """
-    CLOSE 처리 (v4.3).
+    CLOSE 처리 (v4.6 수정).
 
     session_id="CLOSE" 시 호출됩니다.
-    GlobalSession 종료 + Zone 1~5 최종 결과 반환.
+    마지막 trigger 후 CLOSE_WAIT_SECONDS 이상 지났으면 완료 처리.
+    아직 안 지났으면 in_progress 응답 (추론 대기 중).
+
+    v4.6: 추론 대기 로직 추가 (is_ready_to_finalize 체크)
     v4.4: ActiveProductStore도 정리.
 
     Args:
@@ -488,30 +495,56 @@ def _handle_door_close(
     """
     if store is None:
         return {
-            "success": False,
-            "status": "error",
+            "success": True,  # 종료 가능 (v4.6)
+            "status": "complete",
             "message": "DoorSessionStore not enabled",
-            "products": [],  # Node.js 하위 호환
+            "products": [],
             "totalPrice": 0,
             "productCount": 0,
         }
 
+    global_session = store.get_global_session()  # finalize 전에 먼저 조회 (v4.6)
+
+    # GlobalSession이 없으면 바로 종료 (v4.6)
+    if global_session is None:
+        logger.warning("[MULTI-ZONE CLOSE] No active global session to close")
+        return {
+            "success": True,  # 종료 가능 (v4.6)
+            "status": "complete",
+            "message": "No active door session to close",
+            "zones": [],
+            "products": [],
+            "totalPrice": 0,
+            "totalProductCount": 0,
+            "productCount": 0,
+            "globalSessionInfo": None,
+        }
+
+    # 아직 추론 대기 중인지 확인 (마지막 trigger 후 10초 미만) (v4.6)
+    if not global_session.is_ready_to_finalize(CLOSE_WAIT_SECONDS):
+        elapsed = time.time() - global_session.last_trigger_at
+        logger.info(
+            f"[MULTI-ZONE CLOSE] Still processing: "
+            f"last_trigger={elapsed:.1f}s ago, waiting for {CLOSE_WAIT_SECONDS}s"
+        )
+        return {
+            "success": False,  # 아직 처리 중 (v4.6)
+            "status": "in_progress",
+            "message": f"추론 완료 대기 중 ({elapsed:.1f}/{CLOSE_WAIT_SECONDS}초)",
+            "global_session_id": global_session.global_session_id,
+            "zones": [],  # 아직 반환하지 않음
+            "products": [],
+            "totalPrice": 0,
+            "productCount": 0,
+        }
+
+    # 10초 이상 지났으면 finalize 진행 (v4.6)
     global_session = store.finalize_global_session()
 
     # v4.5: ActiveProductStore 정리 (전역)
     if active_product_store is not None:
         if active_product_store.clear():
             logger.info("[MULTI-ZONE CLOSE] Cleared global products from ActiveProductStore")
-
-    if global_session is None:
-        return {
-            "success": False,
-            "status": "error",
-            "message": "No active door session to close",
-            "products": [],  # Node.js 하위 호환
-            "totalPrice": 0,
-            "productCount": 0,
-        }
 
     # Zone 1~5 최종 결과 구성
     zones = []
@@ -528,14 +561,15 @@ def _handle_door_close(
         all_products.extend(z.get("products", []))
 
     logger.info(
-        f"[MULTI-ZONE CLOSE] global_session_id={global_session.global_session_id}, "
+        f"[MULTI-ZONE CLOSE] Finalized: global_session_id={global_session.global_session_id}, "
         f"zones={len(global_session.zone_sessions)}, "
         f"total_price={total_price}, total_products={total_product_count}"
     )
 
     return {
-        "success": total_product_count > 0,
+        "success": True,  # 모든 처리 완료 → 항상 true (v4.6)
         "status": "complete",
+        "has_products": total_product_count > 0,  # 상품 유무 별도 표시 (v4.6)
         "global_session_id": global_session.global_session_id,
         "zones": zones,
         "products": all_products,  # Node.js 하위 호환
@@ -690,19 +724,25 @@ async def judge_multi_zone(
 
     # ========================================================================
     # v4.5: ActiveProductStore에 전역 상품 정보 저장
+    # v4.6: stock_qty None 처리 (None이면 999로 간주하여 허용)
     # ========================================================================
     if active_product_store is not None and request.products:
-        # 상품 정보를 dict 리스트로 변환
-        products_dict = [
-            {
+        # 상품 정보를 dict 리스트로 변환 (v4.6: stock_qty None 처리)
+        products_dict = []
+        for p in request.products:
+            # stock_qty가 None이면 999 (무제한)로 처리 (v4.6)
+            stock = p.stock_qty if p.stock_qty is not None else 999
+            products_dict.append({
                 "product_idx": p.product_idx,
                 "product_name": p.product_name,
                 "sale_price": p.sale_price,
                 "product_weight": p.product_weight or "0",
-                "stock_qty": p.stock_qty,
-            }
-            for p in request.products
-        ]
+                "stock_qty": stock,
+            })
+            logger.debug(
+                f"[MULTI-ZONE] Product: {p.product_name}, "
+                f"original_stock={p.stock_qty}, used_stock={stock}"
+            )
 
         # ActiveProductStore에 전역 상품 설정 (zone 없음)
         set_result = active_product_store.set_products(products=products_dict)
@@ -722,6 +762,10 @@ async def judge_multi_zone(
     # v4.3: Door State (OPEN/CLOSE) 처리
     # ========================================================================
     door_state = _parse_door_state(request.session_id)
+    logger.info(
+        f"[MULTI-ZONE] door_state parsed: "
+        f"session_id='{request.session_id}' -> door_state='{door_state}'"
+    )
 
     # OPEN 처리 (반복 호출됨 - 기존 세션 유지)
     if door_state == "OPEN":
