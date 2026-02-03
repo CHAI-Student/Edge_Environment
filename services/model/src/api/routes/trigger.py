@@ -1,8 +1,11 @@
 """
-Trigger API Routes (v4.2).
+Trigger API Routes (v4.3).
 
 POST /trigger - Camera에서 녹화 완료 시 호출
 즉시 YOLO 추론 실행 후 결과를 SessionStore에 저장.
+
+v4.3 변경사항:
+- add_trigger_with_global 사용: GlobalSession 연동 지원
 
 v4.2 변경사항:
 - YOLO 추론 비동기화 (asyncio.to_thread)
@@ -12,8 +15,9 @@ v4.2 변경사항:
 1. Camera Driver가 녹화 완료 후 /trigger 호출
 2. Model 서비스가 YOLO 추론 실행 (비동기)
 3. 결과를 SessionStore에 저장
-4. session_id 반환
-5. Node.js가 /api/judge/multi-zone으로 결과 폴링
+4. DoorSessionStore에 결과 추가 (GlobalSession 연동)
+5. session_id 반환
+6. Node.js가 /api/judge/multi-zone으로 결과 폴링
 """
 
 import asyncio
@@ -452,7 +456,7 @@ async def trigger_judgment(
 
         session_store.save(session_id, session_data)
 
-        # 7. DoorSessionStore에 trigger 결과 추가 (v4.1)
+        # 7. DoorSessionStore에 trigger 결과 추가 (v4.3: GlobalSession 연동)
         door_session = None
         if door_session_store is not None:
             elapsed_ms_for_trigger = (time.time() - start_time) * 1000
@@ -470,14 +474,18 @@ async def trigger_judgment(
                 is_return=delta_weight > 0,
                 processing_time_ms=elapsed_ms_for_trigger,
             )
-            door_session = door_session_store.add_trigger(
+            # v4.3: add_trigger_with_global 사용 (GlobalSession 연동)
+            door_session = door_session_store.add_trigger_with_global(
                 zone=request.zone,
                 result=trigger_result,
             )
+            # GlobalSession 활성 여부 로깅
+            is_global_active = door_session_store.is_global_session_active()
             logger.info(
                 f"[TRIGGER] Door session: {door_session.door_session_id}, "
                 f"triggers={door_session.trigger_count}, "
-                f"aggregated_products={len(door_session.aggregated_products)}"
+                f"aggregated_products={len(door_session.aggregated_products)}, "
+                f"global_session_active={is_global_active}"
             )
 
         elapsed_ms = (time.time() - start_time) * 1000

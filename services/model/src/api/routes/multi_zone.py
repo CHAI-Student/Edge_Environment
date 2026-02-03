@@ -1,14 +1,23 @@
 """
-Multi-Zone Judge API Routes (v4.0).
+Multi-Zone Judge API Routes (v4.3).
 
 POST /api/judge/multi-zone - Node.js에서 10초 간격으로 폴링
 SessionStore에서 결과를 조회하여 반환.
 
+v4.3 변경사항:
+- session_id 필드를 문 상태 신호로 재활용
+  - session_id="OPEN" → GlobalSession 시작/유지
+  - session_id="CLOSE" → GlobalSession 종료 + 최종 결과
+  - session_id=null → 폴링 (현재 상태 조회)
+- zones 배열 응답: zone 1~5 결과 분리 반환
+- GlobalDoorSession으로 전체 zone 통합 관리
+
 사용 흐름:
-1. Node.js가 데드볼트 문 열림 감지
-2. 10초 간격으로 /api/judge/multi-zone 폴링
-3. 세션 없으면 "processing" 반환
-4. 세션 있으면 "complete" + 상품 정보 반환
+1. Node.js가 데드볼트 문 열림 감지 → session_id="OPEN" 전송
+2. 문 열린 동안 session_id="OPEN" 반복 전송 (기존 세션 유지)
+3. 카메라 trigger 발생 시 각 zone에 상품 누적
+4. 문 닫힘 → session_id="CLOSE" 전송
+5. Model이 zones 배열로 zone 1~5 최종 결과 반환
 """
 
 import logging
@@ -18,7 +27,15 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Body, Depends
 from pydantic import BaseModel, Field
 
-from session import SessionStore, SessionData, ProductResult, DoorSessionStore
+from session import (
+    SessionStore,
+    SessionData,
+    ProductResult,
+    DoorSessionStore,
+    GlobalDoorSession,
+    DoorSession,
+    AggregatedProduct,
+)
 from engine import ProductDecisionEngine, EnsembleResult
 from database.product_db import ProductDatabase
 from api.deps import get_session_store, get_product_db, get_decision_engine, get_door_session_store_optional
@@ -40,6 +57,8 @@ class ProductInfo(BaseModel):
     product_name: str = Field(..., description="상품명")
     sale_price: int = Field(..., description="판매가격")
     product_weight: str = Field(..., description="상품 무게 (g)")
+    stock_qty: int = Field(default=0, description="재고 수량")
+    loadcell: str = Field(default="false", description="로드셀 사용 여부")
 
 
 class MultiZoneRequest(BaseModel):
@@ -146,6 +165,259 @@ def _parse_request(body: Any) -> MultiZoneRequest:
 
 
 # ============================================================================
+# Door State Helper Functions (v4.3)
+# ============================================================================
+
+
+def _parse_door_state(session_id: Optional[str]) -> Optional[str]:
+    """
+    session_id에서 문 상태(door_state) 추출.
+
+    Args:
+        session_id: 요청의 session_id 필드
+
+    Returns:
+        "OPEN", "CLOSE", 또는 None (일반 세션 ID인 경우)
+    """
+    if session_id is None:
+        return None
+    upper = session_id.upper()
+    if upper in ("OPEN", "CLOSE"):
+        return upper
+    return None
+
+
+def _build_zone_result(
+    global_session: GlobalDoorSession,
+    zone: int,
+    is_complete: bool,
+) -> dict:
+    """
+    Zone별 결과 구성.
+
+    Args:
+        global_session: GlobalDoorSession
+        zone: Zone 번호 (1~5)
+        is_complete: 완료 상태 여부
+
+    Returns:
+        Zone 결과 딕셔너리
+    """
+    door_session = global_session.zone_sessions.get(zone)
+
+    if door_session is None:
+        # 해당 zone에 trigger가 없는 경우
+        if is_complete:
+            return {
+                "zone": zone,
+                "products": [],
+                "totalPrice": 0,
+                "productCount": 0,
+            }
+        else:
+            return {
+                "zone": zone,
+                "interim_products": [],
+                "interimTotalPrice": 0,
+                "interimProductCount": 0,
+            }
+
+    # 활성 상품 조회 (count > 0)
+    active_products = door_session.get_active_products()
+    products_list = [
+        {
+            "productIdx": p.product_idx or str(p.product_id),
+            "productId": p.product_id,
+            "name": p.name,
+            "count": p.count,
+            "price": p.unit_price,
+            "confidence": round(p.average_confidence, 4),
+        }
+        for p in active_products
+    ]
+
+    if is_complete:
+        return {
+            "zone": zone,
+            "products": products_list,
+            "totalPrice": door_session.total_price,
+            "productCount": door_session.product_count,
+            "door_session_id": door_session.door_session_id,
+            "triggerCount": door_session.trigger_count,
+        }
+    else:
+        return {
+            "zone": zone,
+            "interim_products": products_list,
+            "interimTotalPrice": door_session.total_price,
+            "interimProductCount": door_session.product_count,
+            "triggerCount": door_session.trigger_count,
+        }
+
+
+def _handle_door_open(store: DoorSessionStore) -> dict:
+    """
+    OPEN 처리 (v4.3).
+
+    session_id="OPEN" 시 호출됩니다.
+    이미 GlobalSession이 있으면 기존 것 사용 (초기화 안함)
+
+    Args:
+        store: DoorSessionStore
+
+    Returns:
+        API 응답 딕셔너리
+    """
+    if store is None:
+        return {
+            "success": False,
+            "status": "error",
+            "message": "DoorSessionStore not enabled",
+        }
+
+    # get_or_start: 있으면 기존 것, 없으면 새로 생성
+    global_session = store.get_or_start_global_session()
+
+    # Zone 1~5 현재 상태 반환
+    zones = []
+    for zone_num in range(1, 6):
+        zone_result = _build_zone_result(global_session, zone_num, is_complete=False)
+        zones.append(zone_result)
+
+    total_interim_price = sum(z.get("interimTotalPrice", 0) for z in zones)
+    total_interim_count = sum(z.get("interimProductCount", 0) for z in zones)
+
+    logger.info(
+        f"[MULTI-ZONE OPEN] global_session_id={global_session.global_session_id}, "
+        f"total_triggers={global_session.total_trigger_count}, "
+        f"interim_price={total_interim_price}"
+    )
+
+    return {
+        "success": False,
+        "status": "in_progress",
+        "global_session_id": global_session.global_session_id,
+        "zones": zones,
+        "totalInterimPrice": total_interim_price,
+        "totalInterimProductCount": total_interim_count,
+        "globalSessionInfo": {
+            "totalTriggerCount": global_session.total_trigger_count,
+            "durationSeconds": round(global_session.duration_seconds, 1),
+            "createdAt": global_session.created_at,
+            "activeZones": global_session.active_zones,
+        },
+    }
+
+
+def _handle_door_close(store: DoorSessionStore) -> dict:
+    """
+    CLOSE 처리 (v4.3).
+
+    session_id="CLOSE" 시 호출됩니다.
+    GlobalSession 종료 + Zone 1~5 최종 결과 반환.
+
+    Args:
+        store: DoorSessionStore
+
+    Returns:
+        API 응답 딕셔너리
+    """
+    if store is None:
+        return {
+            "success": False,
+            "status": "error",
+            "message": "DoorSessionStore not enabled",
+        }
+
+    global_session = store.finalize_global_session()
+
+    if global_session is None:
+        return {
+            "success": False,
+            "status": "error",
+            "message": "No active door session to close",
+        }
+
+    # Zone 1~5 최종 결과 구성
+    zones = []
+    for zone_num in range(1, 6):
+        zone_result = _build_zone_result(global_session, zone_num, is_complete=True)
+        zones.append(zone_result)
+
+    total_price = global_session.total_price
+    total_product_count = global_session.total_product_count
+
+    logger.info(
+        f"[MULTI-ZONE CLOSE] global_session_id={global_session.global_session_id}, "
+        f"zones={len(global_session.zone_sessions)}, "
+        f"total_price={total_price}, total_products={total_product_count}"
+    )
+
+    return {
+        "success": total_product_count > 0,
+        "status": "complete",
+        "global_session_id": global_session.global_session_id,
+        "zones": zones,
+        "totalPrice": total_price,
+        "totalProductCount": total_product_count,
+        "globalSessionInfo": {
+            "totalTriggerCount": global_session.total_trigger_count,
+            "durationSeconds": round(global_session.duration_seconds, 1),
+            "createdAt": global_session.created_at,
+            "finalizedAt": global_session.finalized_at,
+            "activeZones": global_session.active_zones,
+        },
+    }
+
+
+def _handle_global_polling(store: DoorSessionStore) -> dict:
+    """
+    GlobalSession 활성 시 폴링 응답 (v4.3).
+
+    session_id=null 이고 GlobalSession이 활성인 경우.
+
+    Args:
+        store: DoorSessionStore
+
+    Returns:
+        API 응답 딕셔너리
+    """
+    global_session = store.get_global_session()
+
+    if global_session is None:
+        # 이 경우는 발생하지 않아야 함 (is_global_session_active 체크 후 호출)
+        return {
+            "success": False,
+            "status": "processing",
+            "message": "No active global session",
+        }
+
+    # Zone 1~5 현재 상태 반환
+    zones = []
+    for zone_num in range(1, 6):
+        zone_result = _build_zone_result(global_session, zone_num, is_complete=False)
+        zones.append(zone_result)
+
+    total_interim_price = sum(z.get("interimTotalPrice", 0) for z in zones)
+    total_interim_count = sum(z.get("interimProductCount", 0) for z in zones)
+
+    return {
+        "success": False,
+        "status": "in_progress",
+        "global_session_id": global_session.global_session_id,
+        "zones": zones,
+        "totalInterimPrice": total_interim_price,
+        "totalInterimProductCount": total_interim_count,
+        "globalSessionInfo": {
+            "totalTriggerCount": global_session.total_trigger_count,
+            "durationSeconds": round(global_session.duration_seconds, 1),
+            "createdAt": global_session.created_at,
+            "activeZones": global_session.active_zones,
+        },
+    }
+
+
+# ============================================================================
 # Multi-Zone Judge Endpoint
 # ============================================================================
 
@@ -159,7 +431,12 @@ async def judge_multi_zone(
     door_session_store: DoorSessionStore | None = Depends(get_door_session_store_optional),
 ):
     """
-    Node.js 폴링용 상품 판단 API.
+    Node.js 폴링용 상품 판단 API (v4.3).
+
+    v4.3 신규:
+    - session_id="OPEN" → GlobalSession 시작/유지
+    - session_id="CLOSE" → GlobalSession 종료 + zones 배열 반환
+    - session_id=null → 폴링 (GlobalSession 있으면 zones 반환)
 
     데드볼트 문 열리면 10초 간격으로 호출됩니다.
     SessionStore에서 결과를 조회하여:
@@ -168,9 +445,7 @@ async def judge_multi_zone(
 
     지원하는 요청 형식:
     1. 배열 직접 전송: [{"product_idx": "26", ...}, ...]
-    2. 객체 형식: {"session_id": "...", "products": [...], "zone": 1}
-
-    session_id가 없으면 최근 활성 세션을 자동으로 선택합니다.
+    2. 객체 형식: {"session_id": "OPEN|CLOSE|null", "products": [...], "zone": 1}
 
     Args:
         body: 요청 본문 (list 또는 dict)
@@ -178,6 +453,7 @@ async def judge_multi_zone(
 
     Returns:
         ProcessingResponse or CompleteResponse (모두 success 필드 포함)
+        v4.3: zones 배열 포함 응답
     """
     # 요청 파싱
     logger.info(f"[MULTI-ZONE REQUEST] body_type={type(body).__name__}")
@@ -197,6 +473,27 @@ async def judge_multi_zone(
         f"[MULTI-ZONE PARSED] session_id={request.session_id}, "
         f"products={len(request.products)}, zone={request.zone}"
     )
+
+    # ========================================================================
+    # v4.3: Door State (OPEN/CLOSE) 처리
+    # ========================================================================
+    door_state = _parse_door_state(request.session_id)
+
+    # OPEN 처리 (반복 호출됨 - 기존 세션 유지)
+    if door_state == "OPEN":
+        return _handle_door_open(door_session_store)
+
+    # CLOSE 처리 (최종 결과 반환)
+    if door_state == "CLOSE":
+        return _handle_door_close(door_session_store)
+
+    # 폴링 (session_id가 null이고 GlobalSession이 활성인 경우)
+    if door_session_store is not None and door_session_store.is_global_session_active():
+        return _handle_global_polling(door_session_store)
+
+    # ========================================================================
+    # 기존 로직 (v4.2 하위 호환) - zone 기반 DoorSession
+    # ========================================================================
 
     # Door Session 기반 응답 (v4.1) - DoorSessionStore가 활성화되어 있으면 우선 사용
     if door_session_store is not None and request.zone is not None:
@@ -417,6 +714,16 @@ async def judge_multi_zone(
             "processing_stage": session_data.processing_stage,
             "processing_stage_detail": session_data.processing_stage_detail,
         }
+
+    # Node.js에서 전달한 stock_qty로 재고 업데이트 (v4.3)
+    if request.products:
+        stock_data = [
+            {"product_idx": p.product_idx, "stock_qty": p.stock_qty}
+            for p in request.products
+        ]
+        stock_updated = product_db.update_stock_from_request(stock_data)
+        if stock_updated > 0:
+            logger.info(f"[MULTI-ZONE] Stock updated for {stock_updated} products")
 
     # Node.js에서 전달한 product_weight로 무게 업데이트 + 재계산
     if request.products and session_data.vision_candidates:

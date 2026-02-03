@@ -3,6 +3,9 @@ Session module for storing YOLO inference results.
 
 세션별 YOLO 추론 결과 저장 모듈.
 
+v4.3 추가:
+- GlobalDoorSession: session_id="OPEN"/"CLOSE" 기반 전체 zone 통합 관리
+
 v4.2 추가:
 - UnmatchedReturn: 무게 매칭 실패 추적
 
@@ -20,6 +23,7 @@ from .door_session import (
     UnmatchedReturn,
     generate_door_session_id,
 )
+from .global_door_session import GlobalDoorSession, generate_global_session_id
 from .door_session_store import DoorSessionStore
 from .product_aggregator import ProductAggregator
 from .yaml_persistence import YamlPersistence
@@ -38,4 +42,7 @@ __all__ = [
     "DoorSessionStore",
     "ProductAggregator",
     "YamlPersistence",
+    # Global Door Session (v4.3)
+    "GlobalDoorSession",
+    "generate_global_session_id",
 ]

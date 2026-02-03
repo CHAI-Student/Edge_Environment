@@ -1513,3 +1513,73 @@ class ProductDatabase:
 
         logger.debug(f"YOLO class_id not found for product_idx: {product_idx}")
         return None
+
+    # =========================================================================
+    # 재고(Stock) 관리 (v4.3)
+    # =========================================================================
+
+    def update_stock_from_request(self, products: List[dict]) -> int:
+        """
+        API 요청에서 받은 재고 정보 업데이트.
+
+        Node.js가 /api/judge/multi-zone으로 전송하는 stock_qty를
+        사용하여 상품 재고를 업데이트합니다.
+
+        Args:
+            products: [{"product_idx": "...", "stock_qty": N}, ...]
+
+        Returns:
+            업데이트된 상품 수
+        """
+        updated = 0
+        for item in products:
+            product_idx = item.get("product_idx")
+            stock_qty = item.get("stock_qty", 0)
+
+            if not product_idx:
+                continue
+
+            product = self.get_by_product_idx(product_idx)
+            if product is not None:
+                if product.stock != stock_qty:
+                    old_stock = product.stock
+                    product.stock = stock_qty
+                    updated += 1
+                    logger.debug(
+                        f"Stock updated: product_idx={product_idx}, "
+                        f"old={old_stock} -> new={stock_qty}"
+                    )
+            else:
+                # product_idx가 숫자 형태면 직접 product_id로 조회
+                try:
+                    product_id = int(product_idx)
+                    if product_id in self._products:
+                        product = self._products[product_id]
+                        if product.stock != stock_qty:
+                            old_stock = product.stock
+                            product.stock = stock_qty
+                            updated += 1
+                            logger.debug(
+                                f"Stock updated: product_id={product_id}, "
+                                f"old={old_stock} -> new={stock_qty}"
+                            )
+                except ValueError:
+                    pass
+
+        if updated > 0:
+            logger.info(f"[STOCK] Updated stock for {updated} products")
+
+        return updated
+
+    def get_stock(self, product_id: int) -> int:
+        """
+        상품 재고 조회.
+
+        Args:
+            product_id: 상품 ID
+
+        Returns:
+            재고 수량. 없으면 0
+        """
+        product = self.get_product(product_id)
+        return product.stock if product else 0

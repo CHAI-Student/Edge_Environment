@@ -1,8 +1,15 @@
 """
-Door Session Store (v4.2).
+Door Session Store (v4.3).
 
 Door Session을 관리하는 저장소.
 여러 번의 /trigger 호출을 하나의 Door Session으로 통합 관리합니다.
+
+v4.3 변경사항:
+- GlobalDoorSession 추가: session_id="OPEN"/"CLOSE" 기반 문 상태 관리
+- get_or_start_global_session(): OPEN 시 세션 생성/기존 유지
+- finalize_global_session(): CLOSE 시 모든 zone 종료 및 결과 반환
+- add_trigger_with_global(): trigger 시 GlobalSession 연동
+- get_or_finalize()에서 GlobalSession 활성 시 타임아웃 무시
 
 v4.2 변경사항:
 - Copy-on-Write 패턴: Lock 내에서 데이터 복사, Lock 해제 후 YAML 저장
@@ -15,10 +22,13 @@ v4.2 변경사항:
         weight_tolerance=3.0,
     )
 
-    # trigger 결과 추가
-    door_session = store.add_trigger(zone=1, result=trigger_result)
+    # GlobalSession 기반 (v4.3)
+    global_session = store.get_or_start_global_session()  # OPEN
+    door_session = store.add_trigger_with_global(zone=1, result=trigger_result)
+    result = store.finalize_global_session()  # CLOSE
 
-    # 세션 조회 (타임아웃 시 자동 finalize)
+    # 기존 방식 (v4.2 하위 호환)
+    door_session = store.add_trigger(zone=1, result=trigger_result)
     session, is_finalized = store.get_or_finalize(zone=1)
 """
 
@@ -35,6 +45,7 @@ from .door_session import (
     AggregatedProduct,
     generate_door_session_id,
 )
+from .global_door_session import GlobalDoorSession, generate_global_session_id
 from .product_aggregator import ProductAggregator
 from .yaml_persistence import YamlPersistence
 
@@ -50,10 +61,15 @@ class TimeoutCheckResult:
 
 class DoorSessionStore:
     """
-    Door Session 저장소.
+    Door Session 저장소 (v4.3).
 
     Zone별로 하나의 활성 Door Session을 관리합니다.
     여러 trigger가 발생해도 같은 Door Session에 통합됩니다.
+
+    v4.3: GlobalDoorSession 지원
+    - session_id="OPEN" → get_or_start_global_session()
+    - session_id="CLOSE" → finalize_global_session()
+    - GlobalSession 활성 시 타임아웃 무시
 
     타임아웃 시 자동으로 세션이 finalize되며,
     YAML 파일로 영속화됩니다.
@@ -79,6 +95,9 @@ class DoorSessionStore:
         """
         self._active_sessions: Dict[int, DoorSession] = {}  # zone -> session
         self._lock = threading.Lock()
+
+        # v4.3: GlobalDoorSession
+        self._global_session: Optional[GlobalDoorSession] = None
 
         self._session_timeout = session_timeout
         self._weight_tolerance = weight_tolerance
@@ -247,6 +266,7 @@ class DoorSessionStore:
         """
         세션 조회. 타임아웃 시 자동 finalize.
 
+        v4.3: GlobalSession 활성 시 타임아웃 무시
         v4.2: Copy-on-Write 패턴, 통합 타임아웃 체크
 
         Args:
@@ -262,6 +282,12 @@ class DoorSessionStore:
         is_finalized = False
 
         with self._lock:
+            # v4.3: GlobalSession 활성이면 타임아웃 체크 안함
+            if self._global_session is not None:
+                session = self._active_sessions.get(zone)
+                return session, False
+
+            # 기존 로직 (GlobalSession 없을 때만)
             session = self._active_sessions.get(zone)
 
             if session is None:
@@ -293,6 +319,138 @@ class DoorSessionStore:
             self._persistence.save(session_to_save)
 
         return return_session, is_finalized
+
+    # ========================================================================
+    # GlobalDoorSession Methods (v4.3)
+    # ========================================================================
+
+    def get_or_start_global_session(self) -> GlobalDoorSession:
+        """
+        GlobalSession 조회 또는 시작 (v4.3).
+
+        session_id="OPEN" 시 호출됩니다.
+
+        핵심: 이미 활성 GlobalSession이 있으면 기존 것 반환 (초기화 안함)
+        없으면 새로 생성합니다.
+
+        Returns:
+            GlobalDoorSession (기존 또는 새로 생성된 것)
+        """
+        with self._lock:
+            if self._global_session is not None:
+                # 이미 활성 세션 있음 → 기존 것 반환
+                logger.debug(
+                    f"GlobalSession already active: {self._global_session.global_session_id}"
+                )
+                return self._global_session
+
+            # 새 세션 생성
+            self._global_session = GlobalDoorSession(
+                global_session_id=generate_global_session_id(),
+            )
+            logger.info(
+                f"GlobalSession started: {self._global_session.global_session_id}"
+            )
+            return self._global_session
+
+    def finalize_global_session(self) -> Optional[GlobalDoorSession]:
+        """
+        GlobalSession 종료 (v4.3).
+
+        session_id="CLOSE" 시 호출됩니다.
+        모든 활성 zone의 DoorSession을 finalize하고 결과를 반환합니다.
+
+        Returns:
+            종료된 GlobalDoorSession 또는 None (활성 세션이 없는 경우)
+        """
+        sessions_to_save: List[DoorSession] = []
+
+        with self._lock:
+            if self._global_session is None:
+                logger.warning("finalize_global_session called but no active session")
+                return None
+
+            # 모든 활성 zone 세션 finalize
+            for zone in list(self._active_sessions.keys()):
+                session = self._active_sessions[zone]
+                self._finalize_session_in_memory(session)
+                self._global_session.zone_sessions[zone] = session
+                sessions_to_save.append(copy.deepcopy(session))
+
+            self._global_session.status = "complete"
+            self._global_session.finalized_at = time.time()
+
+            result = self._global_session
+            self._global_session = None
+
+            logger.info(
+                f"GlobalSession finalized: {result.global_session_id}, "
+                f"zones={len(result.zone_sessions)}, "
+                f"total_price={result.total_price}, "
+                f"total_products={result.total_product_count}"
+            )
+
+        # Lock 해제 후 YAML 저장 (I/O 작업)
+        for session in sessions_to_save:
+            self._persistence.save(session)
+
+        return result
+
+    def get_global_session(self) -> Optional[GlobalDoorSession]:
+        """
+        현재 활성 GlobalSession 반환 (v4.3).
+
+        Returns:
+            GlobalDoorSession 또는 None
+        """
+        with self._lock:
+            return self._global_session
+
+    def is_global_session_active(self) -> bool:
+        """
+        GlobalSession 활성 여부 (v4.3).
+
+        Returns:
+            True if GlobalSession is active
+        """
+        with self._lock:
+            return self._global_session is not None
+
+    def add_trigger_with_global(
+        self,
+        zone: int,
+        result: TriggerResult,
+    ) -> DoorSession:
+        """
+        Trigger 결과 추가 + GlobalSession 연동 (v4.3).
+
+        기존 add_trigger를 호출하고,
+        GlobalSession이 활성이면 해당 zone의 DoorSession을 연동합니다.
+
+        Args:
+            zone: Zone 번호
+            result: TriggerResult
+
+        Returns:
+            업데이트된 DoorSession
+        """
+        # 기존 add_trigger 호출
+        door_session = self.add_trigger(zone=zone, result=result)
+
+        # GlobalSession에 연동
+        with self._lock:
+            if self._global_session is not None:
+                self._global_session.zone_sessions[zone] = door_session
+                logger.debug(
+                    f"Door session linked to GlobalSession: zone={zone}, "
+                    f"global_id={self._global_session.global_session_id}"
+                )
+
+        return door_session
+
+    # ========================================================================
+    # Original Methods (continued)
+    # ========================================================================
 
     def get_session(self, zone: int) -> Optional[DoorSession]:
         """
@@ -439,6 +597,8 @@ class DoorSessionStore:
         """
         저장소 통계 반환.
 
+        v4.3: GlobalSession 정보 추가
+
         Returns:
             통계 정보
         """
@@ -446,12 +606,27 @@ class DoorSessionStore:
             active_zones = list(self._active_sessions.keys())
             persistence_stats = self._persistence.get_stats()
 
+            # v4.3: GlobalSession 정보
+            global_session_info = None
+            if self._global_session is not None:
+                global_session_info = {
+                    "global_session_id": self._global_session.global_session_id,
+                    "status": self._global_session.status,
+                    "zone_count": len(self._global_session.zone_sessions),
+                    "active_zones": self._global_session.active_zones,
+                    "total_trigger_count": self._global_session.total_trigger_count,
+                    "total_price": self._global_session.total_price,
+                    "duration_seconds": round(self._global_session.duration_seconds, 1),
+                }
+
             return {
                 "active_sessions": len(self._active_sessions),
                 "active_zones": active_zones,
                 "session_timeout": self._session_timeout,
                 "weight_tolerance": self._weight_tolerance,
                 "max_duration": self._max_duration,
+                "global_session_active": self._global_session is not None,
+                "global_session": global_session_info,
                 **persistence_stats,
             }
 

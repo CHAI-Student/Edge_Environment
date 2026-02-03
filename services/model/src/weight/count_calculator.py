@@ -45,6 +45,7 @@ class WeightBasedCountCalculator:
         tolerance_grams: float = 5.0,
         max_count: int = 10,
         min_weight_change: float = 5.0,
+        use_stock_limit: bool = True,
     ):
         """
         개수 계산기 초기화.
@@ -55,12 +56,14 @@ class WeightBasedCountCalculator:
             tolerance_grams: 고정 허용 오차 (기본값 5g)
             max_count: 최대 개수 제한 (기본값 10)
             min_weight_change: 최소 무게 변화량 (기본값 5g)
+            use_stock_limit: 재고 상한 사용 여부 (기본값 True, v4.3)
         """
         self.product_db = product_db
         self.tolerance_percent = tolerance_percent
         self.tolerance_grams = tolerance_grams
         self.max_count = max_count
         self.min_weight_change = min_weight_change
+        self.use_stock_limit = use_stock_limit
 
     def calculate(
         self,
@@ -101,12 +104,20 @@ class WeightBasedCountCalculator:
                 logger.warning(f"Product not found for class_id: {candidate.class_id}")
                 continue
 
+            # v4.3: 재고 0인 상품 필터링
+            if self.use_stock_limit and product.stock <= 0:
+                logger.info(
+                    f"[COUNT] 재고 0 필터링: {product.name} "
+                    f"(class_id={candidate.class_id}, stock={product.stock})"
+                )
+                continue
+
             if product.weight <= 0:
                 logger.debug(f"Skipping product with zero weight: {product.name}")
                 continue
 
-            # 개수 추정
-            count = self._estimate_count(abs_weight, product.weight)
+            # 개수 추정 (v4.3: 재고 상한 적용)
+            count = self._estimate_count(abs_weight, product.weight, stock=product.stock)
             if count <= 0:
                 continue
 
@@ -159,16 +170,22 @@ class WeightBasedCountCalculator:
 
         return estimates
 
-    def _estimate_count(self, abs_weight: float, unit_weight: float) -> int:
+    def _estimate_count(
+        self,
+        abs_weight: float,
+        unit_weight: float,
+        stock: int = 0,
+    ) -> int:
         """
-        수량 추정 (반올림).
+        수량 추정 (반올림), 재고 상한 적용 (v4.3).
 
         Args:
             abs_weight: 절대 무게 변화량 (g)
             unit_weight: 단위 무게 (g)
+            stock: 재고 수량 (v4.3)
 
         Returns:
-            추정 개수 (1 ~ max_count)
+            추정 개수 (1 ~ min(max_count, stock))
         """
         if unit_weight <= 0:
             return 0
@@ -179,7 +196,12 @@ class WeightBasedCountCalculator:
         if count < 1:
             return 0
         if count > self.max_count:
-            return self.max_count
+            count = self.max_count
+
+        # v4.3: 재고 상한 적용
+        if self.use_stock_limit and stock > 0 and count > stock:
+            logger.info(f"[COUNT] 재고 상한 적용: estimated={count} -> stock={stock}")
+            count = stock
 
         return count
 
@@ -258,11 +280,17 @@ class WeightBasedCountCalculator:
         if abs_weight < self.min_weight_change:
             return None
 
-        # 후보군에서 상품 정보 추출
+        # 후보군에서 상품 정보 추출 (v4.3: 재고 0 필터링)
         product_candidates = []
         for candidate in candidates[:5]:  # 상위 5개만 고려
             prod = self.product_db.get_product(candidate.class_id)
             if prod and prod.weight > 0:
+                # v4.3: 재고 0인 상품 필터링
+                if self.use_stock_limit and prod.stock <= 0:
+                    logger.debug(
+                        f"[COMBINATION] 재고 0 필터링: {prod.name} (stock={prod.stock})"
+                    )
+                    continue
                 product_candidates.append((candidate, prod))
 
         if not product_candidates:
@@ -275,8 +303,11 @@ class WeightBasedCountCalculator:
         # 전략 2 & 3: 서로 다른 상품 조합 (다양한 개수)
         if len(product_candidates) >= 2:
             for (cand1, prod1), (cand2, prod2) in combinations(product_candidates, 2):
-                # 각 상품 1~3개씩 조합 시도
-                for count1, count2 in iterproduct(range(1, 4), range(1, 4)):
+                # v4.3: 재고 상한 적용
+                max_count1 = min(3, prod1.stock) if self.use_stock_limit and prod1.stock > 0 else 3
+                max_count2 = min(3, prod2.stock) if self.use_stock_limit and prod2.stock > 0 else 3
+                # 각 상품 1~재고수량(최대3)개씩 조합 시도
+                for count1, count2 in iterproduct(range(1, max_count1 + 1), range(1, max_count2 + 1)):
                     combined_weight = prod1.weight * count1 + prod2.weight * count2
                     error = abs(abs_weight - combined_weight)
                     tolerance = self.tolerance_grams  # 고정 5g
