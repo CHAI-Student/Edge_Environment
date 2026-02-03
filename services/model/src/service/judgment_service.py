@@ -24,6 +24,7 @@ class ProductInfo:
     product_name: str
     sale_price: int
     product_weight: str
+    stock_qty: int = 0
 
 
 @dataclass
@@ -127,17 +128,16 @@ class JudgmentService:
     def judge(self, input_data: JudgmentInput) -> JudgmentResult:
         """
         상품 판단 수행.
-
-        Args:
-            input_data: 판단 요청 입력
-
-        Returns:
-            JudgmentResult: 판단 결과
         """
         logger.info(
             f"[JUDGMENT] session_id={input_data.session_id}, "
             f"zone={input_data.zone}, products={len(input_data.products)}"
         )
+
+        # [추가] 판단 시작 전, Node.js에서 받은 최신 무게 및 재고 정보를 DB에 즉시 반영
+        # 이 과정이 선행되어야 로드셀 폴백 시에도 최신 무게를 사용하고, 재고 필터링을 통과할 수 있습니다.
+        if input_data.products:
+            self._sync_product_database(input_data.products)
 
         # session_id 유효성 검사
         is_valid_session_id = (
@@ -162,6 +162,29 @@ class JudgmentService:
             is_valid_session_id,
             device_id,
         )
+
+    def _sync_product_database(self, products: List[ProductInfo]) -> None:
+        """[추가] Node.js로부터 받은 실시간 상품 정보를 DB에 동기화."""
+        for p in products:
+            class_id = self._product_db.get_yolo_class_id_by_product_idx(p.product_idx)
+            if class_id is not None:
+                try:
+                    # 1. 무게 업데이트
+                    weight = float(p.product_weight) if p.product_weight else 0.0
+                    if weight > 0:
+                        self._product_db.update_weight(class_id, weight)
+                    
+                    # 2. 재고 및 가격 업데이트
+                    # update_product를 통해 DB 내의 stock 값을 0보다 크게 만들어 필터링 방지
+                    self._product_db.update_product(
+                        product_id=class_id,
+                        price=p.sale_price,
+                        stock=p.stock_qty,
+                        weight=weight if weight > 0 else None
+                    )
+                    logger.debug(f"[SYNC] Product {p.product_idx} (ID:{class_id}) updated: weight={weight}g, stock={p.stock_qty}")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"[SYNC] Failed to update product {p.product_idx}: {e}")
 
     def _process_door_session(
         self,
