@@ -33,7 +33,7 @@ class WeightBasedCountCalculator:
 
     Attributes:
         product_db: 상품 데이터베이스
-        tolerance_percent: 기본 허용 오차 비율 (0.0 ~ 1.0)
+        tolerance_percent: 기본 허용 오차 비율 (8%)
         max_count: 최대 개수 제한
         min_weight_change: 최소 무게 변화량 (g)
     """
@@ -41,7 +41,7 @@ class WeightBasedCountCalculator:
     def __init__(
         self,
         product_db: ProductDatabase,
-        tolerance_percent: float = 0.10,
+        tolerance_percent: float = 0.08,
         tolerance_grams: float = 5.0,
         max_count: int = 10,
         min_weight_change: float = 5.0,
@@ -52,7 +52,7 @@ class WeightBasedCountCalculator:
 
         Args:
             product_db: 상품 데이터베이스
-            tolerance_percent: 기본 허용 오차 비율 (기본값 10%, 사용 안함)
+            tolerance_percent: 기본 허용 오차 비율 (기본값 8%)
             tolerance_grams: 고정 허용 오차 (기본값 5g)
             max_count: 최대 개수 제한 (기본값 10)
             min_weight_change: 최소 무게 변화량 (기본값 5g)

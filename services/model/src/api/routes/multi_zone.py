@@ -25,7 +25,7 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, TYPE_CHECKING
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -39,9 +39,18 @@ from session import (
     DoorSession,
     AggregatedProduct,
 )
+from session.active_product_store import ActiveProductStore
 from engine import ProductDecisionEngine, EnsembleResult
 from database.product_db import ProductDatabase
-from api.deps import get_session_store, get_product_db, get_decision_engine, get_door_session_store_optional
+from service.trigger_service import TriggerService
+from api.deps import (
+    get_session_store,
+    get_product_db,
+    get_decision_engine,
+    get_door_session_store_optional,
+    get_active_product_store_optional,
+    get_trigger_service_optional,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -456,15 +465,20 @@ def _handle_door_open(store: DoorSessionStore) -> dict:
     }
 
 
-def _handle_door_close(store: DoorSessionStore) -> dict:
+def _handle_door_close(
+    store: DoorSessionStore,
+    active_product_store: Optional[ActiveProductStore] = None,
+) -> dict:
     """
     CLOSE 처리 (v4.3).
 
     session_id="CLOSE" 시 호출됩니다.
     GlobalSession 종료 + Zone 1~5 최종 결과 반환.
+    v4.4: ActiveProductStore도 정리.
 
     Args:
         store: DoorSessionStore
+        active_product_store: ActiveProductStore (v4.4, 선택)
 
     Returns:
         API 응답 딕셔너리
@@ -480,6 +494,12 @@ def _handle_door_close(store: DoorSessionStore) -> dict:
         }
 
     global_session = store.finalize_global_session()
+
+    # v4.4: ActiveProductStore 정리 (모든 zone)
+    if active_product_store is not None:
+        cleared_count = active_product_store.clear_all()
+        if cleared_count > 0:
+            logger.info(f"[MULTI-ZONE CLOSE] Cleared {cleared_count} zones from ActiveProductStore")
 
     if global_session is None:
         return {
@@ -597,6 +617,8 @@ async def judge_multi_zone(
     product_db: ProductDatabase = Depends(get_product_db),
     engine: ProductDecisionEngine = Depends(get_decision_engine),
     door_session_store: DoorSessionStore | None = Depends(get_door_session_store_optional),
+    active_product_store: ActiveProductStore | None = Depends(get_active_product_store_optional),
+    trigger_service: TriggerService | None = Depends(get_trigger_service_optional),
 ):
     """
     Node.js 폴링용 상품 판단 API (v4.3).
@@ -666,6 +688,54 @@ async def judge_multi_zone(
         _log_product_warnings(request.products)
 
     # ========================================================================
+    # v4.4: ActiveProductStore에 상품 정보 저장 + Pending Trigger 처리
+    # ========================================================================
+    if active_product_store is not None and request.products and request.zone is not None:
+        # 상품 정보를 dict 리스트로 변환
+        products_dict = [
+            {
+                "product_idx": p.product_idx,
+                "product_name": p.product_name,
+                "sale_price": p.sale_price,
+                "product_weight": p.product_weight,
+                "stock_qty": p.stock_qty,
+            }
+            for p in request.products
+        ]
+
+        # ActiveProductStore에 상품 설정
+        set_result = active_product_store.set_products(
+            zone=request.zone,
+            products=products_dict,
+        )
+
+        logger.info(
+            f"[MULTI-ZONE] zone={request.zone}: "
+            f"set_products result: {set_result.mapped_products}/{set_result.total_products} mapped, "
+            f"{set_result.allowed_products} allowed (stock > 0)"
+        )
+
+        if set_result.unmapped_names:
+            logger.warning(
+                f"[MULTI-ZONE] zone={request.zone}: "
+                f"unmapped products: {set_result.unmapped_names}"
+            )
+
+        # Pending trigger 처리 (products 도착 후 대기 중인 trigger 실행)
+        if trigger_service is not None and trigger_service.has_pending_trigger(request.zone):
+            logger.info(
+                f"[MULTI-ZONE] zone={request.zone}: "
+                f"Processing pending trigger after products arrived"
+            )
+            pending_result = await trigger_service.process_pending_trigger(request.zone)
+            if pending_result is not None:
+                logger.info(
+                    f"[MULTI-ZONE] zone={request.zone}: "
+                    f"Pending trigger processed: success={pending_result.success}, "
+                    f"session_id={pending_result.session_id}"
+                )
+
+    # ========================================================================
     # v4.3: Door State (OPEN/CLOSE) 처리
     # ========================================================================
     door_state = _parse_door_state(request.session_id)
@@ -678,7 +748,7 @@ async def judge_multi_zone(
 
     # CLOSE 처리 (최종 결과 반환)
     if door_state == "CLOSE":
-        response = _handle_door_close(door_session_store)
+        response = _handle_door_close(door_session_store, active_product_store)
         _log_request_to_file(request, response)
         return response
 

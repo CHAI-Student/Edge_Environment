@@ -109,8 +109,8 @@ class WeightModel(BaseModel):
     """Weight verification configuration settings."""
 
     tolerance_percent: float = Field(
-        default=0.10,
-        description="Weight tolerance percentage (0.10 = 10%), 레거시 용도",
+        default=0.08,
+        description="Weight tolerance percentage (0.08 = 8%)",
     )
     tolerance_grams: float = Field(
         default=5.0,

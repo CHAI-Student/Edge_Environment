@@ -279,34 +279,25 @@ class ProductDatabase:
         product = self.get_product(product_id)
         return product.category if product else "unknown"
 
-    def get_tolerance(self, product_id: int, default: float = 0.10) -> float:
+    def get_tolerance(self, product_id: int, default: float = 0.08) -> float:
         """
-        상품 카테고리별 허용 오차 조회.
+        무게 허용 오차 조회.
+
+        로드셀 정확도가 높으므로 전체 8%로 통일.
 
         Args:
-            product_id: 상품 ID
-            default: 기본 허용 오차
+            product_id: 상품 ID (미사용, 하위 호환)
+            default: 기본 허용 오차 (8%)
 
         Returns:
-            허용 오차 (0.0 ~ 1.0)
+            허용 오차 (0.08 = 8%)
         """
-        category = self.get_category(product_id)
-        tolerances = {
-            "beverage": 0.05,   # 5%
-            "snack": 0.10,      # 10%
-            "candy": 0.10,      # 10%
-            "food": 0.08,       # 8%
-            "dairy": 0.07,      # 7%
-            "health": 0.10,     # 10%
-            "frozen": 0.15,     # 15% (결빙으로 인한 무게 변동)
-            "etc": 0.15,        # 15%
-        }
-        return tolerances.get(category, default)
+        return default
 
     def search_by_weight(
         self,
         target_weight: float,
-        tolerance: float = 0.15,
+        tolerance: float = 0.08,
         exclude_hand: bool = True,
     ) -> List[ProductInfo]:
         """
@@ -314,7 +305,7 @@ class ProductDatabase:
 
         Args:
             target_weight: 목표 무게 (g)
-            tolerance: 허용 오차 비율 (0.0 ~ 1.0)
+            tolerance: 허용 오차 비율 (기본 8%)
             exclude_hand: hand (class_id=0) 제외 여부
 
         Returns:

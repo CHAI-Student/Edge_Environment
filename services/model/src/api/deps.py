@@ -21,10 +21,13 @@ import logging
 from typing import Optional
 
 from session import SessionStore, DoorSessionStore
+from session.active_product_store import ActiveProductStore
+from session.pending_trigger_store import PendingTriggerStore
 from vision import YOLOWrapper
 from database.product_db import ProductDatabase
 from engine import ProductDecisionEngine
 from video import VideoProcessor
+from service.trigger_service import TriggerService
 from container import ServiceContainer
 from container.service_container import get_global_container, set_global_container, reset_global_container
 
@@ -38,6 +41,8 @@ def init_dependencies(
     product_db: ProductDatabase,
     video_processor: Optional[VideoProcessor] = None,
     door_session_store: Optional[DoorSessionStore] = None,
+    active_product_store: Optional[ActiveProductStore] = None,
+    pending_trigger_store: Optional[PendingTriggerStore] = None,
 ) -> ServiceContainer:
     """
     의존성 초기화 (lifespan에서 호출).
@@ -49,6 +54,8 @@ def init_dependencies(
         product_db: ProductDatabase 인스턴스
         video_processor: VideoProcessor 인스턴스 (선택)
         door_session_store: DoorSessionStore 인스턴스 (선택, v4.1)
+        active_product_store: ActiveProductStore 인스턴스 (선택, v4.4)
+        pending_trigger_store: PendingTriggerStore 인스턴스 (선택, v4.4)
 
     Returns:
         초기화된 ServiceContainer 인스턴스
@@ -61,6 +68,8 @@ def init_dependencies(
         product_db=product_db,
         video_processor=video_processor,
         door_session_store=door_session_store,
+        active_product_store=active_product_store,
+        pending_trigger_store=pending_trigger_store,
     )
     return container
 
@@ -105,6 +114,21 @@ def get_door_session_store() -> DoorSessionStore:
     return get_global_container().get_door_session_store()
 
 
+def get_active_product_store() -> ActiveProductStore:
+    """ActiveProductStore 인스턴스 반환 (v4.4)."""
+    return get_global_container().get_active_product_store()
+
+
+def get_pending_trigger_store() -> PendingTriggerStore:
+    """PendingTriggerStore 인스턴스 반환 (v4.4)."""
+    return get_global_container().get_pending_trigger_store()
+
+
+def get_trigger_service() -> TriggerService:
+    """TriggerService 인스턴스 반환 (v4.4)."""
+    return get_global_container().get_trigger_service()
+
+
 # ============================================================================
 # Optional Getters (may return None)
 # ============================================================================
@@ -138,6 +162,21 @@ def get_video_processor_optional() -> Optional[VideoProcessor]:
 def get_door_session_store_optional() -> Optional[DoorSessionStore]:
     """DoorSessionStore 인스턴스 반환 (None 허용)."""
     return get_global_container().get_door_session_store_optional()
+
+
+def get_active_product_store_optional() -> Optional[ActiveProductStore]:
+    """ActiveProductStore 인스턴스 반환 (None 허용, v4.4)."""
+    return get_global_container().get_active_product_store_optional()
+
+
+def get_pending_trigger_store_optional() -> Optional[PendingTriggerStore]:
+    """PendingTriggerStore 인스턴스 반환 (None 허용, v4.4)."""
+    return get_global_container().get_pending_trigger_store_optional()
+
+
+def get_trigger_service_optional() -> Optional[TriggerService]:
+    """TriggerService 인스턴스 반환 (None 허용, v4.4)."""
+    return get_global_container().get_trigger_service_optional()
 
 
 # ============================================================================

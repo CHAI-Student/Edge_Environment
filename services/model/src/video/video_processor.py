@@ -204,6 +204,7 @@ class VideoProcessor:
         side_path: Optional[str] = None,
         top_weight: float = 0.5,
         side_weight: float = 0.5,
+        allowed_class_ids: Optional[List[int]] = None,
     ) -> VideoProcessingResult:
         """
         Process top and side camera videos.
@@ -213,6 +214,9 @@ class VideoProcessor:
             side_path: Path to side camera AVI file (optional)
             top_weight: Weight for top camera in ensemble (default: 0.5)
             side_weight: Weight for side camera in ensemble (default: 0.5)
+            allowed_class_ids: 허용된 YOLO 클래스 ID 리스트 (v4.4)
+                               None이면 모든 클래스 탐지
+                               리스트가 있으면 해당 클래스만 탐지
 
         Returns:
             VideoProcessingResult with combined voting results
@@ -223,6 +227,8 @@ class VideoProcessor:
         logger.info(f"[VIDEO] ========== 비디오 처리 시작 ==========")
         logger.info(f"[VIDEO] top_path={top_path}")
         logger.info(f"[VIDEO] side_path={side_path}")
+        if allowed_class_ids is not None:
+            logger.info(f"[VIDEO] allowed_class_ids={len(allowed_class_ids)} classes")
 
         top_ensemble = VotingEnsemble(min_vote_ratio=self.min_vote_ratio)
         side_ensemble = VotingEnsemble(min_vote_ratio=self.min_vote_ratio)
@@ -230,7 +236,9 @@ class VideoProcessor:
         # Process top camera video
         if top_path:
             logger.info(f"[VIDEO] Top 카메라 처리 시작...")
-            top_stats = self._process_single_video(top_path, top_ensemble, "top")
+            top_stats = self._process_single_video(
+                top_path, top_ensemble, "top", allowed_class_ids
+            )
             stats.top_frames = top_stats["frames"]
             stats.top_detections = top_stats["detections"]
             stats.motion_filtered_classes += top_stats.get("motion_filtered", 0)
@@ -242,7 +250,9 @@ class VideoProcessor:
         # Process side camera video
         if side_path:
             logger.info(f"[VIDEO] Side 카메라 처리 시작...")
-            side_stats = self._process_single_video(side_path, side_ensemble, "side")
+            side_stats = self._process_single_video(
+                side_path, side_ensemble, "side", allowed_class_ids
+            )
             stats.side_frames = side_stats["frames"]
             stats.side_detections = side_stats["detections"]
             stats.motion_filtered_classes += side_stats.get("motion_filtered", 0)
@@ -293,6 +303,7 @@ class VideoProcessor:
         video_path: str,
         ensemble: VotingEnsemble,
         camera_type: str = "unknown",
+        allowed_class_ids: Optional[List[int]] = None,
     ) -> dict:
         """
         Process a single video file with motion-based filtering.
@@ -310,6 +321,7 @@ class VideoProcessor:
             video_path: Path to video file
             ensemble: VotingEnsemble to accumulate votes
             camera_type: Camera type for logging ("top" or "side")
+            allowed_class_ids: 허용된 YOLO 클래스 ID 리스트 (v4.4)
 
         Returns:
             Statistics dict with frames, detections, and motion_filtered count
@@ -337,8 +349,8 @@ class VideoProcessor:
         for frame in extractor:
             frame_count += 1
 
-            # YOLO inference (single frame)
-            detections = self.yolo.detect(frame)
+            # YOLO inference (single frame) - v4.4: allowed_class_ids 전달
+            detections = self.yolo.detect(frame, allowed_class_ids=allowed_class_ids)
 
             # Process detections
             for det in detections:
