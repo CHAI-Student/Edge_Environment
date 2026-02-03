@@ -92,7 +92,6 @@ class ProductDecisionEngine:
 
         WeightBasedCountCalculator = _get_count_calculator()
         self.count_calculator = WeightBasedCountCalculator(
-            product_db=self.product_db,
             tolerance_percent=self.tolerance_percent,
             tolerance_grams=config.weight.tolerance_grams,  # 고정 허용 오차 (기본 5g)
         )
@@ -381,21 +380,15 @@ class ProductDecisionEngine:
                     f"from active_products (Node.js latest weights)"
                 )
 
-        # Fallback: ProductDatabase에서 조회
+        # v4.9: ProductDatabase fallback 비활성화
+        # Node.js에서 active_products를 받지 못한 상태에서 ProductDB fallback 사용 시
+        # 잘못된 상품 정보(stock 값 등)로 판단될 수 있음 → no_detection 반환
         if not candidate_products:
-            all_products = self.product_db.get_all_products()
-            # has_loadcell 필터링
-            candidate_products = [
-                p for p in all_products
-                if p.weight > 0 and getattr(p, 'has_loadcell', 'true') not in ['false', 'null']
-            ]
-            if not candidate_products:
-                logger.warning("No loadcell-enabled products for fallback")
-                return self._create_no_detection_result(delta_weight, timestamp)
-            logger.info(
-                f"[LOADCELL-ONLY] v4.8: Using {len(candidate_products)} products "
-                f"from ProductDB (fallback)"
+            logger.warning(
+                "[LOADCELL-ONLY] v4.9: No active_products available, "
+                "ProductDB fallback disabled → no_detection"
             )
+            return self._create_no_detection_result(delta_weight, timestamp)
 
         # 기존 로직: 가장 가까운 무게 찾기
         best_match = None

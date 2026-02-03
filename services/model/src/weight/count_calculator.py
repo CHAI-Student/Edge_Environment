@@ -9,13 +9,16 @@ Weight-Based Count Calculator.
 3. 허용 오차 내 검증 (tolerance_percent)
 4. match_score 계산으로 최적 후보 선별
 
+v4.10 변경사항:
+- ProductDatabase 완전 제거 - Node.js active_products만 사용
+
 v4.7 변경사항:
 - active_products 파라미터 추가: ActiveProductStore의 상품 정보 우선 사용
 - stock 필터링 비활성화 가능: use_stock_limit=False로 stock=0 필터링 스킵
 
 사용 예시:
-    calculator = WeightBasedCountCalculator(product_db)
-    estimates = calculator.calculate(candidates, delta_weight=-365.0)
+    calculator = WeightBasedCountCalculator()
+    estimates = calculator.calculate(candidates, delta_weight=-365.0, active_products=products)
     best = estimates[0]  # 가장 높은 match_score
 """
 
@@ -23,7 +26,6 @@ from typing import Any, Dict, List, Optional
 import logging
 
 from engine.models import EnsembleResult, CountEstimate
-from database.product_db import ProductDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +34,12 @@ class WeightBasedCountCalculator:
     """
     무게 기반 개수 계산기.
 
+    v4.10: ProductDatabase 제거 - Node.js active_products만 사용
+
     Vision 후보군의 각 상품에 대해 무게 변화량으로 개수를 추정하고,
     허용 오차 내에서 검증합니다.
 
     Attributes:
-        product_db: 상품 데이터베이스
         tolerance_percent: 기본 허용 오차 비율 (8%)
         max_count: 최대 개수 제한
         min_weight_change: 최소 무게 변화량 (g)
@@ -44,7 +47,6 @@ class WeightBasedCountCalculator:
 
     def __init__(
         self,
-        product_db: ProductDatabase,
         tolerance_percent: float = 0.08,
         tolerance_grams: float = 5.0,
         max_count: int = 10,
@@ -54,15 +56,15 @@ class WeightBasedCountCalculator:
         """
         개수 계산기 초기화.
 
+        v4.10: ProductDatabase 제거 - Node.js active_products만 사용
+
         Args:
-            product_db: 상품 데이터베이스
             tolerance_percent: 기본 허용 오차 비율 (기본값 8%)
             tolerance_grams: 고정 허용 오차 (기본값 5g)
             max_count: 최대 개수 제한 (기본값 10)
             min_weight_change: 최소 무게 변화량 (기본값 5g)
             use_stock_limit: 재고 상한 사용 여부 (기본값 True, v4.3)
         """
-        self.product_db = product_db
         self.tolerance_percent = tolerance_percent
         self.tolerance_grams = tolerance_grams
         self.max_count = max_count
@@ -184,80 +186,12 @@ class WeightBasedCountCalculator:
                     f"unit_price={unit_price}원"
                 )
             else:
-                # Fallback: ProductDatabase에서 조회 (기존 로직)
-                # Note: active_products가 없으므로 Node.js로부터 최신 재고 정보를 받지 못한 상태
-                product = self.product_db.get_product(candidate.class_id)
-
-                if product is None:
-                    logger.warning(f"Product not found for class_id: {candidate.class_id}")
-                    continue
-
-                # v4.9: Fallback 경로에서는 stock 필터링을 스킵
-                # ProductDatabase의 stock은 초기값 또는 오래된 값일 수 있어 신뢰할 수 없음
-                # active_products가 없을 때는 Vision + 무게만으로 판단
-                if product.stock <= 0:
-                    logger.info(
-                        f"[COUNT] Fallback 경로: stock 필터링 스킵 (active_products 없음) - "
-                        f"{product.name} (class_id={candidate.class_id}, db_stock={product.stock})"
-                    )
-
-                if product.weight <= 0:
-                    logger.debug(f"Skipping product with zero weight: {product.name}")
-                    continue
-
-                # v4.8: has_loadcell 필드 지원 (Vision-only 모드)
-                has_loadcell = getattr(product, 'has_loadcell', 'true')  # 기본값: true
-                if has_loadcell in ['false', 'null']:
-                    # 로드셀 없음 → 무게 검증 스킵, Vision 신뢰도만 사용
-                    logger.info(
-                        f"[COUNT] v4.8: Vision-only mode: {product.name} (has_loadcell={has_loadcell})"
-                    )
-                    count = 1  # Vision이 감지했으면 1개로 간주
-                    validated = True  # 무게 검증 스킵
-                    match_score = candidate.combined_confidence  # Vision 신뢰도만 사용
-                    expected_weight = 0.0
-                    weight_error = 0.0
-                else:
-                    # 로드셀 있음 → 기존 무게 검증 로직
-                    # 개수 추정 (v4.3: 재고 상한 적용)
-                    count = self._estimate_count(abs_weight, product.weight, stock=product.stock)
-                    if count <= 0:
-                        continue
-
-                    # 예상 무게 계산
-                    expected_weight = product.weight * count
-                    weight_error = abs(abs_weight - expected_weight)
-
-                    # 허용 오차: 고정 5g 사용
-                    tolerance_amount = self.tolerance_grams
-
-                    # 검증
-                    validated = weight_error <= tolerance_amount
-
-                    # 매칭 점수 계산
-                    match_score = self._calculate_match_score(
-                        weight_error=weight_error,
-                        expected_weight=expected_weight,
-                        vision_confidence=candidate.combined_confidence,
-                    )
-
-                estimate = CountEstimate(
-                    product_id=candidate.class_id,
-                    product_name=product.name,
-                    count=count,
-                    unit_weight=product.weight,
-                    expected_weight=expected_weight,
-                    actual_weight=abs_weight,
-                    match_score=match_score,
-                    vision_confidence=candidate.combined_confidence,
-                    validated=validated,
-                )
-
-                estimates.append(estimate)
+                # v4.9: ProductDatabase fallback 완전 비활성화
+                # Node.js에서 받은 active_products에 없는 상품은 스킵
+                # (재고가 없거나 등록되지 않은 상품)
                 logger.debug(
-                    f"Estimate: {product.name} x{count}, "
-                    f"expected={expected_weight:.1f}g, actual={abs_weight:.1f}g, "
-                    f"error={weight_error:.1f}g, validated={validated}, score={match_score:.3f}"
+                    f"[COUNT] v4.9: Skipping class_id={candidate.class_id} "
+                    f"(not in active_products)"
                 )
 
         # match_score 기준 정렬
@@ -410,17 +344,12 @@ class WeightBasedCountCalculator:
                     })()
                     product_candidates.append((candidate, pseudo_prod))
             else:
-                # Fallback: ProductDatabase에서 조회
-                # Note: active_products가 없으므로 stock 필터링을 스킵
-                prod = self.product_db.get_product(candidate.class_id)
-                if prod and prod.weight > 0:
-                    # v4.9: Fallback 경로에서는 stock 필터링 스킵
-                    if prod.stock <= 0:
-                        logger.debug(
-                            f"[COMBINATION] Fallback 경로: stock 필터링 스킵 - "
-                            f"{prod.name} (db_stock={prod.stock})"
-                        )
-                    product_candidates.append((candidate, prod))
+                # v4.9: ProductDatabase fallback 완전 비활성화
+                # Node.js에서 받은 active_products에 없는 상품은 스킵
+                logger.debug(
+                    f"[COMBINATION] v4.9: Skipping class_id={candidate.class_id} "
+                    f"(not in active_products)"
+                )
 
         if not product_candidates:
             return None
