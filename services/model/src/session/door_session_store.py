@@ -1,8 +1,12 @@
 """
-Door Session Store (v4.5).
+Door Session Store (v4.7).
 
 Door Session을 관리하는 저장소.
 여러 번의 /trigger 호출을 하나의 Door Session으로 통합 관리합니다.
+
+v4.7 변경사항:
+- handle_close_signal() 메서드 추가 (빠른 문 열고 닫기 대응)
+- 첫 CLOSE → pending_close 상태, 두 번째 CLOSE → finalize 여부 결정
 
 v4.5 변경사항:
 - Callback deadlock 방지: Lock 해제 후 callback 실행 (deferred 패턴)
@@ -27,10 +31,12 @@ v4.2 변경사항:
         weight_tolerance=3.0,
     )
 
-    # GlobalSession 기반 (v4.3)
+    # GlobalSession 기반 (v4.7 - handle_close_signal 사용)
     global_session = store.get_or_start_global_session()  # OPEN
     door_session = store.add_trigger_with_global(zone=1, result=trigger_result)
-    result = store.finalize_global_session()  # CLOSE
+    is_ready, session = store.handle_close_signal()  # CLOSE
+    if is_ready:
+        result = store.finalize_global_session()
 
     # 기존 방식 (v4.2 하위 호환)
     door_session = store.add_trigger(zone=1, result=trigger_result)
@@ -446,6 +452,59 @@ class DoorSessionStore:
             self._persistence.save(session)
 
         return result
+
+    def handle_close_signal(self) -> Tuple[bool, Optional[GlobalDoorSession]]:
+        """
+        CLOSE 신호 처리 (v4.7).
+
+        빠른 문 열고 닫기 상황 대응:
+        1. 첫 CLOSE → pending_close=True, in_progress 반환
+        2. 두 번째+ CLOSE:
+           - first_close_at 이후 trigger 있음 → first_close_at 갱신, in_progress
+           - first_close_at 이후 trigger 없음 → finalize 준비 완료
+
+        Returns:
+            (is_ready_to_finalize, global_session)
+            - is_ready_to_finalize: True면 finalize 진행 가능
+            - global_session: 현재 GlobalSession (없으면 None)
+        """
+        with self._lock:
+            if self._global_session is None:
+                logger.info("[CLOSE] No active global session")
+                return True, None  # 세션 없음 → success 반환 가능
+
+            now = time.time()
+
+            if not self._global_session.pending_close:
+                # 첫 CLOSE: pending_close 설정
+                self._global_session.pending_close = True
+                self._global_session.first_close_at = now
+                logger.info(
+                    f"[CLOSE] 첫 CLOSE 수신: global_session_id={self._global_session.global_session_id}, "
+                    f"pending_close=True, first_close_at={now:.1f}"
+                )
+                return False, self._global_session
+
+            # 두 번째+ CLOSE: first_close_at 이후 trigger가 있었는지 확인
+            if self._global_session.is_ready_to_finalize_after_close():
+                # trigger 없음 → finalize 준비 완료
+                logger.info(
+                    f"[CLOSE] first_close 이후 trigger 없음, finalize 준비: "
+                    f"global_session_id={self._global_session.global_session_id}, "
+                    f"last_trigger_at={self._global_session.last_trigger_at}, "
+                    f"first_close_at={self._global_session.first_close_at}"
+                )
+                return True, self._global_session
+            else:
+                # trigger가 있었음 → first_close_at 갱신하고 다시 대기
+                self._global_session.first_close_at = now
+                logger.info(
+                    f"[CLOSE] first_close 이후 trigger 있음, 다시 대기: "
+                    f"global_session_id={self._global_session.global_session_id}, "
+                    f"last_trigger_at={self._global_session.last_trigger_at}, "
+                    f"new_first_close_at={now:.1f}"
+                )
+                return False, self._global_session
 
     def get_global_session(self) -> Optional[GlobalDoorSession]:
         """

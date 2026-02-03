@@ -1,8 +1,13 @@
 """
-Multi-Zone Judge API Routes (v4.5).
+Multi-Zone Judge API Routes (v4.7).
 
 POST /api/judge/multi-zone - Node.js에서 10초 간격으로 폴링
 SessionStore에서 결과를 조회하여 반환.
+
+v4.7 변경사항:
+- CLOSE 타이밍 문제 해결 (빠른 문 열고 닫기 대응)
+- handle_close_signal() 사용: 첫 CLOSE → pending, 두 번째 CLOSE → finalize 여부 결정
+- pending_close 상태 응답 추가
 
 v4.5 변경사항:
 - 상품 리스트 전역(global) 저장 (zone별 관리 제거)
@@ -21,8 +26,9 @@ v4.3 변경사항:
 1. Node.js가 데드볼트 문 열림 감지 → session_id="OPEN" 전송
 2. 문 열린 동안 session_id="OPEN" 반복 전송 (기존 세션 유지)
 3. 카메라 trigger 발생 시 각 zone에 상품 누적
-4. 문 닫힘 → session_id="CLOSE" 전송
-5. Model이 zones 배열로 zone 1~5 최종 결과 반환
+4. 문 닫힘 → session_id="CLOSE" 전송 (첫 CLOSE: pending 상태)
+5. 두 번째 CLOSE → trigger 없으면 finalize, 있으면 다시 대기
+6. Model이 zones 배열로 zone 1~5 최종 결과 반환
 """
 
 import json
@@ -468,22 +474,21 @@ def _handle_door_open(store: DoorSessionStore) -> dict:
     }
 
 
-# CLOSE 대기 시간 (초) - 마지막 trigger 후 이 시간이 지나야 완료 처리 (v4.6)
-CLOSE_WAIT_SECONDS = 10.0
-
-
 def _handle_door_close(
     store: DoorSessionStore,
     active_product_store: Optional[ActiveProductStore] = None,
 ) -> dict:
     """
-    CLOSE 처리 (v4.6 수정).
+    CLOSE 처리 (v4.7 수정).
 
     session_id="CLOSE" 시 호출됩니다.
-    마지막 trigger 후 CLOSE_WAIT_SECONDS 이상 지났으면 완료 처리.
-    아직 안 지났으면 in_progress 응답 (추론 대기 중).
+    빠른 문 열고 닫기 상황 대응을 위해 handle_close_signal() 사용:
+    1. 첫 CLOSE → pending_close 상태, in_progress 반환
+    2. 두 번째+ CLOSE → first_close_at 이후 trigger 유무에 따라 결정
+       - trigger 없음 → finalize 진행
+       - trigger 있음 → first_close_at 갱신, 다시 대기
 
-    v4.6: 추론 대기 로직 추가 (is_ready_to_finalize 체크)
+    v4.7: handle_close_signal() 기반 로직으로 변경
     v4.4: ActiveProductStore도 정리.
 
     Args:
@@ -495,22 +500,23 @@ def _handle_door_close(
     """
     if store is None:
         return {
-            "success": True,  # 종료 가능 (v4.6)
-            "status": "complete",
+            "success": True,
+            "status": "success",
             "message": "DoorSessionStore not enabled",
             "products": [],
             "totalPrice": 0,
             "productCount": 0,
         }
 
-    global_session = store.get_global_session()  # finalize 전에 먼저 조회 (v4.6)
+    # v4.7: handle_close_signal() 사용
+    is_ready, global_session = store.handle_close_signal()
 
-    # GlobalSession이 없으면 바로 종료 (v4.6)
+    # GlobalSession이 없으면 바로 종료
     if global_session is None:
-        logger.warning("[MULTI-ZONE CLOSE] No active global session to close")
+        logger.info("[MULTI-ZONE CLOSE] No active global session to close")
         return {
-            "success": True,  # 종료 가능 (v4.6)
-            "status": "complete",
+            "success": True,
+            "status": "success",
             "message": "No active door session to close",
             "zones": [],
             "products": [],
@@ -520,31 +526,59 @@ def _handle_door_close(
             "globalSessionInfo": None,
         }
 
-    # 아직 추론 대기 중인지 확인 (마지막 trigger 후 10초 미만) (v4.6)
-    if not global_session.is_ready_to_finalize(CLOSE_WAIT_SECONDS):
-        elapsed = time.time() - global_session.last_trigger_at
+    # 아직 finalize 준비 안됨 (pending_close 상태)
+    if not is_ready:
+        elapsed = 0.0
+        if global_session.first_close_at is not None:
+            elapsed = time.time() - global_session.first_close_at
+
+        # Zone 1~5 현재 interim 상태 반환 (v4.7)
+        zones = []
+        for zone_num in range(1, 6):
+            zone_result = _build_zone_result(global_session, zone_num, is_complete=False)
+            zones.append(zone_result)
+
+        total_interim_price = sum(z.get("interimTotalPrice", 0) for z in zones)
+        total_interim_count = sum(z.get("interimProductCount", 0) for z in zones)
+
+        # Node.js 하위 호환
+        all_products = []
+        for z in zones:
+            all_products.extend(z.get("interim_products", []))
+
         logger.info(
-            f"[MULTI-ZONE CLOSE] Still processing: "
-            f"last_trigger={elapsed:.1f}s ago, waiting for {CLOSE_WAIT_SECONDS}s"
+            f"[MULTI-ZONE CLOSE] Pending close: "
+            f"global_session_id={global_session.global_session_id}, "
+            f"elapsed={elapsed:.1f}s, pending_close={global_session.pending_close}, "
+            f"last_trigger_at={global_session.last_trigger_at}"
         )
+
         return {
-            "success": False,  # 아직 처리 중 (v4.6)
+            "success": False,
             "status": "in_progress",
-            "message": f"추론 완료 대기 중 ({elapsed:.1f}/{CLOSE_WAIT_SECONDS}초)",
+            "message": f"CLOSE 대기 중 (trigger 도착 대기, {elapsed:.1f}초)",
+            "pending_close": True,  # v4.7: pending 상태 표시
             "global_session_id": global_session.global_session_id,
-            "zones": [],  # 아직 반환하지 않음
-            "products": [],
-            "totalPrice": 0,
-            "productCount": 0,
+            "zones": zones,
+            "products": all_products,
+            "totalInterimPrice": total_interim_price,
+            "totalInterimProductCount": total_interim_count,
+            "interimProductCount": total_interim_count,
+            "totalPrice": total_interim_price,
+            "productCount": total_interim_count,
+            "globalSessionInfo": {
+                "totalTriggerCount": global_session.total_trigger_count,
+                "durationSeconds": round(global_session.duration_seconds, 1),
+                "createdAt": global_session.created_at,
+                "activeZones": global_session.active_zones,
+                "pendingClose": global_session.pending_close,
+                "firstCloseAt": global_session.first_close_at,
+                "lastTriggerAt": global_session.last_trigger_at,
+            },
         }
 
-    # 10초 이상 지났으면 finalize 진행 (v4.6)
+    # finalize 준비 완료 → finalize 진행
     global_session = store.finalize_global_session()
-
-    # v4.5: ActiveProductStore 정리 (전역)
-    # if active_product_store is not None:
-    #     if active_product_store.clear():
-    #         logger.info("[MULTI-ZONE CLOSE] Cleared global products from ActiveProductStore")
 
     # Zone 1~5 최종 결과 구성
     zones = []
@@ -567,15 +601,15 @@ def _handle_door_close(
     )
 
     return {
-        "success": True,  # 모든 처리 완료 → 항상 true (v4.6)
-        "status": "success",  # Node.js PaymentStore 호환 (v4.6 - "complete" → "success")
-        "has_products": total_product_count > 0,  # 상품 유무 별도 표시 (v4.6)
+        "success": True,
+        "status": "success",
+        "has_products": total_product_count > 0,
         "global_session_id": global_session.global_session_id,
         "zones": zones,
-        "products": all_products,  # Node.js 하위 호환
+        "products": all_products,
         "totalPrice": total_price,
         "totalProductCount": total_product_count,
-        "productCount": total_product_count,  # Node.js 하위 호환
+        "productCount": total_product_count,
         "globalSessionInfo": {
             "totalTriggerCount": global_session.total_trigger_count,
             "durationSeconds": round(global_session.duration_seconds, 1),

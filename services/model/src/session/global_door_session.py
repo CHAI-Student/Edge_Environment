@@ -1,9 +1,13 @@
 """
-Global Door Session Data Model (v4.3).
+Global Door Session Data Model (v4.7).
 
 전체 zone(1~5)을 통합 관리하는 GlobalDoorSession.
 Node.js가 session_id="OPEN"/"CLOSE" 신호를 보내면,
 문 열림~닫힘 동안의 모든 zone trigger를 하나의 세션으로 통합합니다.
+
+v4.7 변경사항:
+- pending_close/first_close_at 필드 추가 (빠른 문 열고 닫기 대응)
+- is_ready_to_finalize_after_close() 메서드 추가
 
 사용법:
     global_session = GlobalDoorSession(
@@ -29,11 +33,15 @@ from .door_session import DoorSession
 @dataclass
 class GlobalDoorSession:
     """
-    전체 zone 통합 관리 세션 (v4.3).
+    전체 zone 통합 관리 세션 (v4.7).
 
     문 열림(OPEN) ~ 문 닫힘(CLOSE) 동안의 모든 zone trigger를 통합 관리.
     Node.js가 session_id="OPEN"을 처음 보내면 생성,
     session_id="CLOSE"를 보내면 종료.
+
+    v4.7: pending_close 상태 추가 (빠른 문 열고 닫기 대응)
+    - 첫 CLOSE 시 pending_close=True 설정
+    - 다음 CLOSE 시 first_close_at 이후 trigger가 없으면 finalize
 
     Attributes:
         global_session_id: GlobalSession ID (예: "global_260203_143000")
@@ -41,6 +49,9 @@ class GlobalDoorSession:
         zone_sessions: zone별 DoorSession (zone -> DoorSession)
         created_at: 세션 생성 시각 (epoch)
         finalized_at: 세션 종료 시각 (complete일 때만)
+        last_trigger_at: 마지막 trigger 시각 (v4.6)
+        pending_close: 첫 CLOSE 수신 여부 (v4.7)
+        first_close_at: 첫 CLOSE 시각 (v4.7)
     """
 
     global_session_id: str
@@ -49,6 +60,8 @@ class GlobalDoorSession:
     created_at: float = field(default_factory=time.time)
     finalized_at: Optional[float] = None
     last_trigger_at: Optional[float] = None  # 마지막 trigger 시각 (v4.6)
+    pending_close: bool = False  # 첫 CLOSE 수신 여부 (v4.7)
+    first_close_at: Optional[float] = None  # 첫 CLOSE 시각 (v4.7)
 
     @property
     def total_price(self) -> int:
@@ -83,10 +96,12 @@ class GlobalDoorSession:
 
     def is_ready_to_finalize(self, wait_seconds: float = 10.0) -> bool:
         """
-        Finalize 준비 완료 여부 (v4.6).
+        Finalize 준비 완료 여부 (v4.6, 하위 호환).
 
         마지막 trigger 후 wait_seconds 이상 지났으면 True.
         trigger가 없으면 True (빈 세션).
+
+        참고: v4.7에서는 is_ready_to_finalize_after_close() 사용 권장
 
         Args:
             wait_seconds: 대기 시간 (초)
@@ -97,6 +112,30 @@ class GlobalDoorSession:
         if self.last_trigger_at is None:
             return True  # trigger 없음 → 바로 종료 가능
         return time.time() - self.last_trigger_at >= wait_seconds
+
+    def is_ready_to_finalize_after_close(self) -> bool:
+        """
+        CLOSE 이후 finalize 준비 완료 여부 (v4.7).
+
+        pending_close 상태에서 first_close_at 이후 trigger가 없으면 True.
+        - pending_close=False: 아직 첫 CLOSE 안 옴 → False
+        - first_close_at 이후 trigger 있음 → False (더 대기 필요)
+        - first_close_at 이후 trigger 없음 → True (finalize 가능)
+
+        Returns:
+            True if ready to finalize after CLOSE signal
+        """
+        if not self.pending_close:
+            return False  # 아직 첫 CLOSE 안 옴
+
+        if self.first_close_at is None:
+            return False  # 비정상 상태
+
+        # first_close_at 이후에 trigger가 있었는지 확인
+        if self.last_trigger_at is not None and self.last_trigger_at > self.first_close_at:
+            return False  # first_close 이후 trigger 있음 → 더 대기
+
+        return True  # first_close 이후 trigger 없음 → finalize 가능
 
     def get_zone_session(self, zone: int) -> Optional[DoorSession]:
         """특정 zone의 DoorSession 반환."""
@@ -113,6 +152,9 @@ class GlobalDoorSession:
             },
             "created_at": self.created_at,
             "finalized_at": self.finalized_at,
+            "last_trigger_at": self.last_trigger_at,
+            "pending_close": self.pending_close,  # v4.7
+            "first_close_at": self.first_close_at,  # v4.7
             "summary": {
                 "total_price": self.total_price,
                 "total_product_count": self.total_product_count,
