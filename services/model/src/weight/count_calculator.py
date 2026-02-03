@@ -185,19 +185,21 @@ class WeightBasedCountCalculator:
                 )
             else:
                 # Fallback: ProductDatabase에서 조회 (기존 로직)
+                # Note: active_products가 없으므로 Node.js로부터 최신 재고 정보를 받지 못한 상태
                 product = self.product_db.get_product(candidate.class_id)
 
                 if product is None:
                     logger.warning(f"Product not found for class_id: {candidate.class_id}")
                     continue
 
-                # v4.3: 재고 0인 상품 필터링 (active_products 없을 때만)
-                if self.use_stock_limit and product.stock <= 0:
+                # v4.9: Fallback 경로에서는 stock 필터링을 스킵
+                # ProductDatabase의 stock은 초기값 또는 오래된 값일 수 있어 신뢰할 수 없음
+                # active_products가 없을 때는 Vision + 무게만으로 판단
+                if product.stock <= 0:
                     logger.info(
-                        f"[COUNT] 재고 0 필터링: {product.name} "
-                        f"(class_id={candidate.class_id}, stock={product.stock})"
+                        f"[COUNT] Fallback 경로: stock 필터링 스킵 (active_products 없음) - "
+                        f"{product.name} (class_id={candidate.class_id}, db_stock={product.stock})"
                     )
-                    continue
 
                 if product.weight <= 0:
                     logger.debug(f"Skipping product with zero weight: {product.name}")
@@ -409,14 +411,15 @@ class WeightBasedCountCalculator:
                     product_candidates.append((candidate, pseudo_prod))
             else:
                 # Fallback: ProductDatabase에서 조회
+                # Note: active_products가 없으므로 stock 필터링을 스킵
                 prod = self.product_db.get_product(candidate.class_id)
                 if prod and prod.weight > 0:
-                    # v4.3: 재고 0인 상품 필터링 (active_products 없을 때만)
-                    if self.use_stock_limit and prod.stock <= 0:
+                    # v4.9: Fallback 경로에서는 stock 필터링 스킵
+                    if prod.stock <= 0:
                         logger.debug(
-                            f"[COMBINATION] 재고 0 필터링: {prod.name} (stock={prod.stock})"
+                            f"[COMBINATION] Fallback 경로: stock 필터링 스킵 - "
+                            f"{prod.name} (db_stock={prod.stock})"
                         )
-                        continue
                     product_candidates.append((candidate, prod))
 
         if not product_candidates:
