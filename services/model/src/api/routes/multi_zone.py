@@ -1,8 +1,13 @@
 """
-Multi-Zone Judge API Routes (v4.7).
+Multi-Zone Judge API Routes (v4.8).
 
 POST /api/judge/multi-zone - Node.js에서 10초 간격으로 폴링
 SessionStore에서 결과를 조회하여 반환.
+
+v4.8 변경사항:
+- Zone 기반 DoorSession 코드 제거 (dead code 정리)
+- GlobalDoorSession으로 완전 통합
+- Node.js는 항상 OPEN/CLOSE 신호를 보내므로 Zone 타임아웃 불필요
 
 v4.7 변경사항:
 - CLOSE 타이밍 문제 해결 (빠른 문 열고 닫기 대응)
@@ -821,161 +826,12 @@ async def judge_multi_zone(
         return response
 
     # ========================================================================
-    # 기존 로직 (v4.2 하위 호환) - zone 기반 DoorSession
+    # v4.8: Zone 기반 DoorSession 제거됨
+    # - Node.js는 항상 OPEN/CLOSE 신호를 보내므로 GlobalDoorSession만 사용
+    # - Zone 기반 타임아웃 로직 삭제 (dead code 정리)
     # ========================================================================
 
-    # Door Session 기반 응답 (v4.1) - DoorSessionStore가 활성화되어 있으면 우선 사용
-    if door_session_store is not None and request.zone is not None:
-        door_session, is_finalized = door_session_store.get_or_finalize(request.zone)
-
-        if door_session is not None:
-            # DoorSession 기반 응답 생성
-            active_products = door_session.get_active_products()
-
-            # 상품 정보 변환
-            products_response = [
-                {
-                    "productIdx": p.product_idx if p.product_idx else str(p.product_id),
-                    "productId": p.product_id,
-                    "name": p.name,
-                    "count": p.count,
-                    "price": p.unit_price,
-                    "confidence": round(p.average_confidence, 4),
-                }
-                for p in active_products
-            ]
-
-            # 총 상품 개수 및 금액
-            product_count = sum(p.count for p in active_products)
-            total_price = door_session.total_price
-
-            # device_id 추출
-            is_valid_session_id = (
-                request.session_id is not None
-                and request.session_id.startswith("zone_")
-            )
-            device_id = None if is_valid_session_id else request.session_id
-
-            if is_finalized:
-                # 세션 종료 (complete)
-                logger.info(
-                    f"[MULTI-ZONE DOOR SESSION COMPLETE] "
-                    f"door_session_id={door_session.door_session_id}, "
-                    f"triggers={door_session.trigger_count}, "
-                    f"products={product_count}, total_price={total_price}"
-                )
-
-                # unmatched_returns 정보 (v4.2)
-                unmatched_info = None
-                if door_session.has_unmatched_returns:
-                    unmatched_info = {
-                        "count": len(door_session.unmatched_returns),
-                        "totalWeight": round(door_session.unmatched_returns_weight, 1),
-                        "details": [
-                            {
-                                "triggerId": r.trigger_id,
-                                "deltaWeight": round(r.delta_weight, 1),
-                                "timestamp": r.timestamp,
-                            }
-                            for r in door_session.unmatched_returns
-                        ],
-                    }
-
-                # 새 필드: 상품명/개수 배열, 무게 변화량
-                product_names = [p.name for p in active_products]
-                product_counts_list = [p.count for p in active_products]
-                weight_delta = sum(t.delta_weight for t in door_session.triggers)
-
-                response = {
-                    "success": product_count > 0,
-                    "status": "complete",
-                    "device_id": device_id,
-                    "zone": door_session.zone,
-                    "door_session_id": door_session.door_session_id,
-                    "session_id": door_session.triggers[-1].session_id if door_session.triggers else None,
-                    "processing_stage": "complete",
-                    "processing_stage_detail": f"Door session 완료: {door_session.trigger_count}개 trigger 통합",
-                    "products": products_response,
-                    "productNames": product_names,
-                    "productCounts": product_counts_list,
-                    "productCount": product_count,
-                    "totalPrice": total_price,
-                    "weightDelta": round(weight_delta, 1),
-                    "confidence": round(
-                        sum(p.average_confidence for p in active_products) / len(active_products)
-                        if active_products else 0.0,
-                        4,
-                    ),
-                    "weightInfo": {
-                        "delta": round(weight_delta, 1),
-                        "isRemoval": weight_delta < 0,
-                    },
-                    "doorSessionInfo": {
-                        "triggerCount": door_session.trigger_count,
-                        "durationSeconds": round(door_session.duration_seconds, 1),
-                        "createdAt": door_session.created_at,
-                        "finalizedAt": door_session.finalized_at,
-                        "unmatchedReturns": unmatched_info,
-                    },
-                    "stats": {
-                        "topFrames": 0,
-                        "sideFrames": 0,
-                        "processingTimeMs": round(
-                            sum(t.processing_time_ms for t in door_session.triggers),
-                            1,
-                        ),
-                    },
-                }
-                _log_request_to_file(request, response)
-                return response
-            else:
-                # 세션 진행 중 (in_progress)
-                logger.info(
-                    f"[MULTI-ZONE DOOR SESSION IN_PROGRESS] "
-                    f"door_session_id={door_session.door_session_id}, "
-                    f"triggers={door_session.trigger_count}, "
-                    f"interim_products={product_count}"
-                )
-
-                # 새 필드: 상품명/개수 배열, 무게 변화량
-                interim_product_names = [p.name for p in active_products]
-                interim_product_counts_list = [p.count for p in active_products]
-                interim_weight_delta = sum(t.delta_weight for t in door_session.triggers)
-
-                response = {
-                    "success": False,
-                    "status": "in_progress",
-                    "device_id": device_id,
-                    "zone": door_session.zone,
-                    "door_session_id": door_session.door_session_id,
-                    "session_id": door_session.triggers[-1].session_id if door_session.triggers else None,
-                    "processing_stage": "door_session_active",
-                    "processing_stage_detail": f"Door session 활성: {door_session.trigger_count}개 trigger 수신",
-                    "interim_products": products_response,
-                    "interimProductNames": interim_product_names,
-                    "interimProductCounts": interim_product_counts_list,
-                    "interimProductCount": product_count,
-                    "interimTotalPrice": total_price,
-                    "weightDelta": round(interim_weight_delta, 1),
-                    "doorSessionInfo": {
-                        "triggerCount": door_session.trigger_count,
-                        "durationSeconds": round(door_session.duration_seconds, 1),
-                        "createdAt": door_session.created_at,
-                        "lastTriggerAt": door_session.last_trigger_at,
-                    },
-                    "stats": {
-                        "topFrames": 0,
-                        "sideFrames": 0,
-                        "processingTimeMs": round(
-                            sum(t.processing_time_ms for t in door_session.triggers),
-                            1,
-                        ),
-                    },
-                }
-                _log_request_to_file(request, response)
-                return response
-
-    # 기존 SessionStore 기반 응답 (DoorSession이 없거나 비활성화된 경우)
+    # 기존 SessionStore 기반 응답 (GlobalSession이 없는 경우 - 레거시 fallback)
     # session_id 유효성 검사: zone_으로 시작하면 실제 세션 ID, 아니면 device_id
     # Node.js가 deviceIdx(예: "DE17683631997086480")를 session_id로 보내는 경우
     is_valid_session_id = (
