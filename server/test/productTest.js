@@ -39,7 +39,7 @@ if (require.main === module) {
       });
 
       console.log("[ProductList] response:");
-      console.dir(data, { depth: null });
+      // console.dir(data, { depth: null });
       console.log(data.DATA.product_list)
     } catch (err) {
       console.error("[ProductList] error:");

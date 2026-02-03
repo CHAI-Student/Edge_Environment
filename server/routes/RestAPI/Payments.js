@@ -92,7 +92,7 @@ function MakeCameraFolder() {
 // let stopPolling = true;
 
 async function modelPooling(productData, opts = {}) {
-  const { intervalMs = 10_000, timeoutMs = 5 * 60_000 } = opts;
+  const { intervalMs = 10_000, timeoutMs = 5 * 60_000, checkOnly = false } = opts;
   const started = Date.now();
 
   /**
@@ -106,20 +106,72 @@ async function modelPooling(productData, opts = {}) {
     )
    */
 
+  // while (true) {
+  //   if (Date.now() - started > timeoutMs) throw new Error("Model inference timeout");
+  //   // console.log('product list', productData)
+
+  //   try {
+  //     const res = await axios.post(`${config.modelApi}/api/judge/multi-zone`, productData, { timeout: 30_000 });
+  //     const data = res.data;
+  //     console.log('[MODEL-RESPONSE]', data)
+
+  //     if (data.success === true) {
+  //       return data;
+  //     }
+  //   } catch (error) {
+  //     if (error.response && error.response.status === 400) {
+  //       // 4. 통신 에러/예외 발생 시: 에러 로그 찍고 null 반환하여 종료
+  //       console.error("[Model] Request failed (Network/System):", e?.message || e);
+  //       return;
+  //     }
+  //   }
+  //   await delay(intervalMs);
+  // }
+
+
+  // [모드 1] 검증 모드 (checkOnly: true)
+  // 문 열기 전에 1번만 실행해서 400 에러인지 확인하는 용도
+  if (checkOnly) {
+      try {
+          console.log("[Validation] Checking model server status...");
+          // 타임아웃을 짧게(3초) 설정해 빠르게 확인
+          const res = await axios.post(`${config.modelApi}/api/judge/multi-zone`, productData, { timeout: 3000 });
+          
+          if (res.data.status === 400) {
+              throw new Error("400 Bad Request");
+          }
+          return true; // 통과
+      } catch (error) {
+          // 400 에러면 명확하게 에러 던짐
+          if (error.response && error.response.status === 400) {
+              throw new Error("BLOCK_400");
+          }
+          // 통신 에러 등은 일단 경고만 하고 통과시킬지, 막을지 정책 결정 (여기선 false 리턴)
+          console.warn("[Validation] Network Error (Ignored):", error.message);
+          return false; 
+      }
+  }
+
+  // [모드 2] 반복 추론 모드 (기존 로직)
   while (true) {
     if (Date.now() - started > timeoutMs) throw new Error("Model inference timeout");
-    // console.log('product list', productData)
 
     try {
       const res = await axios.post(`${config.modelApi}/api/judge/multi-zone`, productData, { timeout: 30_000 });
       const data = res.data;
-      console.log('[MODEL-RESPONSE]', data)
+      // console.log('[MODEL-RESPONSE]', data);
 
-      if (data.success === true || data.status == 'complete') return data;
+      if (data.success === true) {
+        return data;
+      }
+      // 반복 중 400이 뜨면 중단
+      if (data.status === 400) { 
+           throw new Error("Model rejected request (Status 400)");
+      }
     } catch (e) {
-      console.error("[Model] request failed:", e?.message || e);
+      console.error("[Model] Request failed (Network/System):", e?.message || e);
+      // 반복 중 에러 발생 시 재시도하거나 종료 (여기선 에러 로그만 찍고 재시도)
     }
-
     await delay(intervalMs);
   }
 }
@@ -417,20 +469,9 @@ async function Payments(token, CardMethod) {
         division_idx: divisionIdx,
         device_idx: null
     });
-    console.log("[ProductList] Data Loading Complete:", productList);
+    // console.log("[ProductList] Data Loading Complete:", productList);
 
-    // [4] 카메라 폴더 생성
-    // const LOCAL_ROOT = path.resolve(process.cwd()); 
-    const { folderName, folderPath } = MakeCameraFolder();
-    console.log("[Camera] Folder Created:", folderPath, 'name:', folderName);
 
-    // [5] 문 열기 (OPEN)
-    const openResult = await callApiToControlDeadbolt("OPEN");
-    if (openResult !== "OPEN" && openResult !== 'UNLOCK') throw new Error(`Failed to open door. Status: ${openResult}`) 
-
-    // 문 열림 알림 시작 - 1분간
-    startDoorOpenMonitor(Date.now());
-    
     // 상품 정보 추출
     let productData = []
     if (productList) { productData = productList.DATA.product_list }
@@ -443,20 +484,73 @@ async function Payments(token, CardMethod) {
         sale_price: parseInt(item.sale_price),        // 매칭: 1500 (Integer)
         product_weight: item.product_loadcell_weight, // 매칭: '530' (String, API 정의와 일치)
         has_loadcell: item.has_loadcell == 'Y' ? "true" : item.has_loadcell == 'N' ? "false" : 'null',
-        stock_qty: item.stock_qty
+        stock_qty: parseInt(item.stock_qty)
       };
     });
 
     // 3. 최종 전송 데이터 구성 (MultiZoneRequest)
     const requestPayload = {
-      session_id: openResult == 'UNLOCK' ? 'OPEN' : openResult == 'LOCK' ? 'CLOSE' : 'NULL',
+      session_id: 'OPEN',
       products: formattedProducts
     };
-    
+
+    try {
+        // checkOnly: true 옵션을 줘서 1번만 찔러봄
+        await modelPooling(requestPayload, { checkOnly: true });
+        console.log("[Validation] Model server success");
+    } catch (error) {
+        if (error.message === "BLOCK_400") {
+            console.error("[BLOCK] Model server access denined");
+            return; // 여기서 함수 완전 종료 -> 문 안 열림
+        }
+        console.log("Validation Warning:", error.message);
+    }
+  
+    // [4] 카메라 폴더 생성
+    // const LOCAL_ROOT = path.resolve(process.cwd()); 
+    const { folderName, folderPath } = MakeCameraFolder();
+    console.log("[Camera] Folder Created:", folderPath, 'name:', folderName);
+
+    // [5] 문 열기 (OPEN)
+    const openResult = await callApiToControlDeadbolt("OPEN");
+    if (openResult !== "OPEN" && openResult !== 'UNLOCK') throw new Error(`Failed to open door. Status: ${openResult}`) 
+
     // 모델 서버 요청 (POST)
-    console.log("[Model] Sending data for inference...");
+    // console.log("[Model] Sending data for inference...", requestPayload);
     // stopPolling = false;
     const inferencePromise = modelPooling(requestPayload, { intervalMs: 10_000 });
+    // if (inferencePromise == null) return;
+
+    // 문 열림 알림 시작 - 1분간
+    startDoorOpenMonitor(Date.now());
+    
+    // // 상품 정보 추출
+    // let productData = []
+    // let closeEventData = ''
+    // if (productList) { productData = productList.DATA.product_list }
+    // // console.log(productData)
+    // // 2. API 스펙(ProductInfo)에 맞춰 매핑 (Mapping)
+    // const formattedProducts = productData.map((item) => {
+    //   return {
+    //     product_idx: item.product_idx,      // 매칭: P17355176366172772
+    //     product_name: item.product_eng_name,    // 매칭: 광동) 제주 삼다수 500ml
+    //     sale_price: parseInt(item.sale_price),        // 매칭: 1500 (Integer)
+    //     product_weight: item.product_loadcell_weight, // 매칭: '530' (String, API 정의와 일치)
+    //     has_loadcell: item.has_loadcell == 'Y' ? "true" : item.has_loadcell == 'N' ? "false" : 'null',
+    //     stock_qty: item.stock_qty
+    //   };
+    // });
+
+    // // 3. 최종 전송 데이터 구성 (MultiZoneRequest)
+    // const requestPayload = {
+    //   session_id: openResult == 'UNLOCK' ? 'OPEN' : closeEventData == 'LOCKED' ? 'CLOSE' : 'NULL',
+    //   products: formattedProducts
+    // };
+    
+    // // 모델 서버 요청 (POST)
+    // console.log("[Model] Sending data for inference...", requestPayload);
+    // // stopPolling = false;
+    // const inferencePromise = modelPooling(requestPayload, { intervalMs: 10_000 });
 
     // [6] 상단 카메라 ON 요청
     await requestTopCameraON({ save_path: folderPath});
@@ -469,17 +563,19 @@ async function Payments(token, CardMethod) {
     try {
       // 1. 문이 닫히고 로그 경로가 올 때까지 대기
       const closeEventData = await waitForDeadboltClose();
+      // console.log('ddddddddddd', closeEventData)
       const state = closeEventData.state;
       if (state && closedStates.includes(state)) {
+          requestPayload.session_id = 'CLOSE';
           // stopPolling = true;
           stopDoorOpenMonitor("deadbolt closed");
           console.log("[DEADBOLT] Door closed detected:", closeEventData.state);
         try {
           await axios.post(`${config.ioboardApi}/recording/stop`, {}); 
           await delay(5000);
-          console.log("녹화 종료 성공");
+          // console.log("녹화 종료 성공");
         } catch (error) {
-          console.error("녹화 종료 실패:", error);
+          // console.error("녹화 종료 실패:", error);
         }
         try {
           await requestCameraOFF();
@@ -517,10 +613,14 @@ async function Payments(token, CardMethod) {
         console.log('card method', CardMethod)
         // stopPolling = true;
 
-        // 결제 승인 요청
-        const finalAmount = inferenceResult.totalPrice;
-        const paymentAt = new Date()
+        if (!inferenceResult){
+          console.error("[PAYMENT] Model inference failed or error occurred. Process aborted.");
+          return;
+        }
         if (inferenceResult.success == true){
+          // 결제 승인 요청
+          const finalAmount = inferenceResult.totalPrice;
+
           // 삼성 페이
           if (CardMethod === "S") {
             paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {
@@ -538,8 +638,9 @@ async function Payments(token, CardMethod) {
           // 일반 카드
           else if (CardMethod === "N"){
             paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/token/approve`, {
-                    amount: string(finalAmount),
-                    vankey_hash: string(paymentToken || token)
+                    // amount: String(finalAmount),
+                    amount: '5',
+                    vankey_hash: String(paymentToken || token)
                 });
           }
           else{
@@ -549,7 +650,8 @@ async function Payments(token, CardMethod) {
         }
         // 결제 결과 처리
         if (paymentResponse && paymentResponse.status === 200) {
-            console.log("[PAYMENT] Success:", paymentResponse.data);
+            const paymentAt = new Date()
+            console.log("[PAYMENT] Success:", paymentResponse.data, token);
             await sendToPNT(
               paymentResponse.data,
               inferenceResult,
@@ -564,12 +666,13 @@ async function Payments(token, CardMethod) {
 
     } catch (error) {
         console.error("[Model] Inference Request Failed:", error.message);
-    } finally {
-        isProcessing = false;
-        resetGlobalTokens(); 
+    } 
+    // finally {
+    //     isProcessing = false;
+    //     resetGlobalTokens(); 
         
-        console.log("[SYSTEM] Process finished. Ready for next user.");
-    }
+    //     console.log("[SYSTEM] Process finished. Ready for next user.");
+    // }
 }
 
 module.exports = { Payments, router, init };
