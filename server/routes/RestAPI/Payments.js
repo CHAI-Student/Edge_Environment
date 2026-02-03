@@ -166,7 +166,7 @@ async function modelPooling(productData, opts = {}) {
     try {
       const res = await axios.post(`${config.modelApi}/api/judge/multi-zone`, productData, { timeout: 30_000 });
       const data = res.data;
-      // console.log('[MODEL-RESPONSE]', data);
+      console.log('[MODEL-RESPONSE]', data);
 
       if (data.success === true) {
         return data;
@@ -621,14 +621,17 @@ async function Payments(token, CardMethod) {
         console.log('card method', CardMethod)
         // stopPolling = true;
 
-        if (!inferenceResult){
+        if (inferenceResult.success == false || inferenceResult.status == 'error'){
           console.error("[PAYMENT] Model inference failed or error occurred. Process aborted.");
           return;
         }
-        if (inferenceResult.success == true){
+        if (inferenceResult.success == true && inferenceResult.totalPrice == 0) {
+          console.log('total price is 0, running end')
+          return;
+        }
+        if (inferenceResult.success == true && inferenceResult.produce.length >= 1){
           // 결제 승인 요청
           const finalAmount = inferenceResult.totalPrice;
-
           // 삼성 페이
           if (CardMethod === "S") {
             paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {
@@ -651,27 +654,27 @@ async function Payments(token, CardMethod) {
                     vankey_hash: String(paymentToken || token)
                 });
           }
-          else{
+          else {
             console.log("Undefined Card Method Detected.")
             return;
           }
-        }
-        // 결제 결과 처리
-        if (paymentResponse && paymentResponse.status === 200) {
-            const paymentAt = new Date()
-            console.log("[PAYMENT] Success:", paymentResponse.data, token);
-            await sendToPNT(
-              paymentResponse.data,
-              inferenceResult,
-              folderPath,
-              paymentAt,
-              CardMethod
-            )
-
+          // 결제 결과 처리
+          if (paymentResponse && paymentResponse.status === 200) {
+              const paymentAt = new Date()
+              console.log("[PAYMENT] Success:", paymentResponse.data, token);
+              await sendToPNT(
+                paymentResponse.data,
+                inferenceResult,
+                folderPath,
+                paymentAt,
+                CardMethod
+              )
+          } else {
+              console.error("[PAYMENT] Failed:", paymentResponse.data);
+          }
         } else {
-            console.error("[PAYMENT] Failed:", paymentResponse.data);
+          console.log('inferenceResult not found')
         }
-
     } catch (error) {
         console.error("[Model] Inference Request Failed:", error.message);
     } 
