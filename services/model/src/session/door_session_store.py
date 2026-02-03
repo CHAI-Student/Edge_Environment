@@ -227,24 +227,30 @@ class DoorSessionStore:
             session = self._active_sessions.get(zone)
 
             if session is not None:
-                # 타임아웃 체크 (통합 로직 사용)
-                timeout_result = self._check_timeout(session, now)
+                # v4.6: GlobalSession 활성이면 타임아웃 체크 안함
+                if self._global_session is not None:
+                    logger.debug(
+                        f"GlobalSession active, skipping timeout check for zone {zone}"
+                    )
+                else:
+                    # 타임아웃 체크 (통합 로직 사용)
+                    timeout_result = self._check_timeout(session, now)
 
-                if timeout_result.is_timed_out:
-                    if timeout_result.reason == "idle_timeout":
-                        logger.info(
-                            f"Door session timed out: {session.door_session_id} "
-                            f"(idle for {now - session.last_trigger_at:.1f}s)"
-                        )
-                    else:
-                        logger.warning(
-                            f"Door session max duration exceeded: {session.door_session_id} "
-                            f"(duration={now - session.created_at:.1f}s)"
-                        )
-                    # Lock 내에서 finalize 처리 (메모리 상태만)
-                    deferred_callback = self._finalize_session_in_memory(session)
-                    session_to_finalize = session  # Lock 해제 후 YAML 저장
-                    session = None
+                    if timeout_result.is_timed_out:
+                        if timeout_result.reason == "idle_timeout":
+                            logger.info(
+                                f"Door session timed out: {session.door_session_id} "
+                                f"(idle for {now - session.last_trigger_at:.1f}s)"
+                            )
+                        else:
+                            logger.warning(
+                                f"Door session max duration exceeded: {session.door_session_id} "
+                                f"(duration={now - session.created_at:.1f}s)"
+                            )
+                        # Lock 내에서 finalize 처리 (메모리 상태만)
+                        deferred_callback = self._finalize_session_in_memory(session)
+                        session_to_finalize = session  # Lock 해제 후 YAML 저장
+                        session = None
 
             if session is None:
                 # 새 세션 생성

@@ -568,7 +568,7 @@ def _handle_door_close(
 
     return {
         "success": True,  # 모든 처리 완료 → 항상 true (v4.6)
-        "status": "complete",
+        "status": "success",  # Node.js PaymentStore 호환 (v4.6 - "complete" → "success")
         "has_products": total_product_count > 0,  # 상품 유무 별도 표시 (v4.6)
         "global_session_id": global_session.global_session_id,
         "zones": zones,
