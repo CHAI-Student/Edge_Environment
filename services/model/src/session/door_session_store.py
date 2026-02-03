@@ -453,19 +453,23 @@ class DoorSessionStore:
 
         return result
 
-    def handle_close_signal(self, wait_seconds: float = 20.0) -> Tuple[bool, Optional[GlobalDoorSession]]:
+    def handle_close_signal(
+        self,
+        initial_wait_seconds: float = 20.0,
+        subsequent_wait_seconds: float = 5.0,
+    ) -> Tuple[bool, Optional[GlobalDoorSession]]:
         """
-        CLOSE 신호 처리 (v4.7).
+        CLOSE 신호 처리 (v4.7.2).
 
         빠른 문 열고 닫기 상황 대응:
         1. 첫 CLOSE → pending_close=True, in_progress 반환
         2. 이후 CLOSE:
-           - 대기 시간(20초) 안 지남 → 그냥 대기 (first_close_at 유지)
-           - 대기 시간 지났고 trigger 없음 → finalize 준비 완료
-           - 대기 시간 지났고 trigger 있음 → first_close_at 갱신, 다시 대기
+           - trigger 없음 → first_close_at 기준 20초 대기 (YOLO 로드 시간 고려)
+           - trigger 있음 → last_trigger_at 기준 5초 대기 (이미 처리 중이므로 빠름)
 
         Args:
-            wait_seconds: 첫 CLOSE 이후 대기 시간 (기본 20초)
+            initial_wait_seconds: trigger 없을 때 대기 시간 (기본 20초)
+            subsequent_wait_seconds: trigger 있을 때 대기 시간 (기본 5초)
 
         Returns:
             (is_ready_to_finalize, global_session)
@@ -489,41 +493,47 @@ class DoorSessionStore:
                 )
                 return False, self._global_session
 
-            # 이후 CLOSE: 시간 체크 먼저
-            elapsed = now - self._global_session.first_close_at
+            # 이후 CLOSE: trigger 유무에 따라 대기 시간 다르게 적용
+            has_trigger = self._global_session.last_trigger_at is not None
 
-            if elapsed < wait_seconds:
-                # 대기 시간 안 지남 → first_close_at 유지하고 계속 대기
-                logger.info(
-                    f"[CLOSE] 대기 중: elapsed={elapsed:.1f}s < {wait_seconds}s, "
-                    f"global_session_id={self._global_session.global_session_id}"
-                )
-                return False, self._global_session
+            if has_trigger:
+                # trigger 있음 → last_trigger_at 기준 5초 대기
+                elapsed_since_trigger = now - self._global_session.last_trigger_at
+                wait_seconds = subsequent_wait_seconds
 
-            # 대기 시간 지남 → trigger 체크
-            has_trigger_after_close = (
-                self._global_session.last_trigger_at is not None and
-                self._global_session.last_trigger_at > self._global_session.first_close_at
-            )
-
-            if has_trigger_after_close:
-                # trigger가 있었음 → first_close_at 갱신하고 다시 대기
-                self._global_session.first_close_at = now
-                logger.info(
-                    f"[CLOSE] {wait_seconds}초 후 trigger 감지, 다시 대기: "
-                    f"global_session_id={self._global_session.global_session_id}, "
-                    f"last_trigger_at={self._global_session.last_trigger_at}, "
-                    f"new_first_close_at={now:.1f}"
-                )
-                return False, self._global_session
+                if elapsed_since_trigger < wait_seconds:
+                    logger.info(
+                        f"[CLOSE] trigger 후 대기 중: elapsed={elapsed_since_trigger:.1f}s < {wait_seconds}s, "
+                        f"global_session_id={self._global_session.global_session_id}"
+                    )
+                    return False, self._global_session
+                else:
+                    # 5초 지남 → finalize 준비 완료
+                    logger.info(
+                        f"[CLOSE] trigger 후 {wait_seconds}초 대기 완료, finalize 준비: "
+                        f"global_session_id={self._global_session.global_session_id}, "
+                        f"elapsed_since_trigger={elapsed_since_trigger:.1f}s"
+                    )
+                    return True, self._global_session
             else:
-                # trigger 없음 → finalize 준비 완료
-                logger.info(
-                    f"[CLOSE] {wait_seconds}초 대기 완료, finalize 준비: "
-                    f"global_session_id={self._global_session.global_session_id}, "
-                    f"elapsed={elapsed:.1f}s"
-                )
-                return True, self._global_session
+                # trigger 없음 → first_close_at 기준 20초 대기
+                elapsed_since_close = now - self._global_session.first_close_at
+                wait_seconds = initial_wait_seconds
+
+                if elapsed_since_close < wait_seconds:
+                    logger.info(
+                        f"[CLOSE] trigger 없음, 대기 중: elapsed={elapsed_since_close:.1f}s < {wait_seconds}s, "
+                        f"global_session_id={self._global_session.global_session_id}"
+                    )
+                    return False, self._global_session
+                else:
+                    # 20초 지남 → finalize 준비 완료
+                    logger.info(
+                        f"[CLOSE] trigger 없음, {wait_seconds}초 대기 완료, finalize 준비: "
+                        f"global_session_id={self._global_session.global_session_id}, "
+                        f"elapsed_since_close={elapsed_since_close:.1f}s"
+                    )
+                    return True, self._global_session
 
     def get_global_session(self) -> Optional[GlobalDoorSession]:
         """
