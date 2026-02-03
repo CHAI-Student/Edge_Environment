@@ -9,13 +9,17 @@ Weight-Based Count Calculator.
 3. 허용 오차 내 검증 (tolerance_percent)
 4. match_score 계산으로 최적 후보 선별
 
+v4.7 변경사항:
+- active_products 파라미터 추가: ActiveProductStore의 상품 정보 우선 사용
+- stock 필터링 비활성화 가능: use_stock_limit=False로 stock=0 필터링 스킵
+
 사용 예시:
     calculator = WeightBasedCountCalculator(product_db)
     estimates = calculator.calculate(candidates, delta_weight=-365.0)
     best = estimates[0]  # 가장 높은 match_score
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 import logging
 
 from engine.models import EnsembleResult, CountEstimate
@@ -70,6 +74,7 @@ class WeightBasedCountCalculator:
         candidates: List[EnsembleResult],
         delta_weight: float,
         use_category_tolerance: bool = True,
+        active_products: Optional[List[Any]] = None,
     ) -> List[CountEstimate]:
         """
         각 후보에 대한 개수 추정.
@@ -77,10 +82,14 @@ class WeightBasedCountCalculator:
         Vision 후보군의 각 상품에 대해 무게 기반 개수를 계산하고,
         match_score 기준으로 정렬하여 반환합니다.
 
+        v4.7: active_products가 있으면 해당 정보를 우선 사용.
+        ActiveProductStore의 상품 정보로 YOLO class_id → 상품 매핑.
+
         Args:
             candidates: Multi-View Ensemble 결과 (Top-5)
             delta_weight: 무게 변화량 (음수 = 제거)
             use_category_tolerance: 카테고리별 허용 오차 사용 여부
+            active_products: ActiveProductStore에서 가져온 상품 정보 (v4.7)
 
         Returns:
             CountEstimate 리스트 (match_score 내림차순 정렬)
@@ -90,6 +99,14 @@ class WeightBasedCountCalculator:
         logger.info(f"[COUNT] ========== 개수 추정 ==========")
         logger.info(f"[COUNT] 후보: {len(candidates)}개, delta_weight={abs_weight:.1f}g")
 
+        # v4.7: active_products 빠른 조회용 맵 생성
+        active_product_map: Dict[int, Any] = {}
+        if active_products:
+            for ap in active_products:
+                if ap.yolo_class_id is not None:
+                    active_product_map[ap.yolo_class_id] = ap
+            logger.info(f"[COUNT] v4.7: active_products {len(active_product_map)}개 로드")
+
         # 최소 무게 변화량 체크
         if abs_weight < self.min_weight_change:
             logger.info(f"[COUNT] 무게 변화 너무 작음: {abs_weight}g < {self.min_weight_change}g")
@@ -98,64 +115,132 @@ class WeightBasedCountCalculator:
         estimates = []
 
         for candidate in candidates:
-            product = self.product_db.get_product(candidate.class_id)
+            # v4.7: active_products에서 먼저 상품 정보 조회
+            active_product = active_product_map.get(candidate.class_id)
 
-            if product is None:
-                logger.warning(f"Product not found for class_id: {candidate.class_id}")
-                continue
+            if active_product is not None:
+                # ActiveProductStore에서 상품 정보 사용 (v4.7)
+                product_name = active_product.product_name
+                product_weight = active_product.product_weight
+                stock = active_product.stock_qty
 
-            # v4.3: 재고 0인 상품 필터링
-            if self.use_stock_limit and product.stock <= 0:
-                logger.info(
-                    f"[COUNT] 재고 0 필터링: {product.name} "
-                    f"(class_id={candidate.class_id}, stock={product.stock})"
+                logger.debug(
+                    f"[COUNT] v4.7: Using active_product: {product_name} "
+                    f"(class_id={candidate.class_id}, weight={product_weight}g, stock={stock})"
                 )
-                continue
 
-            if product.weight <= 0:
-                logger.debug(f"Skipping product with zero weight: {product.name}")
-                continue
+                if product_weight <= 0:
+                    logger.debug(f"[COUNT] Skipping product with zero weight: {product_name}")
+                    continue
 
-            # 개수 추정 (v4.3: 재고 상한 적용)
-            count = self._estimate_count(abs_weight, product.weight, stock=product.stock)
-            if count <= 0:
-                continue
+                # v4.7: active_products는 이미 stock 필터링 완료 (stock > 0)
+                # 따라서 재고 필터링 스킵
 
-            # 예상 무게 계산
-            expected_weight = product.weight * count
-            weight_error = abs(abs_weight - expected_weight)
+                # 개수 추정 (v4.7: stock 상한 적용하지 않음, 이미 필터링됨)
+                count = self._estimate_count(abs_weight, product_weight, stock=0)
+                if count <= 0:
+                    continue
 
-            # 허용 오차: 고정 5g 사용
-            tolerance_amount = self.tolerance_grams
+                # 예상 무게 계산
+                expected_weight = product_weight * count
+                weight_error = abs(abs_weight - expected_weight)
 
-            # 검증
-            validated = weight_error <= tolerance_amount
+                # 허용 오차: 고정 5g 사용
+                tolerance_amount = self.tolerance_grams
 
-            # 매칭 점수 계산
-            match_score = self._calculate_match_score(
-                weight_error=weight_error,
-                expected_weight=expected_weight,
-                vision_confidence=candidate.combined_confidence,
-            )
+                # 검증
+                validated = weight_error <= tolerance_amount
 
-            estimate = CountEstimate(
-                product_id=candidate.class_id,
-                product_name=product.name,
-                count=count,
-                unit_weight=product.weight,
-                expected_weight=expected_weight,
-                actual_weight=abs_weight,
-                match_score=match_score,
-                vision_confidence=candidate.combined_confidence,
-                validated=validated,
-            )
+                # 매칭 점수 계산
+                match_score = self._calculate_match_score(
+                    weight_error=weight_error,
+                    expected_weight=expected_weight,
+                    vision_confidence=candidate.combined_confidence,
+                )
 
-            estimates.append(estimate)
-            logger.debug(
-                f"Estimate: {product.name} x{count}, "
-                f"expected={expected_weight:.1f}g, actual={abs_weight:.1f}g, "
-                f"error={weight_error:.1f}g, validated={validated}, score={match_score:.3f}"
-            )
+                # v4.7: active_product에서 가격 정보 가져오기
+                unit_price = active_product.sale_price
+
+                estimate = CountEstimate(
+                    product_id=candidate.class_id,
+                    product_name=product_name,
+                    count=count,
+                    unit_weight=product_weight,
+                    expected_weight=expected_weight,
+                    actual_weight=abs_weight,
+                    match_score=match_score,
+                    vision_confidence=candidate.combined_confidence,
+                    validated=validated,
+                    unit_price=unit_price,  # v4.7: 가격 정보 추가
+                )
+
+                estimates.append(estimate)
+                logger.debug(
+                    f"[COUNT] v4.7 Estimate: {product_name} x{count}, "
+                    f"expected={expected_weight:.1f}g, actual={abs_weight:.1f}g, "
+                    f"error={weight_error:.1f}g, validated={validated}, score={match_score:.3f}, "
+                    f"unit_price={unit_price}원"
+                )
+            else:
+                # Fallback: ProductDatabase에서 조회 (기존 로직)
+                product = self.product_db.get_product(candidate.class_id)
+
+                if product is None:
+                    logger.warning(f"Product not found for class_id: {candidate.class_id}")
+                    continue
+
+                # v4.3: 재고 0인 상품 필터링 (active_products 없을 때만)
+                if self.use_stock_limit and product.stock <= 0:
+                    logger.info(
+                        f"[COUNT] 재고 0 필터링: {product.name} "
+                        f"(class_id={candidate.class_id}, stock={product.stock})"
+                    )
+                    continue
+
+                if product.weight <= 0:
+                    logger.debug(f"Skipping product with zero weight: {product.name}")
+                    continue
+
+                # 개수 추정 (v4.3: 재고 상한 적용)
+                count = self._estimate_count(abs_weight, product.weight, stock=product.stock)
+                if count <= 0:
+                    continue
+
+                # 예상 무게 계산
+                expected_weight = product.weight * count
+                weight_error = abs(abs_weight - expected_weight)
+
+                # 허용 오차: 고정 5g 사용
+                tolerance_amount = self.tolerance_grams
+
+                # 검증
+                validated = weight_error <= tolerance_amount
+
+                # 매칭 점수 계산
+                match_score = self._calculate_match_score(
+                    weight_error=weight_error,
+                    expected_weight=expected_weight,
+                    vision_confidence=candidate.combined_confidence,
+                )
+
+                estimate = CountEstimate(
+                    product_id=candidate.class_id,
+                    product_name=product.name,
+                    count=count,
+                    unit_weight=product.weight,
+                    expected_weight=expected_weight,
+                    actual_weight=abs_weight,
+                    match_score=match_score,
+                    vision_confidence=candidate.combined_confidence,
+                    validated=validated,
+                )
+
+                estimates.append(estimate)
+                logger.debug(
+                    f"Estimate: {product.name} x{count}, "
+                    f"expected={expected_weight:.1f}g, actual={abs_weight:.1f}g, "
+                    f"error={weight_error:.1f}g, validated={validated}, score={match_score:.3f}"
+                )
 
         # match_score 기준 정렬
         estimates.sort(key=lambda e: e.match_score, reverse=True)
@@ -253,6 +338,7 @@ class WeightBasedCountCalculator:
         candidates: List[EnsembleResult],
         delta_weight: float,
         max_combination_size: int = 2,
+        active_products: Optional[List[Any]] = None,
     ) -> Optional[List[CountEstimate]]:
         """
         다중 상품 조합 계산.
@@ -265,10 +351,13 @@ class WeightBasedCountCalculator:
         2. 서로 다른 상품 조합 (A x 1 + B x 1)
         3. 서로 다른 상품 다중 개수 (A x N + B x M)
 
+        v4.7: active_products가 있으면 해당 정보를 우선 사용.
+
         Args:
             candidates: Multi-View Ensemble 결과
             delta_weight: 무게 변화량
             max_combination_size: 최대 조합 크기 (기본값 2)
+            active_products: ActiveProductStore에서 가져온 상품 정보 (v4.7)
 
         Returns:
             매칭되는 CountEstimate 리스트 또는 None
@@ -280,18 +369,39 @@ class WeightBasedCountCalculator:
         if abs_weight < self.min_weight_change:
             return None
 
-        # 후보군에서 상품 정보 추출 (v4.3: 재고 0 필터링)
+        # v4.7: active_products 빠른 조회용 맵 생성
+        active_product_map: Dict[int, Any] = {}
+        if active_products:
+            for ap in active_products:
+                if ap.yolo_class_id is not None:
+                    active_product_map[ap.yolo_class_id] = ap
+
+        # 후보군에서 상품 정보 추출 (v4.7: active_products 우선)
         product_candidates = []
         for candidate in candidates[:5]:  # 상위 5개만 고려
-            prod = self.product_db.get_product(candidate.class_id)
-            if prod and prod.weight > 0:
-                # v4.3: 재고 0인 상품 필터링
-                if self.use_stock_limit and prod.stock <= 0:
-                    logger.debug(
-                        f"[COMBINATION] 재고 0 필터링: {prod.name} (stock={prod.stock})"
-                    )
-                    continue
-                product_candidates.append((candidate, prod))
+            active_product = active_product_map.get(candidate.class_id)
+
+            if active_product is not None:
+                # v4.7: ActiveProductStore에서 상품 정보 사용
+                if active_product.product_weight > 0:
+                    # 가상의 ProductInfo-like 객체 생성
+                    pseudo_prod = type('PseudoProduct', (), {
+                        'name': active_product.product_name,
+                        'weight': active_product.product_weight,
+                        'stock': active_product.stock_qty,
+                    })()
+                    product_candidates.append((candidate, pseudo_prod))
+            else:
+                # Fallback: ProductDatabase에서 조회
+                prod = self.product_db.get_product(candidate.class_id)
+                if prod and prod.weight > 0:
+                    # v4.3: 재고 0인 상품 필터링 (active_products 없을 때만)
+                    if self.use_stock_limit and prod.stock <= 0:
+                        logger.debug(
+                            f"[COMBINATION] 재고 0 필터링: {prod.name} (stock={prod.stock})"
+                        )
+                        continue
+                    product_candidates.append((candidate, prod))
 
         if not product_candidates:
             return None

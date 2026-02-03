@@ -80,6 +80,7 @@ class CountEstimate:
         match_score: 매칭 점수 (0.0 ~ 1.0)
         vision_confidence: Vision 신뢰도
         validated: 허용 오차 내 검증 여부
+        unit_price: 단가 (원) - v4.7 추가
     """
     product_id: int
     product_name: str
@@ -90,6 +91,7 @@ class CountEstimate:
     match_score: float
     vision_confidence: float
     validated: bool
+    unit_price: int = 0  # v4.7: active_products에서 가격 정보
 
     @property
     def weight_error(self) -> float:
@@ -117,6 +119,7 @@ class CountEstimate:
             "match_score": round(self.match_score, 4),
             "vision_confidence": round(self.vision_confidence, 4),
             "validated": self.validated,
+            "unit_price": self.unit_price,  # v4.7
         }
 
 

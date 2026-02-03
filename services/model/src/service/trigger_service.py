@@ -1,8 +1,13 @@
 """
-Trigger Service (v4.6).
+Trigger Service (v4.7).
 
 트리거 비즈니스 로직 - YOLO 추론 및 세션 저장.
 라우터에서 분리된 핵심 비즈니스 로직.
+
+v4.7 변경사항:
+- ActiveProductStore 상품 정보를 engine.judge()에 전달
+- count_calculator가 active_products를 우선 사용하여 stock 필터링 문제 해결
+- DEFAULT_PRODUCTS fallback 방지
 
 v4.6 변경사항:
 - 무게 변화 5g 이하면 비디오 처리 스킵 (불필요한 YOLO 추론 방지)
@@ -321,12 +326,21 @@ class TriggerService:
         # 6. 투표 결과를 EnsembleResult로 변환
         vision_candidates = self._vote_results_to_ensemble(vote_results)
 
-        # 7. 최종 상품 판단
+        # 7. 최종 상품 판단 - v4.7: active_products 전달
         vision_only = delta_weight == 0.0 and len(input_data.loadcells) == 0
+
+        # v4.7: ActiveProductStore에서 상품 정보 조회
+        active_products = []
+        if self._active_product_store is not None:
+            active_products = self._active_product_store.get_all_products()
+            if active_products:
+                logger.info(f"[TRIGGER] v4.7: active_products {len(active_products)}개 → engine.judge()에 전달")
+
         result = self._engine.judge(
             vision_candidates=vision_candidates,
             delta_weight=delta_weight,
             vision_only=vision_only,
+            active_products=active_products,  # v4.7: 신규 파라미터
         )
 
         # 7-B. Node.js 상품 리스트에 없는 상품 제거 (v4.6)

@@ -102,14 +102,20 @@ class ProductDecisionEngine:
         vision_candidates: List[EnsembleResult],
         delta_weight: float,
         vision_only: bool = False,
+        active_products: Optional[List] = None,
     ) -> JudgmentResult:
         """
         상품 판단 수행.
+
+        v4.7: active_products 파라미터 추가.
+        ActiveProductStore의 상품 정보를 count_calculator에 전달하여
+        stock 필터링 및 DEFAULT_PRODUCTS fallback 문제 해결.
 
         Args:
             vision_candidates: Multi-View Ensemble 결과 (Top-5)
             delta_weight: 무게 변화량 (음수 = 제거)
             vision_only: Vision 전용 모드 (로드셀 없이 카메라만 사용)
+            active_products: ActiveProductStore의 상품 정보 (v4.7)
 
         Returns:
             JudgmentResult (Node.js 전달용)
@@ -122,6 +128,8 @@ class ProductDecisionEngine:
             f"[ENGINE] 후보: {len(vision_candidates)}개, "
             f"delta_weight={delta_weight:.1f}g, vision_only={vision_only}"
         )
+        if active_products:
+            logger.info(f"[ENGINE] v4.7: active_products {len(active_products)}개 수신")
 
         # Vision 전용 모드: 카메라만으로 판단
         if vision_only:
@@ -137,8 +145,10 @@ class ProductDecisionEngine:
             logger.info(f"Weight change too small: {abs_weight:.1f}g < {self.min_weight_change}g")
             return self._create_no_detection_result(delta_weight, timestamp)
 
-        # 3. 개수 계산 (각 후보별)
-        estimates = self.count_calculator.calculate(vision_candidates, delta_weight)
+        # 3. 개수 계산 (각 후보별) - v4.7: active_products 전달
+        estimates = self.count_calculator.calculate(
+            vision_candidates, delta_weight, active_products=active_products
+        )
 
         if not estimates:
             logger.warning("No valid count estimates, trying loadcell-only fallback")
@@ -153,10 +163,10 @@ class ProductDecisionEngine:
             logger.info(f"[ENGINE] 단일 상품 매칭 성공: {single_result.products[0].name}")
             return single_result
 
-        # 5. 다중 상품 조합 시도
+        # 5. 다중 상품 조합 시도 - v4.7: active_products 전달
         logger.info(f"[ENGINE] 전략: combination_match 시도...")
         combo_result = self._try_combination_match(
-            vision_candidates, delta_weight, timestamp
+            vision_candidates, delta_weight, timestamp, active_products=active_products
         )
         if combo_result and combo_result.status == JudgmentStatus.COMPLETE:
             names = [p.name for p in combo_result.products]
@@ -474,12 +484,14 @@ class ProductDecisionEngine:
         candidates: List[EnsembleResult],
         delta_weight: float,
         timestamp: float,
+        active_products: Optional[List] = None,
     ) -> Optional[JudgmentResult]:
-        """다중 상품 조합 매칭 시도."""
+        """다중 상품 조합 매칭 시도. v4.7: active_products 전달."""
         combination = self.count_calculator.calculate_combination(
             candidates=candidates,
             delta_weight=delta_weight,
             max_combination_size=self.max_combination_size,
+            active_products=active_products,
         )
 
         if not combination:
@@ -576,8 +588,12 @@ class ProductDecisionEngine:
         estimate: CountEstimate,
         confidence: float,
     ) -> ProductJudgment:
-        """CountEstimate에서 ProductJudgment 생성."""
-        price = self.product_db.get_price(estimate.product_id)
+        """CountEstimate에서 ProductJudgment 생성. v4.7: estimate.unit_price 우선 사용."""
+        # v4.7: active_products에서 가격이 있으면 우선 사용
+        if estimate.unit_price > 0:
+            price = estimate.unit_price
+        else:
+            price = self.product_db.get_price(estimate.product_id)
         total_price = price * estimate.count
 
         return ProductJudgment(

@@ -46,74 +46,15 @@ from engine.models import ProductInfo
 logger = logging.getLogger(__name__)
 
 
-# 기본 50개 상품 데이터
+# v4.7: 기본 상품 데이터 비활성화
+# 이전: 50개 기본 상품 (소문자 영문 이름)
+# 문제: stock=0으로 인해 Vision 후보가 필터링되면 judge_by_weight_only()가 호출되어
+#       DEFAULT_PRODUCTS에서 무게만으로 매칭 → 소문자 상품명("kitkat", "kimbap" 등) 반환
+# 해결: DEFAULT_PRODUCTS를 비워서 IF11/YOLO 매핑 파일에서만 상품 관리
+#       ActiveProductStore 상품 정보를 count_calculator에 전달하여 stock 필터링 문제 해결
 DEFAULT_PRODUCTS: List[Dict] = [
-    # class_id 0 = hand (비상품)
+    # class_id 0 = hand (비상품) - 필터링용으로만 유지
     {"id": 0, "name": "hand", "category": "non_product", "weight": 0, "price": 0},
-
-    # 음료 (1-10)
-    {"id": 1, "name": "pulmuone_spring_water_500", "category": "beverage", "weight": 520, "price": 1200},
-    {"id": 2, "name": "samdasoo_500", "category": "beverage", "weight": 520, "price": 1000},
-    {"id": 3, "name": "evian_500", "category": "beverage", "weight": 530, "price": 2500},
-    {"id": 4, "name": "coca_cola_350", "category": "beverage", "weight": 380, "price": 1800},
-    {"id": 5, "name": "sprite_350", "category": "beverage", "weight": 380, "price": 1800},
-    {"id": 6, "name": "fanta_orange_350", "category": "beverage", "weight": 385, "price": 1800},
-    {"id": 7, "name": "pocari_sweat_500", "category": "beverage", "weight": 540, "price": 2000},
-    {"id": 8, "name": "gatorade_600", "category": "beverage", "weight": 640, "price": 2500},
-    {"id": 9, "name": "vita500", "category": "beverage", "weight": 130, "price": 1200},
-    {"id": 10, "name": "hot6", "category": "beverage", "weight": 260, "price": 1500},
-
-    # 스낵 (11-20)
-    {"id": 11, "name": "pepero_original", "category": "snack", "weight": 69, "price": 1500},
-    {"id": 12, "name": "pepero_almond", "category": "snack", "weight": 72, "price": 1700},
-    {"id": 13, "name": "choco_pie", "category": "snack", "weight": 39, "price": 800},
-    {"id": 14, "name": "orion_pie", "category": "snack", "weight": 35, "price": 700},
-    {"id": 15, "name": "honey_butter_chip", "category": "snack", "weight": 60, "price": 2000},
-    {"id": 16, "name": "potato_chip_original", "category": "snack", "weight": 65, "price": 1800},
-    {"id": 17, "name": "shrimp_chip", "category": "snack", "weight": 90, "price": 1500},
-    {"id": 18, "name": "onion_ring", "category": "snack", "weight": 84, "price": 1600},
-    {"id": 19, "name": "cheese_ball", "category": "snack", "weight": 70, "price": 1400},
-    {"id": 20, "name": "pringles_original", "category": "snack", "weight": 53, "price": 2500},
-
-    # 초콜릿/캔디 (21-25)
-    {"id": 21, "name": "snickers", "category": "candy", "weight": 52, "price": 1500},
-    {"id": 22, "name": "twix", "category": "candy", "weight": 50, "price": 1500},
-    {"id": 23, "name": "kitkat", "category": "candy", "weight": 45, "price": 1200},
-    {"id": 24, "name": "m_and_m", "category": "candy", "weight": 45, "price": 2000},
-    {"id": 25, "name": "ferrero_rocher", "category": "candy", "weight": 37, "price": 2500},
-
-    # 편의점 식품 (26-35)
-    {"id": 26, "name": "chickenmayo_rice", "category": "food", "weight": 365, "price": 3500},
-    {"id": 27, "name": "tuna_rice", "category": "food", "weight": 350, "price": 3200},
-    {"id": 28, "name": "spam_rice", "category": "food", "weight": 380, "price": 3800},
-    {"id": 29, "name": "egg_sandwich", "category": "food", "weight": 170, "price": 2800},
-    {"id": 30, "name": "ham_sandwich", "category": "food", "weight": 180, "price": 3200},
-    {"id": 31, "name": "tuna_sandwich", "category": "food", "weight": 175, "price": 3500},
-    {"id": 32, "name": "cup_noodle_small", "category": "food", "weight": 65, "price": 1200},
-    {"id": 33, "name": "cup_noodle_big", "category": "food", "weight": 110, "price": 1800},
-    {"id": 34, "name": "instant_rice", "category": "food", "weight": 210, "price": 2000},
-    {"id": 35, "name": "kimbap", "category": "food", "weight": 250, "price": 2500},
-
-    # 유제품 (36-42)
-    {"id": 36, "name": "seoul_milk_200", "category": "dairy", "weight": 210, "price": 1200},
-    {"id": 37, "name": "banana_milk", "category": "dairy", "weight": 245, "price": 1500},
-    {"id": 38, "name": "strawberry_milk", "category": "dairy", "weight": 245, "price": 1500},
-    {"id": 39, "name": "chocolate_milk", "category": "dairy", "weight": 250, "price": 1500},
-    {"id": 40, "name": "yogurt_plain", "category": "dairy", "weight": 85, "price": 1000},
-    {"id": 41, "name": "yogurt_strawberry", "category": "dairy", "weight": 90, "price": 1200},
-    {"id": 42, "name": "cheese_slice_pack", "category": "dairy", "weight": 200, "price": 3500},
-
-    # 건강식품 (43-47)
-    {"id": 43, "name": "protein_bar", "category": "health", "weight": 50, "price": 2500},
-    {"id": 44, "name": "energy_bar", "category": "health", "weight": 45, "price": 2000},
-    {"id": 45, "name": "granola_bar", "category": "health", "weight": 40, "price": 1800},
-    {"id": 46, "name": "vitamin_c", "category": "health", "weight": 35, "price": 1500},
-    {"id": 47, "name": "multivitamin", "category": "health", "weight": 30, "price": 2000},
-
-    # 기타 (48-50)
-    {"id": 48, "name": "gum_pack", "category": "etc", "weight": 25, "price": 1000},
-    {"id": 49, "name": "mint_candy", "category": "etc", "weight": 15, "price": 800},
-    {"id": 50, "name": "wet_tissue", "category": "etc", "weight": 50, "price": 1000},
 ]
 
 
@@ -146,7 +87,7 @@ class ProductDatabase:
         self._products: Dict[int, ProductInfo] = {}
         self._barcode_index: Dict[str, int] = {}  # barcode -> product_id
         self._data_file = data_file
-        self._next_id = 51  # 기본 상품이 50개이므로 51부터 시작
+        self._next_id = 1  # v4.7: DEFAULT_PRODUCTS 비활성화로 1부터 시작
 
         # YOLO-IF11 매핑 테이블
         self._yolo_to_product: Dict[int, int] = {}      # yolo_class_id -> product_id
