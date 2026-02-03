@@ -33,7 +33,7 @@ function playMp3(filePath) {
   });
 }
 
-// 🔊 실제 음성 출력 함수로 교체
+// 1분 이상 문 열림 시 음성 출력
 function playDoorOpenVoice() {
     const audioPath = path.resolve(__dirname, '../Sounds/door_open.mp3');
     playMp3(audioPath);
@@ -88,7 +88,8 @@ function MakeCameraFolder() {
   return { folderName, folderPath };
 }
 
-let stopPolling = false;
+
+// let stopPolling = true;
 
 async function modelPooling(productData, opts = {}) {
   const { intervalMs = 10_000, timeoutMs = 5 * 60_000 } = opts;
@@ -107,13 +108,14 @@ async function modelPooling(productData, opts = {}) {
 
   while (true) {
     if (Date.now() - started > timeoutMs) throw new Error("Model inference timeout");
-    console.log('product list', productData)
+    // console.log('product list', productData)
 
     try {
       const res = await axios.post(`${config.modelApi}/api/judge/multi-zone`, productData, { timeout: 30_000 });
       const data = res.data;
+      console.log('[MODEL-RESPONSE]', data)
 
-      if (data?.success === true) return data;
+      if (data.success === true || data.status == 'complete') return data;
     } catch (e) {
       console.error("[Model] request failed:", e?.message || e);
     }
@@ -199,14 +201,30 @@ function waitForDeadboltClose() {
 }
 
 
-let paymentToken = null
-let samsungpayToken = null
-let rfidToken = null
+// 전역 변수 초기화 함수 (데이터 오염 방지)
+function resetGlobalTokens() {
+    paymentToken = null;
+    samsungpayToken = null;
+    rfidToken = null;
+    preAmount = null;
+    preAuthNum = null;
+    preAuthDate = null;
+    CardMethod = null;
+    paymentResponse = null;
+    inferenceResult = null;
+}
 
-let preAmount = null;
-let preAuthNum = null;
-let preAuthDate = null;
-let CardMethod = null;
+
+// let paymentToken = null
+// let samsungpayToken = null
+// let rfidToken = null
+
+// let preAmount = null;
+// let preAuthNum = null;
+// let preAuthDate = null;
+// let CardMethod = null;
+
+let isProcessing = false;
 
 // 카드 삽입 -- 결제 기능 시작
 async function init() {
@@ -282,21 +300,43 @@ async function init() {
 
 // --- 2. 프로세스 시작 및 상태 체크 ---
 async function startProcess(token, CardMethod) {
-    const CameraStatus = await CameraStatusAPI()
-    const CardTerminalStatus = await CardTerminalStatusAPI()
-    const DeadboltStatus = await DeadboltStatusAPI()
-    const LoadcellStatus = await LoadcellStatusAPI()
-
-    if (CardTerminalStatus == '39' && DeadboltStatus == '19' && LoadcellStatus == '29' && CameraStatus == '09') {
-        console.log('[PAYMENT] Health check passed. Starting Payments process...');
-        try {
-            await Payments(token, CardMethod);
-        } catch (error) {
-            console.error("[PAYMENT] Process failed:", error);
-        }
-    } else {
-        console.error('[PAYMENT] Health status is bad. Cannot run.');
+    // [수정] 1. 프로세스가 이미 실행 중이면 요청 무시 (Busy Check)
+    if (isProcessing) {
+        console.warn('[SYSTEM] Device is busy. Ignoring new request');
+        // 필요 시 사용자에게 "사용 중입니다" 음성 안내 추가 가능
+        return; 
     }
+    // [수정] 2. 프로세스 잠금 (Lock)
+    isProcessing = true;
+    try {
+      const CameraStatus = await CameraStatusAPI()
+      const CardTerminalStatus = await CardTerminalStatusAPI()
+      const DeadboltStatus = await DeadboltStatusAPI()
+      const LoadcellStatus = await LoadcellStatusAPI()
+
+      if (CardTerminalStatus == '39' && DeadboltStatus == '19' && LoadcellStatus == '29' && CameraStatus == '09') {
+          console.log('[PAYMENT] Health check passed. Starting Payments process...');
+          try {
+              await Payments(token, CardMethod);
+          } catch (error) {
+              console.error("[PAYMENT] Process failed:", error);
+          }
+      } else {
+          console.error('[PAYMENT] Health status is bad. Cannot run.');
+          return;
+      }
+    } catch (error) {
+        console.error("[PAYMENT] Process failed:", error);
+      } finally {
+          // [수정] 3. 프로세스 잠금 해제 (Unlock)
+          // 성공하든 실패하든 반드시 실행되어야 함.
+          isProcessing = false;
+          
+          // [권장] 다음 결제를 위해 전역 토큰 변수 초기화
+          resetGlobalTokens(); 
+          
+          console.log("[SYSTEM] Process finished. Ready for next user.");
+      }
 }
 
 /**
@@ -386,7 +426,7 @@ async function Payments(token, CardMethod) {
 
     // [5] 문 열기 (OPEN)
     const openResult = await callApiToControlDeadbolt("OPEN");
-    if (openResult !== "OPEN" && openResult !== 'UNLOCK') throw new Error(`Failed to open door. Status: ${openResult}`)
+    if (openResult !== "OPEN" && openResult !== 'UNLOCK') throw new Error(`Failed to open door. Status: ${openResult}`) 
 
     // 문 열림 알림 시작 - 1분간
     startDoorOpenMonitor(Date.now());
@@ -399,21 +439,23 @@ async function Payments(token, CardMethod) {
     const formattedProducts = productData.map((item) => {
       return {
         product_idx: item.product_idx,      // 매칭: P17355176366172772
-        product_name: item.product_name,    // 매칭: 광동) 제주 삼다수 500ml
-        sale_price: item.sale_price,        // 매칭: 1500 (Integer)
-        product_weight: item.product_weight // 매칭: '530' (String, API 정의와 일치)
+        product_name: item.product_eng_name,    // 매칭: 광동) 제주 삼다수 500ml
+        sale_price: parseInt(item.sale_price),        // 매칭: 1500 (Integer)
+        product_weight: item.product_loadcell_weight, // 매칭: '530' (String, API 정의와 일치)
+        has_loadcell: item.has_loadcell == 'Y' ? "true" : item.has_loadcell == 'N' ? "false" : 'null',
+        stock_qty: item.stock_qty
       };
     });
 
     // 3. 최종 전송 데이터 구성 (MultiZoneRequest)
     const requestPayload = {
-      session_id: config.deviceIdx, // 세션 ID는 로직에 맞게 생성 필요
-      products: formattedProducts         // 위에서 정제한 배열
+      session_id: openResult == 'UNLOCK' ? 'OPEN' : openResult == 'LOCK' ? 'CLOSE' : 'NULL',
+      products: formattedProducts
     };
     
     // 모델 서버 요청 (POST)
     console.log("[Model] Sending data for inference...");
-    stopPolling = false;
+    // stopPolling = false;
     const inferencePromise = modelPooling(requestPayload, { intervalMs: 10_000 });
 
     // [6] 상단 카메라 ON 요청
@@ -472,11 +514,13 @@ async function Payments(token, CardMethod) {
     try {
         inferenceResult = await inferencePromise;
         console.log("[Model] Inference Result:", inferenceResult);
+        console.log('card method', CardMethod)
+        // stopPolling = true;
 
         // 결제 승인 요청
         const finalAmount = inferenceResult.totalPrice;
         const paymentAt = new Date()
-        if (inferenceResult.success === true){
+        if (inferenceResult.success == true){
           // 삼성 페이
           if (CardMethod === "S") {
             paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {
@@ -494,8 +538,8 @@ async function Payments(token, CardMethod) {
           // 일반 카드
           else if (CardMethod === "N"){
             paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/token/approve`, {
-                    amount: finalAmount,
-                    vankey_hash: paymentToken || token
+                    amount: string(finalAmount),
+                    vankey_hash: string(paymentToken || token)
                 });
           }
           else{
@@ -520,6 +564,11 @@ async function Payments(token, CardMethod) {
 
     } catch (error) {
         console.error("[Model] Inference Request Failed:", error.message);
+    } finally {
+        isProcessing = false;
+        resetGlobalTokens(); 
+        
+        console.log("[SYSTEM] Process finished. Ready for next user.");
     }
 }
 
