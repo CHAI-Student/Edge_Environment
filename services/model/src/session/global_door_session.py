@@ -94,7 +94,7 @@ class GlobalDoorSession:
         """활성 zone 목록 (trigger가 있는 zone)."""
         return sorted(self.zone_sessions.keys())
 
-    def is_ready_to_finalize(self, wait_seconds: float = 10.0) -> bool:
+    def is_ready_to_finalize(self, wait_seconds: float = 30.0) -> bool:
         """
         Finalize 준비 완료 여부 (v4.6, 하위 호환).
 
@@ -113,7 +113,7 @@ class GlobalDoorSession:
             return True  # trigger 없음 → 바로 종료 가능
         return time.time() - self.last_trigger_at >= wait_seconds
 
-    def is_ready_to_finalize_after_close(self) -> bool:
+    def is_ready_to_finalize_after_close(self, wait_seconds: float = 30.0) -> bool:
         """
         CLOSE 이후 finalize 준비 완료 여부 (v4.7).
 
@@ -127,10 +127,16 @@ class GlobalDoorSession:
         """
         if not self.pending_close:
             return False  # 아직 첫 CLOSE 안 옴
+        
+
 
         if self.first_close_at is None:
             return False  # 비정상 상태
 
+        elapsed = time.time() - self.first_close_at
+        if elapsed < wait_seconds:
+            return False
+        
         # first_close_at 이후에 trigger가 있었는지 확인
         if self.last_trigger_at is not None and self.last_trigger_at > self.first_close_at:
             return False  # first_close 이후 trigger 있음 → 더 대기
