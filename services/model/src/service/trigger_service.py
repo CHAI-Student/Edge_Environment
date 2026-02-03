@@ -62,7 +62,8 @@ class TriggerOutput:
     door_session_id: Optional[str]
     message: str
     error_code: Optional[str] = None
-    status: str = "complete"  # "complete", "duplicate"
+    status: str = "complete"  # "complete", "duplicate", "skipped"
+    waiting_for: Optional[str] = None  # "products" if pending
 
 
 class TriggerService:

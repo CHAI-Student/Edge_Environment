@@ -1,8 +1,11 @@
 """
-Door Session Service (v4.2).
+Door Session Service (v4.3).
 
 Door Session 비즈니스 로직 - 세션 관리, 통계 조회, 강제 종료.
 라우터에서 분리된 핵심 비즈니스 로직.
+
+v4.3 변경사항:
+- add_trigger → add_trigger_with_global 변경 (GlobalSession 연동 보장)
 """
 
 import logging
@@ -191,9 +194,12 @@ class DoorSessionService:
 
         return self._door_session_store.get_or_finalize(zone)
 
-    def add_trigger(self, zone: int, trigger_result) -> Optional[DoorSession]:
+    def add_trigger_with_global(self, zone: int, trigger_result) -> Optional[DoorSession]:
         """
-        Door Session에 트리거 결과 추가.
+        Door Session에 트리거 결과 추가 (GlobalSession 연동).
+
+        v4.3: add_trigger → add_trigger_with_global 변경.
+        GlobalSession이 활성화된 경우 자동 연동됩니다.
 
         Args:
             zone: Zone 번호
@@ -205,4 +211,4 @@ class DoorSessionService:
         if not self.is_enabled:
             return None
 
-        return self._door_session_store.add_trigger(zone, trigger_result)
+        return self._door_session_store.add_trigger_with_global(zone, trigger_result)
