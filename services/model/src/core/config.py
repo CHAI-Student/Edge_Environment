@@ -94,14 +94,24 @@ class VisionModel(BaseModel):
         description="Bonus for common classes between cameras",
     )
 
-    # FFmpeg 영상 보정 필터 (v4.4)
-    ffmpeg_gamma: float = Field(
-        default=2.7,
-        description="FFmpeg gamma correction (1.0=원본, >1=밝게)",
+    # FFmpeg 영상 보정 필터 - Top 카메라 (v4.6)
+    ffmpeg_top_gamma: float = Field(
+        default=1.5,
+        description="Top 카메라 gamma correction (1.0=원본, >1=밝게)",
     )
-    ffmpeg_contrast: float = Field(
+    ffmpeg_top_contrast: float = Field(
         default=1.3,
-        description="FFmpeg contrast (1.0=원본, >1=높게)",
+        description="Top 카메라 contrast (1.0=원본, >1=높게)",
+    )
+
+    # FFmpeg 영상 보정 필터 - Side 카메라 (v4.6)
+    ffmpeg_side_gamma: float = Field(
+        default=1.5,
+        description="Side 카메라 gamma correction (1.0=원본, >1=밝게)",
+    )
+    ffmpeg_side_contrast: float = Field(
+        default=1.3,
+        description="Side 카메라 contrast (1.0=원본, >1=높게)",
     )
 
 

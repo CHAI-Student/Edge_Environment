@@ -379,10 +379,12 @@ class VideoProcessor:
         pending_votes: Dict[int, List[Tuple[float, str]]] = {}
 
         # Use factory to get appropriate extractor (ffmpeg or cv2 fallback)
+        # v4.6: camera_type 전달하여 카메라별 gamma/contrast 적용
         extractor = create_frame_extractor(
             video_path,
             prefer_ffmpeg=True,
             use_hwaccel=self.use_hwaccel,
+            camera_type=camera_type,
         )
 
         # ROI 필터링 통계

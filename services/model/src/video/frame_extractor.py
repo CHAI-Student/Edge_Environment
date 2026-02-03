@@ -45,6 +45,7 @@ class StreamingFrameExtractor:
         video_path: str,
         use_hwaccel: bool = True,
         pixel_format: str = "bgr24",
+        camera_type: str = "top",
     ):
         """
         Initialize frame extractor.
@@ -53,10 +54,12 @@ class StreamingFrameExtractor:
             video_path: Path to the video file (AVI, MP4, etc.)
             use_hwaccel: Use hardware acceleration (NVDEC) if available
             pixel_format: Output pixel format (bgr24 for OpenCV compatibility)
+            camera_type: Camera type ("top" or "side") for gamma/contrast settings (v4.6)
         """
         self.video_path = str(video_path)
         self.use_hwaccel = use_hwaccel
         self.pixel_format = pixel_format
+        self.camera_type = camera_type
 
         self._width: int = 0
         self._height: int = 0
@@ -285,10 +288,15 @@ class StreamingFrameExtractor:
         # Input
         cmd.extend(["-i", self.video_path])
 
-        # Gamma/Contrast 보정 필터 (config에서 값 로드, v4.4)
-        gamma = config.vision.ffmpeg_gamma
-        contrast = config.vision.ffmpeg_contrast
+        # Gamma/Contrast 보정 필터 - 카메라별 설정 (v4.6)
+        if self.camera_type == "side":
+            gamma = config.vision.ffmpeg_side_gamma
+            contrast = config.vision.ffmpeg_side_contrast
+        else:  # "top" 또는 기본값
+            gamma = config.vision.ffmpeg_top_gamma
+            contrast = config.vision.ffmpeg_top_contrast
         cmd.extend(["-vf", f"eq=gamma={gamma}:contrast={contrast}"])
+        logger.debug(f"[FFMPEG] {self.camera_type} camera: gamma={gamma}, contrast={contrast}")
 
         # Output format: raw video to pipe
         cmd.extend([
@@ -525,6 +533,7 @@ def create_frame_extractor(
     video_path: str,
     prefer_ffmpeg: bool = True,
     use_hwaccel: bool = True,
+    camera_type: str = "top",
 ) -> "StreamingFrameExtractor | CV2FrameExtractor":
     """
     Factory function to create appropriate frame extractor.
@@ -533,6 +542,7 @@ def create_frame_extractor(
         video_path: Path to video file
         prefer_ffmpeg: Prefer ffmpeg over cv2 (default: True)
         use_hwaccel: Use hardware acceleration if available
+        camera_type: Camera type ("top" or "side") for gamma/contrast settings (v4.6)
 
     Returns:
         StreamingFrameExtractor (ffmpeg) or CV2FrameExtractor (fallback)
@@ -549,6 +559,7 @@ def create_frame_extractor(
                 return StreamingFrameExtractor(
                     video_path,
                     use_hwaccel=use_hwaccel,
+                    camera_type=camera_type,
                 )
         except Exception:
             pass
