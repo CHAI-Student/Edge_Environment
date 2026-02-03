@@ -90,7 +90,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         const response = await axios.post("/chai/payment/store", form, {
             headers: {
                 ...form.getHeaders(),
-                Authorization: `Bearer ${jwt}`,
+                Authorization: `Bearer ${token}`,
             }, 
             timeout: 30000,
             maxBodyLength: Infinity,

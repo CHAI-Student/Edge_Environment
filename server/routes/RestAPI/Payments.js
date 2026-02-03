@@ -166,7 +166,7 @@ async function modelPooling(productData, opts = {}) {
     try {
       const res = await axios.post(`${config.modelApi}/api/judge/multi-zone`, productData, { timeout: 30_000 });
       const data = res.data;
-      console.log('[MODEL-RESPONSE]', data);
+      // console.log('[MODEL-RESPONSE]', data);
 
       if (data.success === true) {
         return data;
@@ -629,7 +629,7 @@ async function Payments(token, CardMethod) {
           console.log('total price is 0, running end')
           return;
         }
-        if (inferenceResult.success == true && inferenceResult.produce.length >= 1){
+        if (inferenceResult.success == true && inferenceResult.products){
           // 결제 승인 요청
           const finalAmount = inferenceResult.totalPrice;
           // 삼성 페이
