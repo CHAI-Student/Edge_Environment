@@ -64,7 +64,7 @@ class VisionModel(BaseModel):
     """Vision configuration settings (Jetson Orin Nano TensorRT only)."""
 
     yolo_model_path: str = Field(
-        default="models/siyeon_best.engine",
+        default="models/A_0203_subset40_valaug.engine",
         description="YOLO TensorRT engine path (.engine only). Jetson Orin Nano required.",
     )
     hand_class_id: int = Field(

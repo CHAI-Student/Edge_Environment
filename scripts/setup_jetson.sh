@@ -150,7 +150,7 @@ echo -e "${GREEN}✓ 의존성 설치 완료${NC}"
 # -----------------------------------------------------------------------------
 echo -e "\n${YELLOW}[5/6] TensorRT 엔진 확인...${NC}"
 
-ENGINE_PATH="$PROJECT_ROOT/models/siyeon_best.engine"
+ENGINE_PATH="$PROJECT_ROOT/models/A_0203_subset40_valaug.engine"
 PT_PATH="$PROJECT_ROOT/models/siyeon_best.pt"
 
 if [ -f "$ENGINE_PATH" ]; then
