@@ -1,8 +1,13 @@
 """
-Door Session Store (v4.7).
+Door Session Store (v4.8).
 
 Door Session을 관리하는 저장소.
 여러 번의 /trigger 호출을 하나의 Door Session으로 통합 관리합니다.
+
+v4.8 변경사항:
+- YAML 저장 백그라운드 비동기화 (ThreadPoolExecutor)
+- finalize 후 새 OPEN 응답 지연 문제 해결
+- shutdown() 메서드 추가 (스레드풀 정리)
 
 v4.7 변경사항:
 - handle_close_signal() 메서드 추가 (빠른 문 열고 닫기 대응)
@@ -44,6 +49,7 @@ v4.2 변경사항:
 """
 
 import copy
+import concurrent.futures
 import logging
 import threading
 import time
@@ -72,10 +78,14 @@ class TimeoutCheckResult:
 
 class DoorSessionStore:
     """
-    Door Session 저장소 (v4.3).
+    Door Session 저장소 (v4.8).
 
     Zone별로 하나의 활성 Door Session을 관리합니다.
     여러 trigger가 발생해도 같은 Door Session에 통합됩니다.
+
+    v4.8: YAML 저장 백그라운드 비동기화
+    - finalize 후 새 OPEN 응답 지연 문제 해결
+    - ThreadPoolExecutor로 YAML 저장 비동기 처리
 
     v4.3: GlobalDoorSession 지원
     - session_id="OPEN" → get_or_start_global_session()
@@ -128,6 +138,12 @@ class DoorSessionStore:
             get_product_weight=get_product_weight,
         )
 
+        # v4.8: YAML 저장용 스레드풀 (백그라운드 비동기 저장)
+        self._yaml_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=2,
+            thread_name_prefix="yaml_save",
+        )
+
         logger.info(
             f"DoorSessionStore initialized: "
             f"timeout={session_timeout}s, tolerance={weight_tolerance}g, "
@@ -168,6 +184,48 @@ class DoorSessionStore:
             )
 
         return TimeoutCheckResult(is_timed_out=False)
+
+    def _save_yaml_background(self, session: DoorSession) -> None:
+        """
+        YAML 저장을 백그라운드 스레드에서 비동기로 실행 (v4.8).
+
+        finalize 후 새 OPEN 요청에 즉시 응답하기 위해
+        YAML 저장을 블로킹하지 않고 백그라운드로 처리합니다.
+
+        Args:
+            session: 저장할 DoorSession
+        """
+        try:
+            self._yaml_executor.submit(self._safe_yaml_save, session)
+        except RuntimeError:
+            # 스레드풀이 이미 shutdown된 경우 (서비스 종료 중)
+            logger.warning(
+                f"YAML executor shutdown, saving synchronously: {session.door_session_id}"
+            )
+            self._safe_yaml_save(session)
+
+    def _safe_yaml_save(self, session: DoorSession) -> None:
+        """
+        백그라운드에서 안전하게 YAML 저장 (v4.8).
+
+        Args:
+            session: 저장할 DoorSession
+        """
+        try:
+            self._persistence.save(session)
+            logger.debug(f"YAML saved (background): {session.door_session_id}")
+        except Exception as e:
+            logger.error(f"YAML save failed: {session.door_session_id}: {e}")
+
+    def shutdown(self) -> None:
+        """
+        서비스 종료 시 스레드풀 정리 (v4.8).
+
+        FastAPI lifespan 또는 shutdown event에서 호출해야 합니다.
+        """
+        logger.info("DoorSessionStore shutting down YAML executor...")
+        self._yaml_executor.shutdown(wait=True)
+        logger.info("DoorSessionStore YAML executor shutdown complete")
 
     def set_product_weight_getter(
         self,
@@ -291,15 +349,16 @@ class DoorSessionStore:
 
             return_session = session
 
-        # Lock 해제 후 I/O 및 콜백 실행 (v4.5)
+        # Lock 해제 후 콜백 실행 (v4.5)
         if deferred_callback is not None:
             deferred_callback()
 
+        # v4.8: YAML 저장을 백그라운드로 (비동기)
         if session_to_finalize is not None:
-            self._persistence.save(session_to_finalize)
+            self._save_yaml_background(session_to_finalize)
 
         if session_to_save is not None:
-            self._persistence.save(session_to_save)
+            self._save_yaml_background(session_to_save)
 
         return return_session
 
@@ -360,12 +419,13 @@ class DoorSessionStore:
             else:
                 return_session = session
 
-        # Lock 해제 후 콜백 및 YAML 저장 (v4.5)
+        # Lock 해제 후 콜백 실행 (v4.5)
         if deferred_callback is not None:
             deferred_callback()
 
+        # v4.8: YAML 저장을 백그라운드로 (비동기)
         if session_to_save is not None:
-            self._persistence.save(session_to_save)
+            self._save_yaml_background(session_to_save)
 
         return return_session, is_finalized
 
@@ -444,12 +504,13 @@ class DoorSessionStore:
                 f"total_products={result.total_product_count}"
             )
 
-        # Lock 해제 후 콜백 및 YAML 저장 (v4.5)
+        # Lock 해제 후 콜백 실행 (v4.5)
         for callback in deferred_callbacks:
             callback()
 
+        # v4.8: YAML 저장을 백그라운드로 (비동기)
         for session in sessions_to_save:
-            self._persistence.save(session)
+            self._save_yaml_background(session)
 
         return result
 
@@ -629,12 +690,13 @@ class DoorSessionStore:
             else:
                 return None
 
-        # Lock 해제 후 콜백 및 YAML 저장 (v4.5)
+        # Lock 해제 후 콜백 실행 (v4.5)
         if deferred_callback is not None:
             deferred_callback()
 
+        # v4.8: YAML 저장을 백그라운드로 (비동기)
         if session_to_save is not None:
-            self._persistence.save(session_to_save)
+            self._save_yaml_background(session_to_save)
 
         return session_to_save
 
@@ -765,9 +827,9 @@ class DoorSessionStore:
 
             active_count = len(self._active_sessions)
 
-        # Lock 해제 후 YAML 저장 (I/O 작업)
+        # v4.8: YAML 저장을 백그라운드로 (비동기)
         for session in sessions_to_save:
-            self._persistence.save(session)
+            self._save_yaml_background(session)
 
         return active_count
 
@@ -869,12 +931,13 @@ class DoorSessionStore:
                         sessions_to_save.append(copy.deepcopy(session))
                         cleaned_count += 1
 
-        # Lock 해제 후 콜백 및 YAML 저장 (v4.5)
+        # Lock 해제 후 콜백 실행 (v4.5)
         for callback in deferred_callbacks:
             callback()
 
+        # v4.8: YAML 저장을 백그라운드로 (비동기)
         for session in sessions_to_save:
-            self._persistence.save(session)
+            self._save_yaml_background(session)
 
         if cleaned_count > 0:
             logger.info(f"Cleaned up {cleaned_count} timed out door sessions")
@@ -895,11 +958,12 @@ class DoorSessionStore:
             self._active_sessions.clear()
             self._global_session = None  # GlobalSession도 정리
 
-        # Lock 해제 후 콜백 및 YAML 저장 (v4.5)
+        # Lock 해제 후 콜백 실행 (v4.5)
         for callback in deferred_callbacks:
             callback()
 
+        # v4.8: YAML 저장을 백그라운드로 (비동기)
         for session in sessions_to_save:
-            self._persistence.save(session)
+            self._save_yaml_background(session)
 
         logger.info(f"All {len(sessions_to_save)} door sessions cleared")

@@ -340,6 +340,9 @@ def create_lifespan(settings: Settings):
             except Exception as e:
                 logger.error(f"YAML cleanup failed: {e}")
 
+            # v4.8: DoorSessionStore 스레드풀 정리 (백그라운드 YAML 저장 완료 대기)
+            door_session_store.shutdown()
+
         cleanup_dependencies()
         logger.info("Model service stopped")
 
