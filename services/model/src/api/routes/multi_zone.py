@@ -168,155 +168,65 @@ def _parse_request(body: Any) -> MultiZoneRequest:
 
 
 # ============================================================================
-# Product Validation Helper
+# Product Validation Helper (v4.4 - 간소화)
 # ============================================================================
 
 
-class ProductValidationError:
-    """상품 유효성 검사 에러 정보."""
-
-    def __init__(self, product_idx: str, field: str, message: str):
-        self.product_idx = product_idx
-        self.field = field
-        self.message = message
-
-    def to_dict(self) -> dict:
-        return {
-            "product_idx": self.product_idx,
-            "field": self.field,
-            "message": self.message,
-        }
+# 비정상 상품명 패턴 (대소문자 무시)
+INVALID_PRODUCT_NAME_PATTERNS = ["test", "테스트", "sample", "샘플", "dummy", "더미"]
 
 
-def _validate_products(
-    products: List[ProductInfo],
-    product_db: Optional[ProductDatabase] = None,
-) -> List[ProductValidationError]:
+def _check_invalid_product_names(products: List[ProductInfo]) -> List[str]:
     """
-    상품 목록 유효성 검사.
+    비정상 상품명 감지.
+
+    "TEST", "테스트", "SAMPLE" 등 더미 상품명을 감지합니다.
+    이런 상품명은 YOLO 매핑이 불가능하므로 HTTP 400을 반환해야 합니다.
 
     Args:
         products: 상품 목록
-        product_db: ProductDatabase 인스턴스 (매핑 검사용, 선택)
 
     Returns:
-        에러 목록 (빈 리스트면 유효)
+        비정상 상품명 리스트 (비어있으면 정상)
     """
-    errors = []
+    invalid_names = []
+    for p in products:
+        if not p.product_name:
+            continue
+        name_lower = p.product_name.strip().lower()
+        for pattern in INVALID_PRODUCT_NAME_PATTERNS:
+            if pattern in name_lower:
+                invalid_names.append(f"{p.product_name} (product_idx={p.product_idx})")
+                break
+    return invalid_names
 
-    for i, p in enumerate(products):
-        product_idx = p.product_idx or f"index_{i}"
 
-        # 1. product_idx 검사
-        if not p.product_idx or not p.product_idx.strip():
-            errors.append(ProductValidationError(
-                product_idx=product_idx,
-                field="product_idx",
-                message="상품 ID가 비어있습니다",
-            ))
+def _log_product_warnings(products: List[ProductInfo]) -> None:
+    """
+    기타 경고사항 로깅 (HTTP 400 아님, 로그만).
 
-        # 2. product_name 검사
-        if not p.product_name or not p.product_name.strip():
-            errors.append(ProductValidationError(
-                product_idx=product_idx,
-                field="product_name",
-                message="상품명이 비어있습니다",
-            ))
-
-        # 3. sale_price 검사
+    음수 가격, 음수 재고 등은 경고만 출력하고 계속 진행합니다.
+    """
+    warnings = []
+    for p in products:
         if p.sale_price < 0:
-            errors.append(ProductValidationError(
-                product_idx=product_idx,
-                field="sale_price",
-                message=f"판매가격이 음수입니다: {p.sale_price}",
-            ))
-
-        # 4. product_weight 검사
-        try:
-            weight = float(p.product_weight) if p.product_weight else 0.0
-            if weight < 0:
-                errors.append(ProductValidationError(
-                    product_idx=product_idx,
-                    field="product_weight",
-                    message=f"상품 무게가 음수입니다: {p.product_weight}",
-                ))
-        except (ValueError, TypeError):
-            errors.append(ProductValidationError(
-                product_idx=product_idx,
-                field="product_weight",
-                message=f"상품 무게 형식이 잘못되었습니다: {p.product_weight}",
-            ))
-
-        # 5. stock_qty 검사
+            warnings.append(f"음수 가격: {p.product_idx}, price={p.sale_price}")
         if p.stock_qty < 0:
-            errors.append(ProductValidationError(
-                product_idx=product_idx,
-                field="stock_qty",
-                message=f"재고 수량이 음수입니다: {p.stock_qty}",
-            ))
+            warnings.append(f"음수 재고: {p.product_idx}, stock={p.stock_qty}")
 
-        # 6. DB 매핑 검사 (product_db가 제공된 경우)
-        if product_db is not None and p.product_idx and p.product_idx.strip():
-            # product_idx로 DB 조회
-            db_product = product_db.get_by_product_idx(p.product_idx)
-
-            # product_idx가 숫자인 경우 product_id로도 조회 시도
-            if db_product is None:
-                try:
-                    product_id = int(p.product_idx)
-                    db_product = product_db.get_product(product_id)
-                except ValueError:
-                    pass
-
-            if db_product is None:
-                errors.append(ProductValidationError(
-                    product_idx=product_idx,
-                    field="product_mapping",
-                    message=f"상품이 DB에 매핑되지 않았습니다: '{p.product_name}' (product_idx={p.product_idx})",
-                ))
-
-    return errors
-
-
-def _raise_validation_error(
-    errors: List[ProductValidationError],
-    request: MultiZoneRequest,
-) -> None:
-    """
-    유효성 검사 에러 발생 시 HTTP 400 예외를 발생시킵니다.
-
-    Args:
-        errors: 유효성 검사 에러 목록
-        request: 요청 객체 (로깅용)
-    """
-    error_details = [e.to_dict() for e in errors]
-
-    logger.error(
-        f"[MULTI-ZONE VALIDATION ERROR] session_id={request.session_id}, "
-        f"products_count={len(request.products)}, errors={len(errors)}"
-    )
-    for e in errors:
-        logger.error(f"  - {e.product_idx}: {e.field} - {e.message}")
-
-    raise HTTPException(
-        status_code=400,
-        detail={
-            "error_code": "PRODUCT_VALIDATION_ERROR",
-            "message": f"상품 정보 유효성 검사 실패: {len(errors)}개 오류",
-            "errors": error_details,
-            "products_received": len(request.products),
-        },
-    )
+    if warnings:
+        # 경고를 1회 로깅 (개별 반복 없음)
+        logger.warning(f"[PRODUCT WARNINGS] {len(warnings)}개: {warnings[:5]}")
 
 
 # ============================================================================
-# Request Logging Helper (디버깅용)
+# Request Logging Helper (디버깅용, 비동기 - v4.4)
 # ============================================================================
 
 
-def _log_request_to_file(request: MultiZoneRequest, response: dict) -> None:
+def _log_request_to_file_sync(request: MultiZoneRequest, response: dict) -> None:
     """
-    Node.js 요청/응답을 로그 파일에 저장 (디버깅용).
+    Node.js 요청/응답을 로그 파일에 저장 (동기 버전, 스레드에서 실행).
 
     로그 파일: services/model/logs/multi_zone_YYYYMMDD.jsonl
     """
@@ -357,6 +267,22 @@ def _log_request_to_file(request: MultiZoneRequest, response: dict) -> None:
 
     except Exception as e:
         logger.warning(f"[LOG] Failed to write request log: {e}")
+
+
+def _log_request_to_file(request: MultiZoneRequest, response: dict) -> None:
+    """
+    Node.js 요청/응답을 로그 파일에 저장 (비동기 - 스레드로 실행).
+
+    v4.4: 동기 파일 I/O가 Uvicorn 블로킹을 유발하지 않도록
+    스레드에서 비동기적으로 실행합니다.
+    """
+    import threading
+    thread = threading.Thread(
+        target=_log_request_to_file_sync,
+        args=(request, response),
+        daemon=True,
+    )
+    thread.start()
 
 
 # ============================================================================
@@ -717,12 +643,27 @@ async def judge_multi_zone(
     )
 
     # ========================================================================
-    # 상품 정보 유효성 검사 (products가 있는 경우에만)
+    # 상품 정보 유효성 검사 (v4.4 간소화)
+    # - 비정상 상품명(TEST 등)만 HTTP 400 반환
+    # - 기타 경고는 로그만 출력 (서비스 블로킹 방지)
     # ========================================================================
     if request.products:
-        validation_errors = _validate_products(request.products, product_db)
-        if validation_errors:
-            _raise_validation_error(validation_errors, request)
+        # 비정상 상품명만 검사 (HTTP 400)
+        invalid_names = _check_invalid_product_names(request.products)
+        if invalid_names:
+            # 로깅 최소화 (1회만)
+            logger.warning(f"[INVALID PRODUCTS] {len(invalid_names)}개 감지: {invalid_names[:3]}")
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error_code": "INVALID_PRODUCT_NAME",
+                    "message": f"비정상 상품명 감지: {len(invalid_names)}개",
+                    "invalid_products": invalid_names,
+                },
+            )
+
+        # 기타 경고는 로그만 (HTTP 400 아님)
+        _log_product_warnings(request.products)
 
     # ========================================================================
     # v4.3: Door State (OPEN/CLOSE) 처리
