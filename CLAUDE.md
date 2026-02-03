@@ -714,3 +714,24 @@ pytest services/model/tests --cov=services/model/src --cov-report=html
 'io board': "~\VOICE\2026\crk\CRK-IO-BOARD"
 'payment': "~\VOICE\2026\crk\CRK-PAYMENT"
 'node': "~\VOICE\2026\crk\Edge_Environment"
+
+## TODO (추후 구현)
+
+### has_loadcell 필드 지원
+
+**배경**: 자판기 하드웨어 모델에 따라 로드셀이 있는 모델과 없는 모델이 존재함.
+
+**현재 상태**:
+- Node.js가 `has_loadcell: "true"/"false"/"null"` 필드를 전송
+- Model 서비스의 `ProductInfo`는 `loadcell` 필드명으로 정의되어 있어 무시됨
+- 현재는 모든 상품에 대해 로드셀 기반 무게 검증을 수행
+
+**구현 필요 사항**:
+1. `ProductInfo.loadcell` → `has_loadcell`로 필드명 변경
+2. `has_loadcell == "false"` 또는 `"null"`인 상품은 무게 검증 로직에서 제외
+3. Vision-only 모드: 로드셀 없는 하드웨어에서는 YOLO 추론 결과만으로 상품 판단
+
+**영향 범위**:
+- `services/model/src/api/routes/multi_zone.py` - ProductInfo 모델
+- `services/model/src/engine/decision_engine.py` - 무게 기반 개수 계산
+- `services/model/src/session/product_aggregator.py` - 반환 처리 (무게 매칭)
