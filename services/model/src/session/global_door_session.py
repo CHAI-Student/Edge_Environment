@@ -113,35 +113,42 @@ class GlobalDoorSession:
             return True  # trigger 없음 → 바로 종료 가능
         return time.time() - self.last_trigger_at >= wait_seconds
 
-    def is_ready_to_finalize_after_close(self, wait_seconds: float = 30.0) -> bool:
+    def is_ready_to_finalize_after_close(self, wait_seconds: float = 20.0) -> bool:
         """
         CLOSE 이후 finalize 준비 완료 여부 (v4.7).
 
-        pending_close 상태에서 first_close_at 이후 trigger가 없으면 True.
+        pending_close 상태에서:
+        1. first_close_at 이후 wait_seconds(기본 20초)가 지났는지 확인
+        2. first_close_at 이후 trigger가 없는지 확인
+
+        조건:
         - pending_close=False: 아직 첫 CLOSE 안 옴 → False
+        - first_close_at 이후 wait_seconds 안 지남 → False (더 대기 필요)
         - first_close_at 이후 trigger 있음 → False (더 대기 필요)
-        - first_close_at 이후 trigger 없음 → True (finalize 가능)
+        - first_close_at 이후 wait_seconds 지났고 trigger 없음 → True
+
+        Args:
+            wait_seconds: 첫 CLOSE 이후 대기 시간 (기본 20초)
 
         Returns:
             True if ready to finalize after CLOSE signal
         """
         if not self.pending_close:
             return False  # 아직 첫 CLOSE 안 옴
-        
-
 
         if self.first_close_at is None:
             return False  # 비정상 상태
 
+        # first_close_at 이후 wait_seconds가 지났는지 확인
         elapsed = time.time() - self.first_close_at
         if elapsed < wait_seconds:
-            return False
-        
+            return False  # 아직 대기 시간 안 지남
+
         # first_close_at 이후에 trigger가 있었는지 확인
         if self.last_trigger_at is not None and self.last_trigger_at > self.first_close_at:
             return False  # first_close 이후 trigger 있음 → 더 대기
 
-        return True  # first_close 이후 trigger 없음 → finalize 가능
+        return True  # 대기 시간 지났고 trigger 없음 → finalize 가능
 
     def get_zone_session(self, zone: int) -> Optional[DoorSession]:
         """특정 zone의 DoorSession 반환."""

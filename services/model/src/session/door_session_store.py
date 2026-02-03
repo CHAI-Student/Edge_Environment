@@ -453,15 +453,19 @@ class DoorSessionStore:
 
         return result
 
-    def handle_close_signal(self) -> Tuple[bool, Optional[GlobalDoorSession]]:
+    def handle_close_signal(self, wait_seconds: float = 20.0) -> Tuple[bool, Optional[GlobalDoorSession]]:
         """
         CLOSE 신호 처리 (v4.7).
 
         빠른 문 열고 닫기 상황 대응:
         1. 첫 CLOSE → pending_close=True, in_progress 반환
-        2. 두 번째+ CLOSE:
-           - first_close_at 이후 trigger 있음 → first_close_at 갱신, in_progress
-           - first_close_at 이후 trigger 없음 → finalize 준비 완료
+        2. 이후 CLOSE:
+           - 대기 시간(20초) 안 지남 → 그냥 대기 (first_close_at 유지)
+           - 대기 시간 지났고 trigger 없음 → finalize 준비 완료
+           - 대기 시간 지났고 trigger 있음 → first_close_at 갱신, 다시 대기
+
+        Args:
+            wait_seconds: 첫 CLOSE 이후 대기 시간 (기본 20초)
 
         Returns:
             (is_ready_to_finalize, global_session)
@@ -485,26 +489,41 @@ class DoorSessionStore:
                 )
                 return False, self._global_session
 
-            # 두 번째+ CLOSE: first_close_at 이후 trigger가 있었는지 확인
-            if self._global_session.is_ready_to_finalize_after_close():
-                # trigger 없음 → finalize 준비 완료
+            # 이후 CLOSE: 시간 체크 먼저
+            elapsed = now - self._global_session.first_close_at
+
+            if elapsed < wait_seconds:
+                # 대기 시간 안 지남 → first_close_at 유지하고 계속 대기
                 logger.info(
-                    f"[CLOSE] first_close 이후 trigger 없음, finalize 준비: "
-                    f"global_session_id={self._global_session.global_session_id}, "
-                    f"last_trigger_at={self._global_session.last_trigger_at}, "
-                    f"first_close_at={self._global_session.first_close_at}"
+                    f"[CLOSE] 대기 중: elapsed={elapsed:.1f}s < {wait_seconds}s, "
+                    f"global_session_id={self._global_session.global_session_id}"
                 )
-                return True, self._global_session
-            else:
+                return False, self._global_session
+
+            # 대기 시간 지남 → trigger 체크
+            has_trigger_after_close = (
+                self._global_session.last_trigger_at is not None and
+                self._global_session.last_trigger_at > self._global_session.first_close_at
+            )
+
+            if has_trigger_after_close:
                 # trigger가 있었음 → first_close_at 갱신하고 다시 대기
                 self._global_session.first_close_at = now
                 logger.info(
-                    f"[CLOSE] first_close 이후 trigger 있음, 다시 대기: "
+                    f"[CLOSE] {wait_seconds}초 후 trigger 감지, 다시 대기: "
                     f"global_session_id={self._global_session.global_session_id}, "
                     f"last_trigger_at={self._global_session.last_trigger_at}, "
                     f"new_first_close_at={now:.1f}"
                 )
                 return False, self._global_session
+            else:
+                # trigger 없음 → finalize 준비 완료
+                logger.info(
+                    f"[CLOSE] {wait_seconds}초 대기 완료, finalize 준비: "
+                    f"global_session_id={self._global_session.global_session_id}, "
+                    f"elapsed={elapsed:.1f}s"
+                )
+                return True, self._global_session
 
     def get_global_session(self) -> Optional[GlobalDoorSession]:
         """
