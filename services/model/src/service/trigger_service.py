@@ -1,8 +1,13 @@
 """
-Trigger Service (v4.5).
+Trigger Service (v4.6).
 
 트리거 비즈니스 로직 - YOLO 추론 및 세션 저장.
 라우터에서 분리된 핵심 비즈니스 로직.
+
+v4.6 변경사항:
+- 무게 변화 5g 이하면 비디오 처리 스킵 (불필요한 YOLO 추론 방지)
+- Node.js 상품 리스트에 없는 상품 제거 (최종 필터링)
+- product_weights 전달하여 로그 개선
 
 v4.5 변경사항:
 - Idempotency key 기반 중복 체크 (5초 이내 동일 요청 스킵)
@@ -66,11 +71,14 @@ class TriggerService:
 
     YOLO 추론, 무게 계산, 상품 판단, 세션 저장을 담당.
 
+    v4.6: 무게 변화 5g 이하 스킵, Node.js 필터링 추가
     v4.5: Idempotency key 기반 중복 체크 추가
     """
 
     # v4.5: 중복 체크 TTL (초)
     DEDUP_TTL_SECONDS = 5.0
+    # v4.6: 최소 무게 변화량 (이하면 비디오 처리 스킵)
+    MIN_WEIGHT_CHANGE_GRAMS = 5.0
 
     def __init__(
         self,
@@ -228,6 +236,35 @@ class TriggerService:
             else:
                 logger.warning("[TRIGGER] No products available, YOLO will detect all classes")
 
+        # 1-C. 무게 변화량 조기 계산 (v4.6 - 비디오 처리 전 검증)
+        delta_weight = self._calculate_weight_delta(input_data.loadcells)
+        logger.info(f"[TRIGGER] 조기 무게 계산: delta_weight={delta_weight:.1f}g")
+
+        if abs(delta_weight) <= self.MIN_WEIGHT_CHANGE_GRAMS:
+            logger.info(
+                f"[TRIGGER] 무게 변화 미미: {abs(delta_weight):.1f}g <= "
+                f"{self.MIN_WEIGHT_CHANGE_GRAMS}g, 비디오 처리 스킵"
+            )
+            session_data = SessionData(
+                session_id=session_id,
+                zone=input_data.zone,
+                products=[],
+                total_price=0,
+                delta_weight=delta_weight,
+                status="complete",
+                processing_stage="skipped_low_weight",
+                processing_stage_detail=f"무게 변화 미미 ({abs(delta_weight):.1f}g)",
+            )
+            self._session_store.save(session_id, session_data)
+            self._register_request(idempotency_key, session_id)
+            return TriggerOutput(
+                success=True,
+                session_id=session_id,
+                door_session_id=None,
+                message=f"무게 변화 미미 ({abs(delta_weight):.1f}g), 스킵",
+                status="skipped",
+            )
+
         # 2. 초기 세션 저장 (processing 상태)
         initial_session = SessionData(
             session_id=session_id,
@@ -238,18 +275,26 @@ class TriggerService:
         )
         self._session_store.save(session_id, initial_session)
 
-        # 3. 비디오 처리 (비동기) - allowed_class_ids 전달 (v4.4)
+        # 3. 비디오 처리 (비동기) - allowed_class_ids, product_weights 전달 (v4.6)
         self._session_store.update_stage(
             session_id,
             processing_stage="extracting_frames",
             processing_stage_detail="비디오에서 프레임 추출 중",
         )
 
+        # v4.6: product_weights 생성 (로그용)
+        product_weights: Dict[int, float] = {}
+        if self._active_product_store is not None:
+            for product_info in self._active_product_store.get_all_products():
+                if product_info.yolo_class_id is not None:
+                    product_weights[product_info.yolo_class_id] = product_info.product_weight
+
         processing_result = await asyncio.to_thread(
             self._video_processor.process_videos,
             top_path=input_data.top_video_path,
             side_path=input_data.side_video_path,
             allowed_class_ids=allowed_class_ids,
+            product_weights=product_weights,
         )
 
         vote_results = processing_result.vote_results
@@ -268,10 +313,9 @@ class TriggerService:
             processing_stage_detail=f"후보 {len(vote_results)}개 도출, 개수 판단 중",
         )
 
-        # 5. 무게 변화량 계산
-        delta_weight = self._calculate_weight_delta(input_data.loadcells)
-        logger.info(f"[TRIGGER] ========== 무게 계산 ==========")
-        logger.info(f"[TRIGGER] delta_weight={delta_weight:.1f}g")
+        # 5. 무게 변화량 (이미 1-C에서 계산됨, v4.6)
+        logger.info(f"[TRIGGER] ========== 무게 확인 ==========")
+        logger.info(f"[TRIGGER] delta_weight={delta_weight:.1f}g (조기 계산값 사용)")
 
         # 6. 투표 결과를 EnsembleResult로 변환
         vision_candidates = self._vote_results_to_ensemble(vote_results)
@@ -284,6 +328,27 @@ class TriggerService:
             vision_only=vision_only,
         )
 
+        # 7-B. Node.js 상품 리스트에 없는 상품 제거 (v4.6)
+        filtered_engine_products = result.products
+        if (
+            self._active_product_store is not None
+            and self._active_product_store.has_products()
+        ):
+            allowed_ids = self._active_product_store.get_allowed_class_ids()
+            if allowed_ids:
+                allowed_ids_set = set(allowed_ids)
+                original_count = len(filtered_engine_products)
+                filtered_engine_products = [
+                    p for p in filtered_engine_products
+                    if p.product_id in allowed_ids_set
+                ]
+                removed_count = original_count - len(filtered_engine_products)
+                if removed_count > 0:
+                    logger.warning(
+                        f"[TRIGGER] v4.6: {removed_count}개 상품 제거 "
+                        f"(Node.js 리스트에 없음)"
+                    )
+
         # 8. SessionStore에 결과 저장
         products = [
             ProductResult(
@@ -294,8 +359,11 @@ class TriggerService:
                 price=p.unit_price,
                 confidence=p.confidence,
             )
-            for p in result.products
+            for p in filtered_engine_products
         ]
+
+        # v4.6: 필터링 후 총 가격 재계산
+        final_total_price = sum(p.price * p.count for p in products)
 
         vision_candidates_dicts = [vc.to_dict() for vc in vision_candidates]
 
@@ -303,7 +371,7 @@ class TriggerService:
             session_id=session_id,
             zone=input_data.zone,
             products=products,
-            total_price=result.total_price,
+            total_price=final_total_price,
             delta_weight=delta_weight,
             status="complete",
             processing_stage="complete",
@@ -334,7 +402,7 @@ class TriggerService:
                 is_return=delta_weight > 0,
                 processing_time_ms=elapsed_ms,
             )
-            door_session = self._door_session_store.add_trigger(
+            door_session = self._door_session_store.add_trigger_with_global(
                 zone=input_data.zone,
                 result=trigger_result,
             )
@@ -348,9 +416,9 @@ class TriggerService:
         elapsed_ms = (time.time() - start_time) * 1000
         logger.info(f"[TRIGGER] ========== 판단 결과 ==========")
         logger.info(f"[TRIGGER] status={result.status.value}, confidence={result.confidence:.3f}")
-        for p in result.products:
+        for p in filtered_engine_products:
             logger.info(f"  - {p.name} x{p.count}: {p.total_price}원")
-        logger.info(f"[TRIGGER] total_price={result.total_price}원, elapsed={elapsed_ms:.1f}ms")
+        logger.info(f"[TRIGGER] total_price={final_total_price}원, elapsed={elapsed_ms:.1f}ms")
 
         # v4.5: 요청 등록 (중복 방지용)
         self._register_request(idempotency_key, session_id)

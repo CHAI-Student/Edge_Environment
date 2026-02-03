@@ -238,6 +238,7 @@ class VotingEnsemble:
         top_weight: float = 0.5,
         side_weight: float = 0.5,
         common_class_bonus: float = 0.2,
+        product_weights: Optional[Dict[int, float]] = None,
     ) -> List[VoteResult]:
         """
         Combine Top and Side camera ensembles with weighted confidence.
@@ -253,10 +254,13 @@ class VotingEnsemble:
             top_weight: Weight for top camera votes (default: 0.5)
             side_weight: Weight for side camera votes (default: 0.5)
             common_class_bonus: Bonus for classes detected in both cameras (default: 0.2)
+            product_weights: {class_id: weight_in_grams} for logging (v4.6)
 
         Returns:
             Combined and sorted VoteResult list (by weighted_confidence descending)
         """
+        if product_weights is None:
+            product_weights = {}
         logger.info(f"[ENSEMBLE] ========== Top/Side 결합 ==========")
         logger.info(
             f"[ENSEMBLE] Top: {top_ensemble.total_frames}프레임, "
@@ -368,9 +372,13 @@ class VotingEnsemble:
         logger.info(f"[ENSEMBLE] 결합 결과: {len(results)}개 후보")
         logger.info(f"[ENSEMBLE] 양쪽 감지: {consensus_count}개")
         for i, r in enumerate(results[:5]):
+            # v4.6: combined_conf와 product_weight 출력
+            weight_str = ""
+            if r.class_id in product_weights:
+                weight_str = f", product_weight={product_weights[r.class_id]:.0f}g"
             logger.info(
-                f"  [{i+1}] {r.class_name}: weighted={r.weighted_confidence:.3f}, "
-                f"top={r.top_detected}, side={r.side_detected}"
+                f"  [{i+1}] {r.class_name}: combined_conf={r.weighted_confidence:.3f}, "
+                f"top={r.top_detected}, side={r.side_detected}{weight_str}"
             )
 
         return results

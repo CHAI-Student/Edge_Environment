@@ -10,6 +10,10 @@ Memory-efficient design for Jetson Orin Nano:
 - Immediate memory release after inference
 - Only vote counts are accumulated (not images)
 
+v4.6 추가:
+- HandPathTracker: 손 경로 추적 기반 상품 필터링
+- product_weights 파라미터 추가 (로그용)
+
 v4.1 추가:
 - Bounding box 중심점 이동 추적 (Motion Tracking)
 - 이동이 감지된 객체만 후보에 포함
@@ -31,6 +35,7 @@ from typing import Dict, List, Optional, Tuple
 from .frame_extractor import create_frame_extractor
 from .voting_ensemble import VotingEnsemble, VoteResult
 from vision import YOLOWrapper
+from vision.hand_path_tracker import HandPathTracker
 from core.config import config
 
 logger = logging.getLogger(__name__)
@@ -112,6 +117,7 @@ class VideoProcessingStats:
         side_detections: Total detections from side camera
         processing_time_ms: Total processing time in milliseconds
         motion_filtered_classes: Number of classes filtered out due to no motion
+        hand_path_filtered_classes: Number of classes filtered out due to hand path (v4.6)
     """
     top_frames: int = 0
     side_frames: int = 0
@@ -119,6 +125,7 @@ class VideoProcessingStats:
     side_detections: int = 0
     processing_time_ms: float = 0.0
     motion_filtered_classes: int = 0
+    hand_path_filtered_classes: int = 0
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -131,6 +138,7 @@ class VideoProcessingStats:
             "total_detections": self.top_detections + self.side_detections,
             "processing_time_ms": round(self.processing_time_ms, 1),
             "motion_filtered_classes": self.motion_filtered_classes,
+            "hand_path_filtered_classes": self.hand_path_filtered_classes,
         }
 
 
@@ -177,6 +185,7 @@ class VideoProcessor:
         motion_filter_enabled: bool = True,
         min_motion_displacement: float = 30.0,
         side_roi_x_max: float = 240.0,
+        hand_path_filter_enabled: bool = True,
     ):
         """
         Initialize video processor.
@@ -189,6 +198,7 @@ class VideoProcessor:
             motion_filter_enabled: Enable motion-based filtering (default: True)
             min_motion_displacement: Minimum bbox center displacement to consider as motion (default: 30 pixels)
             side_roi_x_max: Side 카메라 ROI 최대 X 좌표 (기본 240px, 왼쪽 절반만 허용)
+            hand_path_filter_enabled: Enable hand path-based filtering (v4.6, default: True)
         """
         self.yolo = yolo
         self.min_vote_ratio = min_vote_ratio
@@ -197,6 +207,7 @@ class VideoProcessor:
         self.motion_filter_enabled = motion_filter_enabled
         self.min_motion_displacement = min_motion_displacement
         self.side_roi_x_max = side_roi_x_max
+        self.hand_path_filter_enabled = hand_path_filter_enabled
 
     def process_videos(
         self,
@@ -205,6 +216,7 @@ class VideoProcessor:
         top_weight: float = 0.5,
         side_weight: float = 0.5,
         allowed_class_ids: Optional[List[int]] = None,
+        product_weights: Optional[Dict[int, float]] = None,
     ) -> VideoProcessingResult:
         """
         Process top and side camera videos.
@@ -217,6 +229,7 @@ class VideoProcessor:
             allowed_class_ids: 허용된 YOLO 클래스 ID 리스트 (v4.4)
                                None이면 모든 클래스 탐지
                                리스트가 있으면 해당 클래스만 탐지
+            product_weights: {class_id: weight_in_grams} for logging (v4.6)
 
         Returns:
             VideoProcessingResult with combined voting results
@@ -233,11 +246,17 @@ class VideoProcessor:
         top_ensemble = VotingEnsemble(min_vote_ratio=self.min_vote_ratio)
         side_ensemble = VotingEnsemble(min_vote_ratio=self.min_vote_ratio)
 
+        # v4.6: 손 경로 추적기 생성 (Top 카메라에서만 사용)
+        top_hand_tracker: Optional[HandPathTracker] = None
+        if self.hand_path_filter_enabled:
+            top_hand_tracker = HandPathTracker()
+
         # Process top camera video
         if top_path:
             logger.info(f"[VIDEO] Top 카메라 처리 시작...")
             top_stats = self._process_single_video(
-                top_path, top_ensemble, "top", allowed_class_ids
+                top_path, top_ensemble, "top", allowed_class_ids,
+                hand_path_tracker=top_hand_tracker,
             )
             stats.top_frames = top_stats["frames"]
             stats.top_detections = top_stats["detections"]
@@ -251,7 +270,8 @@ class VideoProcessor:
         if side_path:
             logger.info(f"[VIDEO] Side 카메라 처리 시작...")
             side_stats = self._process_single_video(
-                side_path, side_ensemble, "side", allowed_class_ids
+                side_path, side_ensemble, "side", allowed_class_ids,
+                hand_path_tracker=None,  # Side 카메라에서는 손 경로 필터링 안 함
             )
             stats.side_frames = side_stats["frames"]
             stats.side_detections = side_stats["detections"]
@@ -261,14 +281,30 @@ class VideoProcessor:
                 f"탐지={stats.side_detections}개, 고유클래스={len(side_ensemble.votes)}개"
             )
 
-        # Combine results with config weights
+        # Combine results with config weights (v4.6: product_weights 전달)
         combined_results = VotingEnsemble.combine(
             top_ensemble=top_ensemble,
             side_ensemble=side_ensemble,
             top_weight=config.top_weight,
             side_weight=config.side_weight,
             common_class_bonus=config.common_class_bonus,
+            product_weights=product_weights,
         )
+
+        # v4.6: 손 경로 필터링 적용 (Top 카메라 기준)
+        if top_hand_tracker is not None and self.hand_path_filter_enabled:
+            candidate_class_ids = [r.class_id for r in combined_results]
+            valid_class_ids = top_hand_tracker.filter_products_by_path(candidate_class_ids)
+            valid_class_ids_set = set(valid_class_ids)
+
+            before_count = len(combined_results)
+            combined_results = [r for r in combined_results if r.class_id in valid_class_ids_set]
+            stats.hand_path_filtered_classes = before_count - len(combined_results)
+
+            if stats.hand_path_filtered_classes > 0:
+                logger.info(
+                    f"[VIDEO] 손 경로 필터링: {stats.hand_path_filtered_classes}개 제외"
+                )
 
         # Filter by minimum vote ratio OR minimum vote count
         # 조건 1: vote_ratio >= 5% (기존)
@@ -304,6 +340,7 @@ class VideoProcessor:
         ensemble: VotingEnsemble,
         camera_type: str = "unknown",
         allowed_class_ids: Optional[List[int]] = None,
+        hand_path_tracker: Optional[HandPathTracker] = None,
     ) -> dict:
         """
         Process a single video file with motion-based filtering.
@@ -317,11 +354,16 @@ class VideoProcessor:
         - Only includes classes with significant center movement in final results
         - Filters out stationary background objects
 
+        Hand Path Tracking (v4.6):
+        - Tracks hand movement trajectory
+        - Filters products that don't intersect with hand path
+
         Args:
             video_path: Path to video file
             ensemble: VotingEnsemble to accumulate votes
             camera_type: Camera type for logging ("top" or "side")
             allowed_class_ids: 허용된 YOLO 클래스 ID 리스트 (v4.4)
+            hand_path_tracker: HandPathTracker for hand path filtering (v4.6)
 
         Returns:
             Statistics dict with frames, detections, and motion_filtered count
@@ -351,6 +393,10 @@ class VideoProcessor:
 
             # YOLO inference (single frame) - v4.4: allowed_class_ids 전달
             detections = self.yolo.detect(frame, allowed_class_ids=allowed_class_ids)
+
+            # v4.6: 손 경로 추적기에 모든 탐지 결과 전달 (손 포함)
+            if hand_path_tracker is not None:
+                hand_path_tracker.update_frame(detections, frame_count)
 
             # Process detections
             for det in detections:
