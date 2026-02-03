@@ -1,8 +1,13 @@
 """
-Multi-Zone Judge API Routes (v4.3).
+Multi-Zone Judge API Routes (v4.5).
 
 POST /api/judge/multi-zone - Node.js에서 10초 간격으로 폴링
 SessionStore에서 결과를 조회하여 반환.
+
+v4.5 변경사항:
+- 상품 리스트 전역(global) 저장 (zone별 관리 제거)
+- ProductInfo.product_weight를 Optional로 변경
+- PendingTriggerStore 관련 로직 제거
 
 v4.3 변경사항:
 - session_id 필드를 문 상태 신호로 재활용
@@ -42,14 +47,12 @@ from session import (
 from session.active_product_store import ActiveProductStore
 from engine import ProductDecisionEngine, EnsembleResult
 from database.product_db import ProductDatabase
-from service.trigger_service import TriggerService
 from api.deps import (
     get_session_store,
     get_product_db,
     get_decision_engine,
     get_door_session_store_optional,
     get_active_product_store_optional,
-    get_trigger_service_optional,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,7 +71,7 @@ class ProductInfo(BaseModel):
     product_idx: str = Field(..., description="상품 ID (IF11)")
     product_name: str = Field(..., description="상품명")
     sale_price: int = Field(..., description="판매가격")
-    product_weight: str = Field(..., description="상품 무게 (g)")
+    product_weight: Optional[str] = Field(default="0", description="상품 무게 (g), 없으면 0")
     stock_qty: int = Field(default=0, description="재고 수량")
     loadcell: str = Field(default="false", description="로드셀 사용 여부")
 
@@ -495,11 +498,10 @@ def _handle_door_close(
 
     global_session = store.finalize_global_session()
 
-    # v4.4: ActiveProductStore 정리 (모든 zone)
+    # v4.5: ActiveProductStore 정리 (전역)
     if active_product_store is not None:
-        cleared_count = active_product_store.clear_all()
-        if cleared_count > 0:
-            logger.info(f"[MULTI-ZONE CLOSE] Cleared {cleared_count} zones from ActiveProductStore")
+        if active_product_store.clear():
+            logger.info("[MULTI-ZONE CLOSE] Cleared global products from ActiveProductStore")
 
     if global_session is None:
         return {
@@ -618,7 +620,6 @@ async def judge_multi_zone(
     engine: ProductDecisionEngine = Depends(get_decision_engine),
     door_session_store: DoorSessionStore | None = Depends(get_door_session_store_optional),
     active_product_store: ActiveProductStore | None = Depends(get_active_product_store_optional),
-    trigger_service: TriggerService | None = Depends(get_trigger_service_optional),
 ):
     """
     Node.js 폴링용 상품 판단 API (v4.3).
@@ -688,52 +689,34 @@ async def judge_multi_zone(
         _log_product_warnings(request.products)
 
     # ========================================================================
-    # v4.4: ActiveProductStore에 상품 정보 저장 + Pending Trigger 처리
+    # v4.5: ActiveProductStore에 전역 상품 정보 저장
     # ========================================================================
-    if active_product_store is not None and request.products and request.zone is not None:
+    if active_product_store is not None and request.products:
         # 상품 정보를 dict 리스트로 변환
         products_dict = [
             {
                 "product_idx": p.product_idx,
                 "product_name": p.product_name,
                 "sale_price": p.sale_price,
-                "product_weight": p.product_weight,
+                "product_weight": p.product_weight or "0",
                 "stock_qty": p.stock_qty,
             }
             for p in request.products
         ]
 
-        # ActiveProductStore에 상품 설정
-        set_result = active_product_store.set_products(
-            zone=request.zone,
-            products=products_dict,
-        )
+        # ActiveProductStore에 전역 상품 설정 (zone 없음)
+        set_result = active_product_store.set_products(products=products_dict)
 
         logger.info(
-            f"[MULTI-ZONE] zone={request.zone}: "
-            f"set_products result: {set_result.mapped_products}/{set_result.total_products} mapped, "
+            f"[MULTI-ZONE] set_products: "
+            f"{set_result.mapped_products}/{set_result.total_products} mapped, "
             f"{set_result.allowed_products} allowed (stock > 0)"
         )
 
         if set_result.unmapped_names:
             logger.warning(
-                f"[MULTI-ZONE] zone={request.zone}: "
-                f"unmapped products: {set_result.unmapped_names}"
+                f"[MULTI-ZONE] unmapped products: {set_result.unmapped_names}"
             )
-
-        # Pending trigger 처리 (products 도착 후 대기 중인 trigger 실행)
-        if trigger_service is not None and trigger_service.has_pending_trigger(request.zone):
-            logger.info(
-                f"[MULTI-ZONE] zone={request.zone}: "
-                f"Processing pending trigger after products arrived"
-            )
-            pending_result = await trigger_service.process_pending_trigger(request.zone)
-            if pending_result is not None:
-                logger.info(
-                    f"[MULTI-ZONE] zone={request.zone}: "
-                    f"Pending trigger processed: success={pending_result.success}, "
-                    f"session_id={pending_result.session_id}"
-                )
 
     # ========================================================================
     # v4.3: Door State (OPEN/CLOSE) 처리

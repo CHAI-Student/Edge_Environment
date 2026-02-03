@@ -1,8 +1,11 @@
 """
-API Dependencies for Dependency Injection (v4.2).
+API Dependencies for Dependency Injection (v4.5).
 
 FastAPI Depends()를 위한 의존성 제공자.
 ServiceContainer를 통해 인스턴스에 접근합니다.
+
+v4.5 변경사항:
+- PendingTriggerStore 관련 제거
 
 v4.2 변경사항:
 - 전역 _instances dict를 ServiceContainer로 교체
@@ -22,7 +25,6 @@ from typing import Optional
 
 from session import SessionStore, DoorSessionStore
 from session.active_product_store import ActiveProductStore
-from session.pending_trigger_store import PendingTriggerStore
 from vision import YOLOWrapper
 from database.product_db import ProductDatabase
 from engine import ProductDecisionEngine
@@ -42,7 +44,6 @@ def init_dependencies(
     video_processor: Optional[VideoProcessor] = None,
     door_session_store: Optional[DoorSessionStore] = None,
     active_product_store: Optional[ActiveProductStore] = None,
-    pending_trigger_store: Optional[PendingTriggerStore] = None,
 ) -> ServiceContainer:
     """
     의존성 초기화 (lifespan에서 호출).
@@ -54,8 +55,7 @@ def init_dependencies(
         product_db: ProductDatabase 인스턴스
         video_processor: VideoProcessor 인스턴스 (선택)
         door_session_store: DoorSessionStore 인스턴스 (선택, v4.1)
-        active_product_store: ActiveProductStore 인스턴스 (선택, v4.4)
-        pending_trigger_store: PendingTriggerStore 인스턴스 (선택, v4.4)
+        active_product_store: ActiveProductStore 인스턴스 (선택, v4.5)
 
     Returns:
         초기화된 ServiceContainer 인스턴스
@@ -69,7 +69,6 @@ def init_dependencies(
         video_processor=video_processor,
         door_session_store=door_session_store,
         active_product_store=active_product_store,
-        pending_trigger_store=pending_trigger_store,
     )
     return container
 
@@ -115,13 +114,8 @@ def get_door_session_store() -> DoorSessionStore:
 
 
 def get_active_product_store() -> ActiveProductStore:
-    """ActiveProductStore 인스턴스 반환 (v4.4)."""
+    """ActiveProductStore 인스턴스 반환 (v4.5)."""
     return get_global_container().get_active_product_store()
-
-
-def get_pending_trigger_store() -> PendingTriggerStore:
-    """PendingTriggerStore 인스턴스 반환 (v4.4)."""
-    return get_global_container().get_pending_trigger_store()
 
 
 def get_trigger_service() -> TriggerService:
@@ -165,13 +159,8 @@ def get_door_session_store_optional() -> Optional[DoorSessionStore]:
 
 
 def get_active_product_store_optional() -> Optional[ActiveProductStore]:
-    """ActiveProductStore 인스턴스 반환 (None 허용, v4.4)."""
+    """ActiveProductStore 인스턴스 반환 (None 허용, v4.5)."""
     return get_global_container().get_active_product_store_optional()
-
-
-def get_pending_trigger_store_optional() -> Optional[PendingTriggerStore]:
-    """PendingTriggerStore 인스턴스 반환 (None 허용, v4.4)."""
-    return get_global_container().get_pending_trigger_store_optional()
 
 
 def get_trigger_service_optional() -> Optional[TriggerService]:

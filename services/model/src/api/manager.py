@@ -36,7 +36,6 @@ from engine import ProductDecisionEngine
 from vision import YOLOWrapper
 from session import SessionStore, DoorSessionStore
 from session.active_product_store import ActiveProductStore
-from session.pending_trigger_store import PendingTriggerStore
 from api.deps import init_dependencies, cleanup_dependencies
 from api.routes import (
     health_router,
@@ -55,7 +54,6 @@ logger = get_logger(__name__)
 
 async def session_cleanup_task(
     session_store: SessionStore,
-    pending_trigger_store: Optional[PendingTriggerStore] = None,
     door_session_store: Optional[DoorSessionStore] = None,
     interval_seconds: float = 60.0,
     stop_event: asyncio.Event = None,
@@ -63,15 +61,15 @@ async def session_cleanup_task(
     """
     세션 TTL 정리 백그라운드 태스크 (v4.5).
 
-    지정된 간격으로 만료된 세션 및 대기 trigger를 자동 정리합니다.
+    지정된 간격으로 만료된 세션을 자동 정리합니다.
 
     v4.5 변경사항:
+    - PendingTriggerStore cleanup 제거
     - DoorSessionStore cleanup 추가 (GlobalSession max_duration 체크)
     - Sleep을 5초 단위로 분할 (빠른 shutdown 지원)
 
     Args:
         session_store: SessionStore 인스턴스
-        pending_trigger_store: PendingTriggerStore 인스턴스 (v4.4)
         door_session_store: DoorSessionStore 인스턴스 (v4.5)
         interval_seconds: 정리 주기 (초)
         stop_event: 태스크 종료 신호
@@ -106,12 +104,6 @@ async def session_cleanup_task(
                 cleaned = session_store.cleanup_expired()
                 if cleaned > 0:
                     logger.info(f"Session cleanup: removed {cleaned} expired sessions")
-
-                # v4.4: 만료된 pending trigger 정리
-                if pending_trigger_store is not None:
-                    pending_cleaned = pending_trigger_store.cleanup_expired()
-                    if pending_cleaned > 0:
-                        logger.info(f"Pending trigger cleanup: removed {pending_cleaned} expired triggers")
 
                 # v4.5: DoorSessionStore 타임아웃 정리 (GlobalSession 포함)
                 if door_session_store is not None:
@@ -262,10 +254,7 @@ def create_lifespan(settings: Settings):
             except Exception as e:
                 logger.error(f"Failed to load YOLO mapping for ActiveProductStore: {e}")
 
-        # 8. PendingTriggerStore 초기화 (v4.4)
-        pending_trigger_store = PendingTriggerStore()
-
-        # 9. DoorSessionStore 초기화 (v4.1)
+        # 8. DoorSessionStore 초기화 (v4.1)
         door_session_store = None
         if settings.door_session.enabled:
             door_session_store = DoorSessionStore(
@@ -275,15 +264,15 @@ def create_lifespan(settings: Settings):
                 max_duration=settings.door_session.max_duration_seconds,
                 get_product_weight=lambda pid: product_db.get_weight(pid),
             )
-            # v4.4: 세션 종료 시 ActiveProductStore 정리 콜백 등록
+            # v4.5: 세션 종료 시 ActiveProductStore 정리 콜백 등록
             door_session_store.set_session_finalize_callback(
-                lambda zone: active_product_store.clear(zone)
+                lambda zone: active_product_store.clear()
             )
             # 활성 세션 복구
             recovered = door_session_store.recover_active_sessions()
             logger.info(f"DoorSessionStore: recovered {recovered} active sessions")
 
-        # 10. 의존성 주입 초기화
+        # 9. 의존성 주입 초기화
         init_dependencies(
             session_store=session_store,
             yolo=yolo,
@@ -291,16 +280,14 @@ def create_lifespan(settings: Settings):
             product_db=product_db,
             door_session_store=door_session_store,
             active_product_store=active_product_store,
-            pending_trigger_store=pending_trigger_store,
         )
 
-        # 11. 백그라운드 정리 태스크 시작 (v4.5: door_session_store 추가)
+        # 10. 백그라운드 정리 태스크 시작 (v4.5: pending 제거, door_session_store 추가)
         cleanup_stop_event = asyncio.Event()
         cleanup_interval = settings.buffer.cleanup_interval_seconds
         cleanup_task = asyncio.create_task(
             session_cleanup_task(
                 session_store=session_store,
-                pending_trigger_store=pending_trigger_store,
                 door_session_store=door_session_store,
                 interval_seconds=cleanup_interval,
                 stop_event=cleanup_stop_event,
@@ -329,7 +316,7 @@ def create_lifespan(settings: Settings):
         # 종료 처리
         logger.info("Model service shutting down...")
 
-        # 12. 백그라운드 태스크 종료 (v4.2)
+        # 11. 백그라운드 태스크 종료 (v4.5)
         cleanup_stop_event.set()
         cleanup_task.cancel()
         try:
@@ -337,7 +324,7 @@ def create_lifespan(settings: Settings):
         except asyncio.CancelledError:
             pass
 
-        # 13. YAML 오래된 세션 정리 (v4.2)
+        # 12. YAML 오래된 세션 정리 (v4.5)
         if door_session_store is not None:
             try:
                 days_to_keep = settings.door_session.yaml_retention_days

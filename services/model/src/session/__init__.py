@@ -3,9 +3,11 @@ Session module for storing YOLO inference results.
 
 세션별 YOLO 추론 결과 저장 모듈.
 
+v4.5 변경:
+- PendingTriggerStore 제거 (전역 상품 관리로 불필요해짐)
+
 v4.4 추가:
 - ActiveProductStore: Node.js에서 받은 상품 정보 관리 (YOLO 사전 필터링)
-- PendingTriggerStore: products 도착 전 대기 중인 trigger 관리
 
 v4.3 추가:
 - GlobalDoorSession: session_id="OPEN"/"CLOSE" 기반 전체 zone 통합 관리
@@ -32,7 +34,6 @@ from .door_session_store import DoorSessionStore
 from .product_aggregator import ProductAggregator
 from .yaml_persistence import YamlPersistence
 from .active_product_store import ActiveProductStore
-from .pending_trigger_store import PendingTriggerStore
 
 __all__ = [
     # Session Store (v4.0)
@@ -51,7 +52,6 @@ __all__ = [
     # Global Door Session (v4.3)
     "GlobalDoorSession",
     "generate_global_session_id",
-    # Product Pre-filtering (v4.4)
+    # Product Pre-filtering (v4.4/v4.5)
     "ActiveProductStore",
-    "PendingTriggerStore",
 ]

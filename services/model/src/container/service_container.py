@@ -42,7 +42,6 @@ from typing import Callable, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from session import SessionStore, DoorSessionStore
     from session.active_product_store import ActiveProductStore
-    from session.pending_trigger_store import PendingTriggerStore
     from vision import YOLOWrapper
     from database.product_db import ProductDatabase
     from engine import ProductDecisionEngine
@@ -65,7 +64,6 @@ class ServiceContainer:
         self._session_store: Optional["SessionStore"] = None
         self._door_session_store: Optional["DoorSessionStore"] = None
         self._active_product_store: Optional["ActiveProductStore"] = None
-        self._pending_trigger_store: Optional["PendingTriggerStore"] = None
         self._yolo: Optional["YOLOWrapper"] = None
         self._engine: Optional["ProductDecisionEngine"] = None
         self._product_db: Optional["ProductDatabase"] = None
@@ -82,7 +80,6 @@ class ServiceContainer:
         video_processor: Optional["VideoProcessor"] = None,
         door_session_store: Optional["DoorSessionStore"] = None,
         active_product_store: Optional["ActiveProductStore"] = None,
-        pending_trigger_store: Optional["PendingTriggerStore"] = None,
     ) -> None:
         """
         의존성 초기화.
@@ -94,8 +91,7 @@ class ServiceContainer:
             product_db: ProductDatabase 인스턴스
             video_processor: VideoProcessor 인스턴스 (선택, 없으면 자동 생성)
             door_session_store: DoorSessionStore 인스턴스 (선택, v4.1)
-            active_product_store: ActiveProductStore 인스턴스 (선택, v4.4)
-            pending_trigger_store: PendingTriggerStore 인스턴스 (선택, v4.4)
+            active_product_store: ActiveProductStore 인스턴스 (선택, v4.5)
         """
         from video import VideoProcessor
         from service.trigger_service import TriggerService
@@ -106,7 +102,6 @@ class ServiceContainer:
         self._product_db = product_db
         self._door_session_store = door_session_store
         self._active_product_store = active_product_store
-        self._pending_trigger_store = pending_trigger_store
 
         # VideoProcessor는 yolo를 공유
         if video_processor is not None:
@@ -114,7 +109,7 @@ class ServiceContainer:
         else:
             self._video_processor = VideoProcessor(yolo=yolo)
 
-        # TriggerService 생성 (v4.4)
+        # TriggerService 생성 (v4.5)
         self._trigger_service = TriggerService(
             video_processor=self._video_processor,
             engine=engine,
@@ -122,7 +117,6 @@ class ServiceContainer:
             product_db=product_db,
             door_session_store=door_session_store,
             active_product_store=active_product_store,
-            pending_trigger_store=pending_trigger_store,
         )
 
         self._initialized = True
@@ -135,8 +129,7 @@ class ServiceContainer:
             f"db={product_db is not None}, "
             f"video_processor={self._video_processor is not None}, "
             f"door_session_store={door_session_store is not None}, "
-            f"active_product_store={active_product_store is not None}, "
-            f"pending_trigger_store={pending_trigger_store is not None}"
+            f"active_product_store={active_product_store is not None}"
         )
 
     def cleanup(self) -> None:
@@ -148,15 +141,11 @@ class ServiceContainer:
             self._door_session_store.clear_all()
 
         if self._active_product_store is not None:
-            self._active_product_store.clear_all()
-
-        if self._pending_trigger_store is not None:
-            self._pending_trigger_store.clear_all()
+            self._active_product_store.clear()
 
         self._session_store = None
         self._door_session_store = None
         self._active_product_store = None
-        self._pending_trigger_store = None
         self._yolo = None
         self._engine = None
         self._product_db = None
@@ -207,16 +196,10 @@ class ServiceContainer:
         return self._door_session_store
 
     def get_active_product_store(self) -> "ActiveProductStore":
-        """ActiveProductStore 인스턴스 반환 (v4.4)."""
+        """ActiveProductStore 인스턴스 반환 (v4.5)."""
         if self._active_product_store is None:
             raise RuntimeError("ActiveProductStore not initialized. Call init() first.")
         return self._active_product_store
-
-    def get_pending_trigger_store(self) -> "PendingTriggerStore":
-        """PendingTriggerStore 인스턴스 반환 (v4.4)."""
-        if self._pending_trigger_store is None:
-            raise RuntimeError("PendingTriggerStore not initialized. Call init() first.")
-        return self._pending_trigger_store
 
     def get_trigger_service(self) -> "TriggerService":
         """TriggerService 인스턴스 반환 (v4.4)."""
@@ -253,12 +236,8 @@ class ServiceContainer:
         return self._door_session_store
 
     def get_active_product_store_optional(self) -> Optional["ActiveProductStore"]:
-        """ActiveProductStore 인스턴스 반환 (None 허용, v4.4)."""
+        """ActiveProductStore 인스턴스 반환 (None 허용, v4.5)."""
         return self._active_product_store
-
-    def get_pending_trigger_store_optional(self) -> Optional["PendingTriggerStore"]:
-        """PendingTriggerStore 인스턴스 반환 (None 허용, v4.4)."""
-        return self._pending_trigger_store
 
     def get_trigger_service_optional(self) -> Optional["TriggerService"]:
         """TriggerService 인스턴스 반환 (None 허용, v4.4)."""
@@ -289,7 +268,6 @@ class ServiceContainer:
             "door_session_store": door_store is not None,
             "door_session_store_instance": door_store,
             "active_product_store": self._active_product_store is not None,
-            "pending_trigger_store": self._pending_trigger_store is not None,
             "trigger_service": self._trigger_service is not None,
         }
 

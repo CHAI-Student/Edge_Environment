@@ -1,8 +1,14 @@
 """
-Active Product Store (v4.4).
+Active Product Store (v4.5).
 
-Node.js에서 받은 활성 상품 정보를 zone별로 임시 관리.
+Node.js에서 받은 활성 상품 정보를 전역(global)으로 관리.
 YOLO classes 파라미터를 통한 사전 필터링 지원.
+
+v4.5 변경사항:
+- zone별 관리 → 전역 관리로 변경
+- set_products()에서 zone 파라미터 제거
+- has_products(), get_allowed_class_ids(), clear()에서 zone 파라미터 제거
+- get_product_by_class_id(), clear_all() 메서드 제거
 
 핵심 기능:
 - Node.js products 배열에서 YOLO class_id 추출
@@ -13,13 +19,13 @@ YOLO classes 파라미터를 통한 사전 필터링 지원.
     store = ActiveProductStore(yolo_mapping=yolo_mapping_dict)
 
     # products 설정 (Node.js 폴링 시)
-    result = store.set_products(zone=1, products=products_list)
+    result = store.set_products(products=products_list)
 
     # YOLO 추론 전 허용 클래스 조회
-    allowed_ids = store.get_allowed_class_ids(zone=1)
+    allowed_ids = store.get_allowed_class_ids()
 
     # 문 닫힘 시 정리
-    store.clear(zone=1)
+    store.clear()
 """
 
 import logging
@@ -45,8 +51,8 @@ class ProductInfo:
 
 
 @dataclass
-class ZoneData:
-    """Zone별 상품 데이터."""
+class GlobalProductData:
+    """전역 상품 데이터 (v4.5)."""
 
     products: List[ProductInfo]  # Node.js 원본 (매핑 성공한 것만)
     allowed_class_ids: List[int]  # YOLO 허용 클래스 IDs (stock > 0)
@@ -59,7 +65,6 @@ class SetProductsResult:
     """set_products() 결과."""
 
     success: bool
-    zone: int
     total_products: int  # Node.js에서 받은 총 상품 수
     mapped_products: int  # YOLO 매핑 성공한 상품 수
     allowed_products: int  # stock > 0인 상품 수 (allowed_class_ids 개수)
@@ -68,7 +73,7 @@ class SetProductsResult:
 
 class ActiveProductStore:
     """
-    Node.js에서 받은 활성 상품 정보를 zone별로 임시 관리.
+    Node.js에서 받은 활성 상품 정보를 전역(global)으로 관리 (v4.5).
 
     YOLO classes 파라미터를 통한 사전 필터링 지원.
     yolo_product_mapping.json에서 로드된 매핑 정보를 사용하여
@@ -90,7 +95,7 @@ class ActiveProductStore:
         """
         self._yolo_name_to_id: Dict[str, int] = yolo_name_to_id or {}
         self._yolo_name_normalized: Dict[str, int] = {}  # 정규화된 이름 매핑
-        self._zones: Dict[int, ZoneData] = {}
+        self._global_data: Optional[GlobalProductData] = None  # 전역 상품 데이터 (v4.5)
         self._lock = threading.Lock()
 
         # 정규화된 이름 매핑 생성
@@ -181,17 +186,15 @@ class ActiveProductStore:
 
     def set_products(
         self,
-        zone: int,
         products: List[dict],
     ) -> SetProductsResult:
         """
-        Node.js 상품 리스트 저장.
+        전역 상품 리스트 저장 (v4.5).
 
         product_name → yolo_class_id 매핑 수행.
         stock_qty > 0인 상품만 allowed_class_ids에 추가.
 
         Args:
-            zone: Zone 번호
             products: Node.js에서 받은 상품 리스트
                       [{"product_idx": "...", "product_name": "...",
                         "sale_price": 0, "product_weight": "0", "stock_qty": 0}, ...]
@@ -240,9 +243,9 @@ class ActiveProductStore:
             if stock_qty > 0:
                 allowed_class_ids.append(yolo_class_id)
 
-        # Zone 데이터 저장
+        # 전역 데이터 저장 (v4.5)
         with self._lock:
-            self._zones[zone] = ZoneData(
+            self._global_data = GlobalProductData(
                 products=mapped_products,
                 allowed_class_ids=allowed_class_ids,
                 class_to_product=class_to_product,
@@ -251,7 +254,6 @@ class ActiveProductStore:
 
         result = SetProductsResult(
             success=len(mapped_products) > 0,
-            zone=zone,
             total_products=len(products),
             mapped_products=len(mapped_products),
             allowed_products=len(allowed_class_ids),
@@ -259,41 +261,34 @@ class ActiveProductStore:
         )
 
         logger.info(
-            f"[ActiveProductStore] zone={zone}: "
+            f"[ActiveProductStore] global: "
             f"set {result.mapped_products}/{result.total_products} products, "
             f"allowed_classes={len(allowed_class_ids)}"
         )
 
         if unmapped_names:
             logger.warning(
-                f"[ActiveProductStore] zone={zone}: "
+                f"[ActiveProductStore] global: "
                 f"{len(unmapped_names)} unmapped products: {unmapped_names[:5]}"
             )
 
         return result
 
-    def has_products(self, zone: int) -> bool:
+    def has_products(self) -> bool:
         """
-        해당 zone에 상품 정보가 있는지 확인.
-
-        Args:
-            zone: Zone 번호
+        전역 상품 정보가 있는지 확인 (v4.5).
 
         Returns:
             상품 정보 존재 여부
         """
         with self._lock:
-            zone_data = self._zones.get(zone)
-            return zone_data is not None and len(zone_data.products) > 0
+            return self._global_data is not None and len(self._global_data.products) > 0
 
-    def get_allowed_class_ids(self, zone: int) -> Optional[List[int]]:
+    def get_allowed_class_ids(self) -> Optional[List[int]]:
         """
-        허용된 YOLO 클래스 ID 리스트.
+        허용된 YOLO 클래스 ID 리스트 (v4.5).
 
         stock_qty > 0인 상품의 YOLO class_id만 반환.
-
-        Args:
-            zone: Zone 번호
 
         Returns:
             허용된 class_id 리스트.
@@ -301,82 +296,39 @@ class ActiveProductStore:
             빈 리스트면 허용된 상품이 없음 (모두 재고 0).
         """
         with self._lock:
-            zone_data = self._zones.get(zone)
-            if zone_data is None:
+            if self._global_data is None:
                 return None
-            return zone_data.allowed_class_ids.copy()
+            return self._global_data.allowed_class_ids.copy()
 
-    def get_product_by_class_id(
-        self,
-        zone: int,
-        class_id: int,
-    ) -> Optional[ProductInfo]:
+    def get_all_products(self) -> List[ProductInfo]:
         """
-        클래스 ID로 상품 정보 조회.
-
-        Args:
-            zone: Zone 번호
-            class_id: YOLO class_id
-
-        Returns:
-            ProductInfo 또는 None
-        """
-        with self._lock:
-            zone_data = self._zones.get(zone)
-            if zone_data is None:
-                return None
-            return zone_data.class_to_product.get(class_id)
-
-    def get_all_products(self, zone: int) -> List[ProductInfo]:
-        """
-        해당 zone의 모든 상품 정보 조회.
-
-        Args:
-            zone: Zone 번호
+        모든 상품 정보 조회 (v4.5).
 
         Returns:
             ProductInfo 리스트 (빈 리스트면 없음)
         """
         with self._lock:
-            zone_data = self._zones.get(zone)
-            if zone_data is None:
+            if self._global_data is None:
                 return []
-            return zone_data.products.copy()
+            return self._global_data.products.copy()
 
-    def clear(self, zone: int) -> bool:
+    def clear(self) -> bool:
         """
-        문 닫힘 시 해당 zone 데이터 삭제.
-
-        Args:
-            zone: Zone 번호
+        전역 상품 데이터 삭제 (v4.5).
 
         Returns:
             삭제 성공 여부 (데이터가 있었으면 True)
         """
         with self._lock:
-            if zone in self._zones:
-                del self._zones[zone]
-                logger.info(f"[ActiveProductStore] zone={zone}: cleared")
+            if self._global_data is not None:
+                self._global_data = None
+                logger.info("[ActiveProductStore] global: cleared")
                 return True
             return False
 
-    def clear_all(self) -> int:
-        """
-        모든 zone 데이터 삭제.
-
-        Returns:
-            삭제된 zone 수
-        """
-        with self._lock:
-            count = len(self._zones)
-            self._zones.clear()
-            if count > 0:
-                logger.info(f"[ActiveProductStore] cleared all {count} zones")
-            return count
-
     def get_stats(self) -> dict:
         """
-        저장소 통계 반환.
+        저장소 통계 반환 (v4.5).
 
         Returns:
             통계 정보
@@ -384,16 +336,12 @@ class ActiveProductStore:
         with self._lock:
             stats = {
                 "total_yolo_classes": len(self._yolo_name_to_id),
-                "active_zones": list(self._zones.keys()),
-                "zone_count": len(self._zones),
-                "zones": {},
+                "has_products": self._global_data is not None,
             }
 
-            for zone, zone_data in self._zones.items():
-                stats["zones"][zone] = {
-                    "products": len(zone_data.products),
-                    "allowed_classes": len(zone_data.allowed_class_ids),
-                    "updated_at": zone_data.updated_at,
-                }
+            if self._global_data is not None:
+                stats["products_count"] = len(self._global_data.products)
+                stats["allowed_classes_count"] = len(self._global_data.allowed_class_ids)
+                stats["updated_at"] = self._global_data.updated_at
 
             return stats
