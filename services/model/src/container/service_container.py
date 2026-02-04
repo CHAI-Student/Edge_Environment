@@ -13,7 +13,6 @@ Service Container for Dependency Injection.
         session_store=session_store,
         yolo=yolo,
         engine=engine,
-        product_db=product_db,
     )
 
     # 의존성 조회
@@ -43,7 +42,6 @@ if TYPE_CHECKING:
     from session import SessionStore, DoorSessionStore
     from session.active_product_store import ActiveProductStore
     from vision import YOLOWrapper
-    from database.product_db import ProductDatabase
     from engine import ProductDecisionEngine
     from video import VideoProcessor
     from service.trigger_service import TriggerService
@@ -66,7 +64,6 @@ class ServiceContainer:
         self._active_product_store: Optional["ActiveProductStore"] = None
         self._yolo: Optional["YOLOWrapper"] = None
         self._engine: Optional["ProductDecisionEngine"] = None
-        self._product_db: Optional["ProductDatabase"] = None
         self._video_processor: Optional["VideoProcessor"] = None
         self._trigger_service: Optional["TriggerService"] = None
         self._initialized: bool = False
@@ -76,7 +73,6 @@ class ServiceContainer:
         session_store: "SessionStore",
         yolo: "YOLOWrapper",
         engine: "ProductDecisionEngine",
-        product_db: "ProductDatabase",
         video_processor: Optional["VideoProcessor"] = None,
         door_session_store: Optional["DoorSessionStore"] = None,
         active_product_store: Optional["ActiveProductStore"] = None,
@@ -88,7 +84,6 @@ class ServiceContainer:
             session_store: SessionStore 인스턴스
             yolo: YOLOWrapper 인스턴스
             engine: ProductDecisionEngine 인스턴스
-            product_db: ProductDatabase 인스턴스
             video_processor: VideoProcessor 인스턴스 (선택, 없으면 자동 생성)
             door_session_store: DoorSessionStore 인스턴스 (선택, v4.1)
             active_product_store: ActiveProductStore 인스턴스 (선택, v4.5)
@@ -99,7 +94,6 @@ class ServiceContainer:
         self._session_store = session_store
         self._yolo = yolo
         self._engine = engine
-        self._product_db = product_db
         self._door_session_store = door_session_store
         self._active_product_store = active_product_store
 
@@ -109,12 +103,11 @@ class ServiceContainer:
         else:
             self._video_processor = VideoProcessor(yolo=yolo)
 
-        # TriggerService 생성 (v4.5)
+        # TriggerService 생성 (v5.0: product_db 제거)
         self._trigger_service = TriggerService(
             video_processor=self._video_processor,
             engine=engine,
             session_store=session_store,
-            product_db=product_db,
             door_session_store=door_session_store,
             active_product_store=active_product_store,
         )
@@ -126,7 +119,6 @@ class ServiceContainer:
             f"session_store={session_store is not None}, "
             f"yolo={yolo is not None}, "
             f"engine={engine is not None}, "
-            f"db={product_db is not None}, "
             f"video_processor={self._video_processor is not None}, "
             f"door_session_store={door_session_store is not None}, "
             f"active_product_store={active_product_store is not None}"
@@ -148,7 +140,6 @@ class ServiceContainer:
         self._active_product_store = None
         self._yolo = None
         self._engine = None
-        self._product_db = None
         self._video_processor = None
         self._trigger_service = None
         self._initialized = False
@@ -176,12 +167,6 @@ class ServiceContainer:
         if self._engine is None:
             raise RuntimeError("ProductDecisionEngine not initialized. Call init() first.")
         return self._engine
-
-    def get_product_db(self) -> "ProductDatabase":
-        """ProductDatabase 인스턴스 반환."""
-        if self._product_db is None:
-            raise RuntimeError("ProductDatabase not initialized. Call init() first.")
-        return self._product_db
 
     def get_video_processor(self) -> "VideoProcessor":
         """VideoProcessor 인스턴스 반환."""
@@ -223,10 +208,6 @@ class ServiceContainer:
         """ProductDecisionEngine 인스턴스 반환 (None 허용)."""
         return self._engine
 
-    def get_product_db_optional(self) -> Optional["ProductDatabase"]:
-        """ProductDatabase 인스턴스 반환 (None 허용)."""
-        return self._product_db
-
     def get_video_processor_optional(self) -> Optional["VideoProcessor"]:
         """VideoProcessor 인스턴스 반환 (None 허용)."""
         return self._video_processor
@@ -263,7 +244,6 @@ class ServiceContainer:
             "yolo_instance": yolo,  # health.py에서 is_loaded 확인용
             "yolo_loaded": yolo.is_loaded if yolo else False,
             "engine": self._engine is not None,
-            "db": self._product_db is not None,
             "video_processor": self._video_processor is not None,
             "door_session_store": door_store is not None,
             "door_session_store_instance": door_store,

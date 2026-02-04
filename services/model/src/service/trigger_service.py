@@ -36,7 +36,6 @@ from engine import ProductDecisionEngine, EnsembleResult
 from session import SessionStore, SessionData, ProductResult, DoorSessionStore, TriggerResult
 from session.session_store import generate_session_id
 from session.active_product_store import ActiveProductStore
-from database.product_db import ProductDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +90,6 @@ class TriggerService:
         video_processor: VideoProcessor,
         engine: ProductDecisionEngine,
         session_store: SessionStore,
-        product_db: ProductDatabase,
         door_session_store: Optional[DoorSessionStore] = None,
         active_product_store: Optional[ActiveProductStore] = None,
     ):
@@ -102,14 +100,12 @@ class TriggerService:
             video_processor: VideoProcessor 인스턴스
             engine: ProductDecisionEngine 인스턴스
             session_store: SessionStore 인스턴스
-            product_db: ProductDatabase 인스턴스
             door_session_store: DoorSessionStore 인스턴스 (선택)
             active_product_store: ActiveProductStore 인스턴스 (v4.5, 전역 상품 관리)
         """
         self._video_processor = video_processor
         self._engine = engine
         self._session_store = session_store
-        self._product_db = product_db
         self._door_session_store = door_session_store
         self._active_product_store = active_product_store
 
@@ -262,11 +258,38 @@ class TriggerService:
                 processing_stage_detail=f"무게 변화 미미 ({abs(delta_weight):.1f}g)",
             )
             self._session_store.save(session_id, session_data)
+
+            # v5.0: DoorSession이 활성이면 빈 trigger 추가 (net delta 추적)
+            door_session_id = None
+            if self._door_session_store is not None:
+                lightweight_trigger = TriggerResult(
+                    trigger_id="",
+                    session_id=session_id,
+                    timestamp=time.time(),
+                    products=[],
+                    delta_weight=delta_weight,
+                    confidence=0.0,
+                    video_paths={
+                        "top": str(input_data.top_video_path) if input_data.top_video_path else "",
+                        "side": str(input_data.side_video_path) if input_data.side_video_path else "",
+                    },
+                    is_return=(delta_weight > 0),
+                )
+                door_session = self._door_session_store.add_trigger_with_global(
+                    zone=input_data.zone,
+                    result=lightweight_trigger,
+                )
+                door_session_id = door_session.door_session_id
+                logger.info(
+                    f"[TRIGGER] 스킵 trigger DoorSession에 추가: {door_session_id}, "
+                    f"delta={delta_weight:.1f}g"
+                )
+
             self._register_request(idempotency_key, session_id)
             return TriggerOutput(
                 success=True,
                 session_id=session_id,
-                door_session_id=None,
+                door_session_id=door_session_id,
                 message=f"무게 변화 미미 ({abs(delta_weight):.1f}g), 스킵",
                 status="skipped",
             )
@@ -465,9 +488,10 @@ class TriggerService:
 
     def _get_product_idx(self, product_id: int) -> Optional[str]:
         """YOLO class_id로 IF11 product_idx 조회."""
-        product_info = self._product_db.get_by_yolo_class_id(product_id)
-        if product_info and product_info.product_idx:
-            return product_info.product_idx
+        if self._active_product_store is not None:
+            product_info = self._active_product_store.get_by_yolo_class_id(product_id)
+            if product_info and product_info.product_idx:
+                return product_info.product_idx
         return None
 
     def _calculate_weight_delta(self, loadcells: List[LoadcellReading]) -> float:

@@ -813,9 +813,68 @@ class DoorSessionStore:
                 self._get_product_weight,
             )
 
+        # v5.0: net delta 검증 (전량/부분 반환 보정)
+        self._validate_net_delta(session)
+
         # v4.9: 크로스 존 반환 처리
         modified_zones = self._handle_cross_zone_returns(session)
         return modified_zones
+
+    def _validate_net_delta(self, session: DoorSession) -> None:
+        """
+        DoorSession의 net delta vs expected product weight 교차 검증 (v5.0).
+
+        전량 반환 또는 부분 반환 시 aggregated_products 개수를 보정합니다.
+        """
+        net_delta = sum(t.delta_weight for t in session.triggers)
+        active_products = [
+            p for p in session.aggregated_products.values()
+            if p.count > 0 and p.weight > 0
+        ]
+        expected_weight = sum(p.weight * p.count for p in active_products)
+
+        if not active_products:
+            return
+
+        NET_ZERO_THRESHOLD = 15.0  # g
+
+        # Case 1: 전량 반환 (net_delta ≈ 0이거나 양수)
+        if net_delta >= -NET_ZERO_THRESHOLD and expected_weight > NET_ZERO_THRESHOLD:
+            logger.info(
+                f"[복구 모드] 전량 반환 감지: net_delta={net_delta:.1f}g, "
+                f"expected={expected_weight:.1f}g"
+            )
+            for p in active_products:
+                logger.info(
+                    f"[복구 모드] 복구된 상품: {p.name} x{p.count} ({p.weight}g)"
+                )
+                p.count = 0
+            return
+
+        # Case 2: 부분 반환 (net_delta < expected_weight)
+        if abs(net_delta) < expected_weight - NET_ZERO_THRESHOLD:
+            actual_removed = abs(net_delta)
+            remaining = actual_removed
+            corrected = False
+            for p in sorted(active_products, key=lambda x: x.weight, reverse=True):
+                if p.weight <= 0:
+                    continue
+                new_count = min(p.count, max(0, int(round(remaining / p.weight))))
+                if new_count < p.count:
+                    logger.info(
+                        f"[복구 모드] 부분 반환: {p.name} {p.count}개 → {new_count}개"
+                    )
+                    p.count = new_count
+                    corrected = True
+                remaining -= p.weight * new_count
+                if remaining <= NET_ZERO_THRESHOLD:
+                    break
+            if corrected:
+                total = sum(
+                    p.count for p in session.aggregated_products.values()
+                    if p.count > 0
+                )
+                logger.info(f"[복구 모드] 보정 완료: 총 {total}개")
 
     def _handle_cross_zone_returns(self, session: DoorSession) -> List[int]:
         """

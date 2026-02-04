@@ -26,7 +26,6 @@ from typing import Optional
 from session import SessionStore, DoorSessionStore
 from session.active_product_store import ActiveProductStore
 from vision import YOLOWrapper
-from database.product_db import ProductDatabase
 from engine import ProductDecisionEngine
 from video import VideoProcessor
 from service.trigger_service import TriggerService
@@ -40,7 +39,6 @@ def init_dependencies(
     session_store: SessionStore,
     yolo: YOLOWrapper,
     engine: ProductDecisionEngine,
-    product_db: ProductDatabase,
     video_processor: Optional[VideoProcessor] = None,
     door_session_store: Optional[DoorSessionStore] = None,
     active_product_store: Optional[ActiveProductStore] = None,
@@ -52,7 +50,6 @@ def init_dependencies(
         session_store: SessionStore 인스턴스
         yolo: YOLOWrapper 인스턴스
         engine: ProductDecisionEngine 인스턴스
-        product_db: ProductDatabase 인스턴스
         video_processor: VideoProcessor 인스턴스 (선택)
         door_session_store: DoorSessionStore 인스턴스 (선택, v4.1)
         active_product_store: ActiveProductStore 인스턴스 (선택, v4.5)
@@ -65,7 +62,6 @@ def init_dependencies(
         session_store=session_store,
         yolo=yolo,
         engine=engine,
-        product_db=product_db,
         video_processor=video_processor,
         door_session_store=door_session_store,
         active_product_store=active_product_store,
@@ -96,11 +92,6 @@ def get_yolo() -> YOLOWrapper:
 def get_decision_engine() -> ProductDecisionEngine:
     """ProductDecisionEngine 인스턴스 반환."""
     return get_global_container().get_decision_engine()
-
-
-def get_product_db() -> ProductDatabase:
-    """ProductDatabase 인스턴스 반환."""
-    return get_global_container().get_product_db()
 
 
 def get_video_processor() -> VideoProcessor:
@@ -141,11 +132,6 @@ def get_yolo_optional() -> Optional[YOLOWrapper]:
 def get_decision_engine_optional() -> Optional[ProductDecisionEngine]:
     """ProductDecisionEngine 인스턴스 반환 (None 허용)."""
     return get_global_container().get_decision_engine_optional()
-
-
-def get_product_db_optional() -> Optional[ProductDatabase]:
-    """ProductDatabase 인스턴스 반환 (None 허용)."""
-    return get_global_container().get_product_db_optional()
 
 
 def get_video_processor_optional() -> Optional[VideoProcessor]:

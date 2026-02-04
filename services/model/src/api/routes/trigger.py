@@ -46,11 +46,11 @@ from api.deps import (
     get_decision_engine,
     get_video_processor,
     get_session_store,
-    get_product_db,
+    get_active_product_store_optional,
     get_door_session_store_optional,
     get_trigger_service_optional,
 )
-from database.product_db import ProductDatabase
+from session.active_product_store import ActiveProductStore
 from core.exceptions import (
     VideoProcessingError,
     VideoCorruptedError,
@@ -321,7 +321,7 @@ async def trigger_judgment(
     video_processor: VideoProcessor = Depends(get_video_processor),
     engine: ProductDecisionEngine = Depends(get_decision_engine),
     session_store: SessionStore = Depends(get_session_store),
-    product_db: ProductDatabase = Depends(get_product_db),
+    active_product_store: ActiveProductStore | None = Depends(get_active_product_store_optional),
     door_session_store: DoorSessionStore | None = Depends(get_door_session_store_optional),
     trigger_service: TriggerService | None = Depends(get_trigger_service_optional),
 ):
@@ -479,7 +479,9 @@ async def trigger_judgment(
         # YOLO class_id → IF11 product_idx 조회
         def get_product_idx(product_id: int) -> str | None:
             """YOLO class_id로 IF11 product_idx 조회."""
-            product_info = product_db.get_by_yolo_class_id(product_id)
+            if active_product_store is None:
+                return None
+            product_info = active_product_store.get_by_yolo_class_id(product_id)
             if product_info and product_info.product_idx:
                 return product_info.product_idx
             return None

@@ -50,6 +50,27 @@ class ProductInfo:
     yolo_class_id: Optional[int] = None  # 매핑된 YOLO 클래스 ID
     has_loadcell: str = "true"  # v4.8: 추가
 
+    # v5.0: product_db 호환 프로퍼티 (decision_engine 등에서 사용)
+    @property
+    def product_id(self) -> int:
+        return self.yolo_class_id or 0
+
+    @property
+    def weight(self) -> float:
+        return self.product_weight
+
+    @property
+    def price(self) -> int:
+        return self.sale_price
+
+    @property
+    def name(self) -> str:
+        return self.product_name
+
+    @property
+    def stock(self) -> int:
+        return self.stock_qty
+
 
 @dataclass
 class GlobalProductData:
@@ -331,6 +352,42 @@ class ActiveProductStore:
                 logger.info("[ActiveProductStore] global: cleared")
                 return True
             return False
+
+    # ========================================================================
+    # v5.0: product_db 호환 메서드 (ProductDatabase 대체)
+    # ========================================================================
+
+    def get_by_yolo_class_id(self, class_id: int) -> Optional[ProductInfo]:
+        """yolo_class_id로 상품 조회 (product_db.get_by_yolo_class_id 대체)."""
+        with self._lock:
+            if self._global_data is None:
+                return None
+            return self._global_data.class_to_product.get(class_id)
+
+    def get_by_yolo_class_name(self, class_name: str) -> Optional[ProductInfo]:
+        """yolo_class_name으로 상품 조회 (product_db.get_by_yolo_class_name 대체)."""
+        class_id = self._find_yolo_class_id(class_name)
+        if class_id is None:
+            return None
+        return self.get_by_yolo_class_id(class_id)
+
+    def get_product_weight(self, class_id: int) -> float:
+        """상품 무게 조회 (product_db.get_weight 대체)."""
+        product = self.get_by_yolo_class_id(class_id)
+        return product.product_weight if product else 0.0
+
+    def get_product_price(self, class_id: int) -> int:
+        """상품 가격 조회 (product_db.get_price 대체)."""
+        product = self.get_by_yolo_class_id(class_id)
+        return product.sale_price if product else 0
+
+    def get_product(self, class_id: int) -> Optional[ProductInfo]:
+        """product_id(class_id)로 상품 조회 (product_db.get_product 대체)."""
+        return self.get_by_yolo_class_id(class_id)
+
+    def get_price(self, class_id: int) -> int:
+        """상품 가격 조회 (product_db.get_price 호환)."""
+        return self.get_product_price(class_id)
 
     def get_stats(self) -> dict:
         """

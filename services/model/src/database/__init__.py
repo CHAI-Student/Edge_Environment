@@ -1,11 +1,5 @@
 """
 Database module for Model service.
 
-상품 정보 데이터베이스.
+v5.0: ProductDatabase 제거 (ActiveProductStore로 대체)
 """
-
-from .product_db import ProductDatabase
-
-__all__ = [
-    "ProductDatabase",
-]

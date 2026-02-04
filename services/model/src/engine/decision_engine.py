@@ -15,7 +15,7 @@ Vision 후보군 + 무게 검증을 결합하여 최종 상품과 개수를 결�
 
 from __future__ import annotations
 
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, Optional
 import logging
 import time
 
@@ -29,17 +29,7 @@ from .models import (
 from core.config import config
 from session.active_product_store import ActiveProductStore
 
-# Lazy import to avoid circular dependency
-if TYPE_CHECKING:
-    from database.product_db import ProductDatabase
-
 logger = logging.getLogger(__name__)
-
-
-def _get_product_database():
-    """Lazy import ProductDatabase to avoid circular import."""
-    from database.product_db import ProductDatabase
-    return ProductDatabase
 
 
 def _get_count_calculator():
@@ -627,8 +617,10 @@ class ProductDecisionEngine:
         # v4.7: active_products에서 가격이 있으면 우선 사용
         if estimate.unit_price > 0:
             price = estimate.unit_price
-        else:
+        elif self.product_db is not None:
             price = self.product_db.get_price(estimate.product_id)
+        else:
+            price = 0
         total_price = price * estimate.count
 
         return ProductJudgment(

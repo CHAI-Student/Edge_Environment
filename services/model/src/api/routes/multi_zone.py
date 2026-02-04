@@ -57,10 +57,8 @@ from session import (
 )
 from session.active_product_store import ActiveProductStore
 from engine import ProductDecisionEngine, EnsembleResult
-from database.product_db import ProductDatabase
 from api.deps import (
     get_session_store,
-    get_product_db,
     get_decision_engine,
     get_door_session_store_optional,
     get_active_product_store_optional,
@@ -606,8 +604,8 @@ def _handle_door_close(
     )
 
     return {
-        "success": True,
-        "status": "success",
+        "success": total_product_count > 0,
+        "status": "success" if total_product_count > 0 else "complete_no_products",
         "has_products": total_product_count > 0,
         "global_session_id": global_session.global_session_id,
         "zones": zones,
@@ -689,7 +687,6 @@ def _handle_global_polling(store: DoorSessionStore) -> dict:
 async def judge_multi_zone(
     body: Any = Body(...),
     session_store: SessionStore = Depends(get_session_store),
-    product_db: ProductDatabase = Depends(get_product_db),
     engine: ProductDecisionEngine = Depends(get_decision_engine),
     door_session_store: DoorSessionStore | None = Depends(get_door_session_store_optional),
     active_product_store: ActiveProductStore | None = Depends(get_active_product_store_optional),
@@ -917,102 +914,6 @@ async def judge_multi_zone(
             "processing_stage": session_data.processing_stage,
             "processing_stage_detail": session_data.processing_stage_detail,
         }
-
-    # Node.js에서 전달한 stock_qty로 재고 업데이트 (v4.3)
-    if request.products:
-        stock_data = [
-            {"product_idx": p.product_idx, "stock_qty": p.stock_qty}
-            for p in request.products
-        ]
-        stock_updated = product_db.update_stock_from_request(stock_data)
-        if stock_updated > 0:
-            logger.info(f"[MULTI-ZONE] Stock updated for {stock_updated} products")
-
-    # Node.js에서 전달한 product_weight로 무게 업데이트 + 재계산
-    if request.products and session_data.vision_candidates:
-        weights_updated = False
-        updated_product_ids = []
-
-        for p in request.products:
-            try:
-                weight = float(p.product_weight) if p.product_weight else 0.0
-            except (ValueError, TypeError):
-                weight = 0.0
-
-            if weight > 0:
-                # product_idx로 YOLO class_id 조회
-                class_id = product_db.get_yolo_class_id_by_product_idx(p.product_idx)
-                if class_id is not None:
-                    old_weight = product_db.get_weight(class_id)
-                    if old_weight != weight:
-                        product_db.update_weight(class_id, weight)
-                        weights_updated = True
-                        updated_product_ids.append(class_id)
-                        logger.info(
-                            f"[MULTI-ZONE] Weight updated: product_idx={p.product_idx}, "
-                            f"class_id={class_id}, {old_weight}g -> {weight}g"
-                        )
-
-        # 무게가 업데이트되었으면 개수 재계산
-        if weights_updated and session_data.status == "complete":
-            logger.info(
-                f"[MULTI-ZONE] Recalculating counts with updated weights: "
-                f"updated_ids={updated_product_ids}"
-            )
-
-            # vision_candidates를 EnsembleResult로 복원
-            vision_candidates = [
-                EnsembleResult(
-                    class_id=vc["class_id"],
-                    class_name=vc["class_name"],
-                    top_confidence=vc.get("top_confidence", 0.0),
-                    side_confidence=vc.get("side_confidence", 0.0),
-                    combined_confidence=vc.get("combined_confidence", 0.0),
-                    vote_count=vc.get("vote_count", 1),
-                )
-                for vc in session_data.vision_candidates
-            ]
-
-            # 재판단
-            result = engine.judge(
-                vision_candidates=vision_candidates,
-                delta_weight=session_data.delta_weight,
-                vision_only=False,
-            )
-
-            # 세션 데이터 업데이트
-            def get_product_idx(product_id: int) -> Optional[str]:
-                """YOLO class_id로 IF11 product_idx 조회."""
-                product_info = product_db.get_by_yolo_class_id(product_id)
-                if product_info and product_info.product_idx:
-                    return product_info.product_idx
-                return None
-
-            new_products = [
-                ProductResult(
-                    product_id=p.product_id,
-                    product_idx=get_product_idx(p.product_id),
-                    name=p.name,
-                    count=p.count,
-                    price=p.unit_price,
-                    confidence=p.confidence,
-                )
-                for p in result.products
-            ]
-
-            # 세션 업데이트
-            session_data.products = new_products
-            session_data.total_price = result.total_price
-            session_data.confidence = result.confidence
-            session_data.processing_stage_detail = f"무게 보정 후 재계산: 상품 {len(new_products)}개"
-
-            # 세션 저장소에 저장
-            session_store.save(session_data.session_id, session_data)
-
-            logger.info(
-                f"[MULTI-ZONE] Recalculation complete: "
-                f"products={len(new_products)}, total_price={result.total_price}"
-            )
 
     # 결과가 있으면 complete 응답
     # 개수가 0인 상품은 제외 (Node.js에서 요청한 상품 목록에 포함되지 않음)

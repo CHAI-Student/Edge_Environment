@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Optional
 
 from session import SessionStore, SessionData, ProductResult, DoorSessionStore
 from session.door_session import DoorSession, AggregatedProduct
+from session.active_product_store import ActiveProductStore
 from engine import ProductDecisionEngine, EnsembleResult
-from database.product_db import ProductDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -108,23 +108,23 @@ class JudgmentService:
     def __init__(
         self,
         session_store: SessionStore,
-        product_db: ProductDatabase,
         engine: ProductDecisionEngine,
         door_session_store: Optional[DoorSessionStore] = None,
+        active_product_store: Optional[ActiveProductStore] = None,
     ):
         """
         Initialize judgment service.
 
         Args:
             session_store: SessionStore 인스턴스
-            product_db: ProductDatabase 인스턴스
             engine: ProductDecisionEngine 인스턴스
             door_session_store: DoorSessionStore 인스턴스 (선택)
+            active_product_store: ActiveProductStore 인스턴스 (선택, v5.0)
         """
         self._session_store = session_store
-        self._product_db = product_db
         self._engine = engine
         self._door_session_store = door_session_store
+        self._active_product_store = active_product_store
 
     def judge(self, input_data: JudgmentInput) -> JudgmentResult:
         """
@@ -134,11 +134,6 @@ class JudgmentService:
             f"[JUDGMENT] session_id={input_data.session_id}, "
             f"zone={input_data.zone}, products={len(input_data.products)}"
         )
-
-        # [추가] 판단 시작 전, Node.js에서 받은 최신 무게 및 재고 정보를 DB에 즉시 반영
-        # 이 과정이 선행되어야 로드셀 폴백 시에도 최신 무게를 사용하고, 재고 필터링을 통과할 수 있습니다.
-        if input_data.products:
-            self._sync_product_database(input_data.products)
 
         # session_id 유효성 검사
         is_valid_session_id = (
@@ -163,32 +158,6 @@ class JudgmentService:
             is_valid_session_id,
             device_id,
         )
-
-    def _sync_product_database(self, products: List[ProductInfo]) -> None:
-        """Node.js로부터 받은 실시간 상품 정보를 DB에 동기화 (v4.8: has_loadcell 추가)."""
-        for p in products:
-            class_id = self._product_db.get_yolo_class_id_by_product_idx(p.product_idx)
-            if class_id is not None:
-                try:
-                    # 1. 무게 업데이트
-                    weight = float(p.product_weight) if p.product_weight else 0.0
-                    if weight > 0:
-                        self._product_db.update_weight(class_id, weight)
-
-                    # 2. 재고/가격/has_loadcell 업데이트 (v4.8)
-                    self._product_db.update_product(
-                        product_id=class_id,
-                        price=p.sale_price,
-                        stock=p.stock_qty,
-                        weight=weight if weight > 0 else None,
-                        has_loadcell=p.has_loadcell,  # v4.8: 추가
-                    )
-                    logger.debug(
-                        f"[SYNC] Product {p.product_idx} (ID:{class_id}) updated: "
-                        f"weight={weight}g, stock={p.stock_qty}, has_loadcell={p.has_loadcell}"
-                    )
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"[SYNC] Failed to update product {p.product_idx}: {e}")
 
     def _process_door_session(
         self,
@@ -367,10 +336,6 @@ class JudgmentService:
         if session_data.status == "processing":
             return self._create_session_processing_response(session_data, device_id)
 
-        # 무게 업데이트 및 재계산
-        if input_data.products and session_data.vision_candidates:
-            self._update_weights_and_recalculate(session_data, input_data.products)
-
         return self._create_complete_response(session_data, device_id)
 
     def _create_processing_response(
@@ -488,95 +453,12 @@ class JudgmentService:
             ),
         )
 
-    def _update_weights_and_recalculate(
-        self,
-        session_data: SessionData,
-        products: List[ProductInfo],
-    ) -> None:
-        """무게 업데이트 및 재계산."""
-        weights_updated = False
-        updated_product_ids = []
-
-        for p in products:
-            try:
-                weight = float(p.product_weight) if p.product_weight else 0.0
-            except (ValueError, TypeError):
-                weight = 0.0
-
-            if weight > 0:
-                class_id = self._product_db.get_yolo_class_id_by_product_idx(p.product_idx)
-                if class_id is not None:
-                    old_weight = self._product_db.get_weight(class_id)
-                    if old_weight != weight:
-                        self._product_db.update_weight(class_id, weight)
-                        weights_updated = True
-                        updated_product_ids.append(class_id)
-                        logger.info(
-                            f"[JUDGMENT] Weight updated: product_idx={p.product_idx}, "
-                            f"class_id={class_id}, {old_weight}g -> {weight}g"
-                        )
-
-        if weights_updated and session_data.status == "complete":
-            self._recalculate_judgment(session_data, updated_product_ids)
-
-    def _recalculate_judgment(
-        self,
-        session_data: SessionData,
-        updated_product_ids: List[int],
-    ) -> None:
-        """판단 재계산."""
-        logger.info(
-            f"[JUDGMENT] Recalculating counts with updated weights: "
-            f"updated_ids={updated_product_ids}"
-        )
-
-        vision_candidates = [
-            EnsembleResult(
-                class_id=vc["class_id"],
-                class_name=vc["class_name"],
-                top_confidence=vc.get("top_confidence", 0.0),
-                side_confidence=vc.get("side_confidence", 0.0),
-                combined_confidence=vc.get("combined_confidence", 0.0),
-                vote_count=vc.get("vote_count", 1),
-            )
-            for vc in session_data.vision_candidates
-        ]
-
-        result = self._engine.judge(
-            vision_candidates=vision_candidates,
-            delta_weight=session_data.delta_weight,
-            vision_only=False,
-        )
-
-        new_products = [
-            ProductResult(
-                product_id=p.product_id,
-                product_idx=self._get_product_idx(p.product_id),
-                name=p.name,
-                count=p.count,
-                price=p.unit_price,
-                confidence=p.confidence,
-            )
-            for p in result.products
-        ]
-
-        session_data.products = new_products
-        session_data.total_price = result.total_price
-        session_data.confidence = result.confidence
-        session_data.processing_stage_detail = f"무게 보정 후 재계산: 상품 {len(new_products)}개"
-
-        self._session_store.save(session_data.session_id, session_data)
-
-        logger.info(
-            f"[JUDGMENT] Recalculation complete: "
-            f"products={len(new_products)}, total_price={result.total_price}"
-        )
-
     def _get_product_idx(self, product_id: int) -> Optional[str]:
         """YOLO class_id로 IF11 product_idx 조회."""
-        product_info = self._product_db.get_by_yolo_class_id(product_id)
-        if product_info and product_info.product_idx:
-            return product_info.product_idx
+        if self._active_product_store is not None:
+            product_info = self._active_product_store.get_by_yolo_class_id(product_id)
+            if product_info and product_info.product_idx:
+                return product_info.product_idx
         return None
 
     def _convert_aggregated_products(
