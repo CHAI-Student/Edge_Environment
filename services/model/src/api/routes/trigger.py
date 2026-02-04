@@ -374,8 +374,8 @@ async def trigger_judgment(
                 side_video_path=request.videos.side,
             )
 
-            # TriggerService로 처리 위임
-            output: TriggerOutput = await trigger_service.process_trigger(trigger_input)
+            # TriggerService로 처리 위임 (v4.10: 큐 기반 순차 처리)
+            output: TriggerOutput = await trigger_service.enqueue_trigger(trigger_input)
 
             elapsed_ms = (time.time() - start_time) * 1000
             logger.info(f"[TRIGGER] TriggerService 완료: elapsed={elapsed_ms:.1f}ms")

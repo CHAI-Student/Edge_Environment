@@ -1,8 +1,14 @@
 """
-Door Session Store (v4.9).
+Door Session Store (v4.10).
 
 Door Session을 관리하는 저장소.
 여러 번의 /trigger 호출을 하나의 Door Session으로 통합 관리합니다.
+
+v4.10 변경사항:
+- Trigger 큐 연동: pending_trigger_count 추적
+- notify_trigger_enqueued(): 큐에 등록 시 호출 → pending 카운터 증가 + last_trigger_at 갱신
+- notify_trigger_processed(): 워커 처리 완료 시 호출 → pending 카운터 감소
+- handle_close_signal(): pending > 0이면 finalize 거부 (큐 대기 중 CLOSE 방지)
 
 v4.9 변경사항:
 - 크로스 존 반환 처리 추가 (_handle_cross_zone_returns)
@@ -145,6 +151,9 @@ class DoorSessionStore:
             get_product_weight=get_product_weight,
         )
 
+        # v4.10: 큐에 등록되었지만 아직 처리 안 된 trigger 수
+        self._pending_trigger_count = 0
+
         # v4.8: YAML 저장용 스레드풀 (백그라운드 비동기 저장)
         self._yaml_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=2,
@@ -265,6 +274,41 @@ class DoorSessionStore:
         """
         self._on_session_finalize = callback
         logger.debug("Session finalize callback registered")
+
+    def notify_trigger_enqueued(self, zone: int) -> None:
+        """
+        Trigger가 큐에 등록됨을 알림 (v4.10).
+
+        pending 카운터 증가 + GlobalSession.last_trigger_at 갱신.
+        CLOSE 신호가 큐 대기 중인 trigger를 놓치지 않도록 보장합니다.
+
+        Args:
+            zone: Zone 번호
+        """
+        with self._lock:
+            self._pending_trigger_count += 1
+            if self._global_session is not None:
+                self._global_session.last_trigger_at = time.time()
+            logger.debug(
+                f"[TRIGGER-QUEUE] Enqueued notification: zone={zone}, "
+                f"pending={self._pending_trigger_count}"
+            )
+
+    def notify_trigger_processed(self, zone: int) -> None:
+        """
+        Trigger 처리 완료를 알림 (v4.10).
+
+        pending 카운터 감소.
+
+        Args:
+            zone: Zone 번호
+        """
+        with self._lock:
+            self._pending_trigger_count = max(0, self._pending_trigger_count - 1)
+            logger.debug(
+                f"[TRIGGER-QUEUE] Processed notification: zone={zone}, "
+                f"pending={self._pending_trigger_count}"
+            )
 
     def add_trigger(
         self,
@@ -539,11 +583,12 @@ class DoorSessionStore:
         subsequent_wait_seconds: float = 5.0,
     ) -> Tuple[bool, Optional[GlobalDoorSession]]:
         """
-        CLOSE 신호 처리 (v4.7.2).
+        CLOSE 신호 처리 (v4.10).
 
         빠른 문 열고 닫기 상황 대응:
         1. 첫 CLOSE → pending_close=True, in_progress 반환
         2. 이후 CLOSE:
+           - v4.10: pending_trigger_count > 0 → 큐 대기 중이므로 finalize 거부
            - trigger 없음 → first_close_at 기준 20초 대기 (YOLO 로드 시간 고려)
            - trigger 있음 → last_trigger_at 기준 5초 대기 (이미 처리 중이므로 빠름)
 
@@ -562,6 +607,16 @@ class DoorSessionStore:
                 return True, None  # 세션 없음 → success 반환 가능
 
             now = time.time()
+
+            # v4.10: 큐에 대기 중인 trigger가 있으면 finalize 거부
+            if self._pending_trigger_count > 0:
+                logger.info(
+                    f"[CLOSE] {self._pending_trigger_count} triggers pending in queue, waiting..."
+                )
+                if not self._global_session.pending_close:
+                    self._global_session.pending_close = True
+                    self._global_session.first_close_at = now
+                return False, self._global_session
 
             if not self._global_session.pending_close:
                 # 첫 CLOSE: pending_close 설정
@@ -1027,6 +1082,7 @@ class DoorSessionStore:
                 "global_session_max_duration": self._global_session_max_duration,
                 "global_session_active": self._global_session is not None,
                 "global_session": global_session_info,
+                "pending_trigger_count": self._pending_trigger_count,  # v4.10
                 **persistence_stats,
             }
 

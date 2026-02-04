@@ -1,8 +1,14 @@
 """
-Trigger Service (v4.7).
+Trigger Service (v4.10).
 
 트리거 비즈니스 로직 - YOLO 추론 및 세션 저장.
 라우터에서 분리된 핵심 비즈니스 로직.
+
+v4.10 변경사항:
+- asyncio.Queue 기반 순차 처리 워커 추가
+- enqueue_trigger(): 즉시 "queued" 응답 반환, 백그라운드 워커에서 순차 처리
+- CLOSE 신호 race condition 방지 (notify_trigger_enqueued/processed)
+- Jetson 4GB 단일 GPU에서 TensorRT 동시 추론 충돌 방지
 
 v4.7 변경사항:
 - ActiveProductStore 상품 정보를 engine.judge()에 전달
@@ -66,8 +72,21 @@ class TriggerOutput:
     door_session_id: Optional[str]
     message: str
     error_code: Optional[str] = None
-    status: str = "complete"  # "complete", "duplicate", "skipped"
+    status: str = "complete"  # "complete", "duplicate", "skipped", "queued"
     waiting_for: Optional[str] = None  # "products" if pending
+
+
+@dataclass
+class QueueItem:
+    """큐 아이템 (v4.10)."""
+    input_data: TriggerInput
+    session_id: str
+    idempotency_key: str
+    delta_weight: float
+    enqueued_at: float
+    allowed_class_ids: Optional[List[int]] = None
+    cached_active_products: Optional[List] = None
+    product_weights: Optional[Dict[int, float]] = None
 
 
 class TriggerService:
@@ -76,6 +95,7 @@ class TriggerService:
 
     YOLO 추론, 무게 계산, 상품 판단, 세션 저장을 담당.
 
+    v4.10: asyncio.Queue 기반 순차 처리 워커
     v4.6: 무게 변화 5g 이하 스킵, Node.js 필터링 추가
     v4.5: Idempotency key 기반 중복 체크 추가
     """
@@ -84,6 +104,8 @@ class TriggerService:
     DEDUP_TTL_SECONDS = 5.0
     # v4.6: 최소 무게 변화량 (이하면 비디오 처리 스킵)
     MIN_WEIGHT_CHANGE_GRAMS = 5.0
+    # v4.10: 큐 최대 크기
+    QUEUE_MAX_SIZE = 20
 
     def __init__(
         self,
@@ -112,6 +134,11 @@ class TriggerService:
         # v4.5: Deduplication 캐시 (idempotency_key -> (timestamp, session_id))
         self._dedup_cache: Dict[str, Tuple[float, str]] = {}
         self._dedup_lock = threading.Lock()
+
+        # v4.10: 순차 처리 큐
+        self._queue: Optional[asyncio.Queue] = None
+        self._worker_task: Optional[asyncio.Task] = None
+        self._stop_event: Optional[asyncio.Event] = None
 
     def _generate_idempotency_key(self, input_data: TriggerInput) -> str:
         """
@@ -172,6 +199,501 @@ class TriggerService:
         """
         with self._dedup_lock:
             self._dedup_cache[idempotency_key] = (time.time(), session_id)
+
+    # ========================================================================
+    # Queue Worker (v4.10)
+    # ========================================================================
+
+    async def start_worker(self) -> None:
+        """
+        큐 워커 시작 (v4.10).
+
+        lifespan startup에서 호출됩니다.
+        """
+        self._queue = asyncio.Queue(maxsize=self.QUEUE_MAX_SIZE)
+        self._stop_event = asyncio.Event()
+        self._worker_task = asyncio.create_task(self._worker_loop())
+        logger.info(
+            f"[TRIGGER-WORKER] Started (max_queue_size={self.QUEUE_MAX_SIZE})"
+        )
+
+    async def stop_worker(self) -> None:
+        """
+        큐 워커 중지 (v4.10).
+
+        lifespan shutdown에서 호출됩니다.
+        잔여 큐 항목을 30초간 drain 시도 후 타임아웃 시 cancel합니다.
+        """
+        if self._worker_task is None:
+            return
+
+        self._stop_event.set()
+        try:
+            await asyncio.wait_for(self._worker_task, timeout=30.0)
+            logger.info("[TRIGGER-WORKER] Stopped gracefully")
+        except asyncio.TimeoutError:
+            logger.warning("[TRIGGER-WORKER] Timeout waiting for worker, cancelling...")
+            self._worker_task.cancel()
+            try:
+                await self._worker_task
+            except asyncio.CancelledError:
+                pass
+        except asyncio.CancelledError:
+            pass
+        self._worker_task = None
+
+    async def enqueue_trigger(self, input_data: TriggerInput) -> TriggerOutput:
+        """
+        트리거를 큐에 등록 (v4.10).
+
+        중복 체크, 비디오 검증, 무게 < 5g 체크를 즉시 수행하고,
+        YOLO 추론이 필요한 경우 큐에 등록하여 즉시 "queued" 응답을 반환합니다.
+
+        워커가 시작되지 않은 경우 (테스트 등) 기존 process_trigger로 fallback합니다.
+
+        Args:
+            input_data: 트리거 입력 데이터
+
+        Returns:
+            TriggerOutput: status="queued" (큐 등록 성공)
+        """
+        # 워커가 시작되지 않은 경우 기존 방식으로 처리
+        if self._queue is None:
+            return await self.process_trigger(input_data)
+        # v4.5: 중복 요청 체크
+        idempotency_key = self._generate_idempotency_key(input_data)
+        duplicate_session_id = self._check_duplicate(idempotency_key)
+        if duplicate_session_id is not None:
+            logger.warning(
+                f"[TRIGGER] Duplicate request detected: "
+                f"zone={input_data.zone}, idempotency_key={idempotency_key[:8]}..., "
+                f"returning previous session_id={duplicate_session_id}"
+            )
+            return TriggerOutput(
+                success=True,
+                session_id=duplicate_session_id,
+                door_session_id=None,
+                message="중복 요청 (이전 결과 반환)",
+                status="duplicate",
+            )
+
+        session_id = generate_session_id(input_data.zone)
+
+        logger.info(f"[TRIGGER] ========== 큐 등록 시작 ==========")
+        logger.info(f"[TRIGGER] zone={input_data.zone}, session_id={session_id}")
+        logger.info(f"[TRIGGER] videos: top={input_data.top_video_path}, side={input_data.side_video_path}")
+        logger.info(f"[TRIGGER] loadcells: {len(input_data.loadcells)}개")
+
+        # 1. 비디오 파일 검증
+        validation_error = self._validate_video_paths(
+            input_data.top_video_path,
+            input_data.side_video_path,
+        )
+        if validation_error:
+            return TriggerOutput(
+                success=False,
+                session_id=session_id,
+                door_session_id=None,
+                message=validation_error,
+                error_code="VIDEO_VALIDATION_ERROR",
+            )
+
+        # 2. 전역 상품 정보 확인 (v4.5 사전 필터링)
+        allowed_class_ids = None
+        if self._active_product_store is not None:
+            if self._active_product_store.has_products():
+                allowed_class_ids = self._active_product_store.get_allowed_class_ids()
+                if allowed_class_ids is not None:
+                    logger.info(
+                        f"[TRIGGER] YOLO filtering with {len(allowed_class_ids)} classes: "
+                        f"{allowed_class_ids[:10]}{'...' if len(allowed_class_ids) > 10 else ''}"
+                    )
+            else:
+                logger.warning("[TRIGGER] No products available, YOLO will detect all classes")
+
+        # 3. 무게 변화량 조기 계산
+        delta_weight = self._calculate_weight_delta(input_data.loadcells)
+        logger.info(f"[TRIGGER] 조기 무게 계산: delta_weight={delta_weight:.1f}g")
+
+        # 4. 무게 < 5g이면 YOLO 불필요 → 즉시 처리 (큐 거치지 않음)
+        if abs(delta_weight) <= self.MIN_WEIGHT_CHANGE_GRAMS:
+            return self._handle_low_weight_skip(
+                input_data, session_id, idempotency_key, delta_weight
+            )
+
+        # 5. active_products 캐시 (v4.11: 조회 시점 통일)
+        product_weights: Dict[int, float] = {}
+        cached_active_products: List = []
+        if self._active_product_store is not None:
+            cached_active_products = self._active_product_store.get_all_products()
+            for product_info in cached_active_products:
+                if product_info.yolo_class_id is not None:
+                    product_weights[product_info.yolo_class_id] = product_info.product_weight
+            if cached_active_products:
+                logger.info(f"[TRIGGER] v4.11: active_products {len(cached_active_products)}개 캐시됨")
+
+        # 6. SessionStore에 "queued" 상태 저장
+        initial_session = SessionData(
+            session_id=session_id,
+            zone=input_data.zone,
+            status="processing",
+            processing_stage="queued",
+            processing_stage_detail="큐에서 대기 중",
+        )
+        self._session_store.save(session_id, initial_session)
+
+        # 7. DoorSessionStore에 pending 알림 (CLOSE 안전장치)
+        if self._door_session_store is not None:
+            self._door_session_store.notify_trigger_enqueued(input_data.zone)
+
+        # 8. 큐에 등록
+        item = QueueItem(
+            input_data=input_data,
+            session_id=session_id,
+            idempotency_key=idempotency_key,
+            delta_weight=delta_weight,
+            enqueued_at=time.time(),
+            allowed_class_ids=allowed_class_ids,
+            cached_active_products=cached_active_products,
+            product_weights=product_weights,
+        )
+
+        try:
+            self._queue.put_nowait(item)
+        except asyncio.QueueFull:
+            logger.error(
+                f"[TRIGGER] Queue full ({self.QUEUE_MAX_SIZE}), rejecting trigger: "
+                f"zone={input_data.zone}, session_id={session_id}"
+            )
+            # 큐 등록 실패 → pending 알림 취소
+            if self._door_session_store is not None:
+                self._door_session_store.notify_trigger_processed(input_data.zone)
+            self._session_store.update_stage(
+                session_id,
+                processing_stage="error",
+                processing_stage_detail="큐 가득 참",
+            )
+            return TriggerOutput(
+                success=False,
+                session_id=session_id,
+                door_session_id=None,
+                message="처리 큐가 가득 찼습니다. 잠시 후 다시 시도하세요.",
+                error_code="QUEUE_FULL",
+            )
+
+        # 9. dedup 등록
+        self._register_request(idempotency_key, session_id)
+
+        logger.info(
+            f"[TRIGGER] 큐 등록 완료: session_id={session_id}, "
+            f"queue_size={self._queue.qsize()}"
+        )
+
+        return TriggerOutput(
+            success=True,
+            session_id=session_id,
+            door_session_id=None,
+            message="큐에 등록됨, 순차 처리 대기 중",
+            status="queued",
+        )
+
+    def _handle_low_weight_skip(
+        self,
+        input_data: TriggerInput,
+        session_id: str,
+        idempotency_key: str,
+        delta_weight: float,
+    ) -> TriggerOutput:
+        """
+        무게 변화 미미 시 즉시 처리 (v4.10, 큐 거치지 않음).
+
+        Args:
+            input_data: 트리거 입력 데이터
+            session_id: Session ID
+            idempotency_key: Idempotency key
+            delta_weight: 무게 변화량
+
+        Returns:
+            TriggerOutput: status="skipped"
+        """
+        logger.info(
+            f"[TRIGGER] 무게 변화 미미: {abs(delta_weight):.1f}g <= "
+            f"{self.MIN_WEIGHT_CHANGE_GRAMS}g, 비디오 처리 스킵"
+        )
+        session_data = SessionData(
+            session_id=session_id,
+            zone=input_data.zone,
+            products=[],
+            total_price=0,
+            delta_weight=delta_weight,
+            status="complete",
+            processing_stage="skipped_low_weight",
+            processing_stage_detail=f"무게 변화 미미 ({abs(delta_weight):.1f}g)",
+        )
+        self._session_store.save(session_id, session_data)
+
+        door_session_id = None
+        if self._door_session_store is not None:
+            lightweight_trigger = TriggerResult(
+                trigger_id="",
+                session_id=session_id,
+                timestamp=time.time(),
+                products=[],
+                delta_weight=delta_weight,
+                confidence=0.0,
+                video_paths={
+                    "top": str(input_data.top_video_path) if input_data.top_video_path else "",
+                    "side": str(input_data.side_video_path) if input_data.side_video_path else "",
+                },
+                is_return=(delta_weight > 0),
+            )
+            door_session = self._door_session_store.add_trigger_with_global(
+                zone=input_data.zone,
+                result=lightweight_trigger,
+            )
+            door_session_id = door_session.door_session_id
+            logger.info(
+                f"[TRIGGER] 스킵 trigger DoorSession에 추가: {door_session_id}, "
+                f"delta={delta_weight:.1f}g"
+            )
+
+        self._register_request(idempotency_key, session_id)
+        return TriggerOutput(
+            success=True,
+            session_id=session_id,
+            door_session_id=door_session_id,
+            message=f"무게 변화 미미 ({abs(delta_weight):.1f}g), 스킵",
+            status="skipped",
+        )
+
+    async def _worker_loop(self) -> None:
+        """
+        백그라운드 워커 루프 (v4.10).
+
+        큐에서 한 번에 1개씩 꺼내서 순차 처리합니다.
+        GPU 독점을 보장하여 TensorRT 동시 추론 충돌을 방지합니다.
+        """
+        logger.info("[TRIGGER-WORKER] Worker loop started")
+        while True:
+            if self._stop_event.is_set() and self._queue.empty():
+                logger.info("[TRIGGER-WORKER] Stop event set and queue empty, exiting")
+                break
+            try:
+                item = await asyncio.wait_for(self._queue.get(), timeout=2.0)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                logger.info("[TRIGGER-WORKER] Worker cancelled")
+                break
+
+            try:
+                await self._process_trigger_internal(item)
+            except Exception as e:
+                logger.error(
+                    f"[TRIGGER-WORKER] Error processing zone={item.input_data.zone}, "
+                    f"session_id={item.session_id}: {e}",
+                    exc_info=True,
+                )
+                self._session_store.update_stage(
+                    item.session_id,
+                    processing_stage="error",
+                    processing_stage_detail=str(e)[:200],
+                )
+                # pending 카운터 감소 (에러 시에도 반드시)
+                if self._door_session_store is not None:
+                    self._door_session_store.notify_trigger_processed(
+                        item.input_data.zone
+                    )
+            finally:
+                self._queue.task_done()
+
+        logger.info("[TRIGGER-WORKER] Worker loop stopped")
+
+    async def _process_trigger_internal(self, item: QueueItem) -> None:
+        """
+        큐에서 꺼낸 트리거를 실제 처리 (v4.10).
+
+        기존 process_trigger의 비디오 처리~결과 저장 로직을 수행합니다.
+
+        Args:
+            item: QueueItem
+        """
+        start_time = time.time()
+        input_data = item.input_data
+        session_id = item.session_id
+
+        logger.info(
+            f"[TRIGGER-WORKER] Processing: zone={input_data.zone}, "
+            f"session_id={session_id}, "
+            f"wait_time={start_time - item.enqueued_at:.1f}s"
+        )
+
+        # 1. SessionStore 상태 업데이트
+        self._session_store.update_stage(
+            session_id,
+            processing_stage="extracting_frames",
+            processing_stage_detail="비디오에서 프레임 추출 중",
+        )
+
+        # 2. 비디오 처리 (YOLO 추론) - GPU 독점
+        processing_result = await asyncio.to_thread(
+            self._video_processor.process_videos,
+            top_path=input_data.top_video_path,
+            side_path=input_data.side_video_path,
+            allowed_class_ids=item.allowed_class_ids,
+            product_weights=item.product_weights or {},
+        )
+
+        vote_results = processing_result.vote_results
+        stats = processing_result.stats
+
+        logger.info(
+            f"[TRIGGER-WORKER] 비디오 처리 완료: zone={input_data.zone}, "
+            f"프레임={stats.top_frames + stats.side_frames}, "
+            f"후보={len(vote_results)}개, 시간={stats.processing_time_ms:.1f}ms"
+        )
+
+        # 3. 처리 단계 업데이트
+        self._session_store.update_stage(
+            session_id,
+            processing_stage="calculating_count",
+            processing_stage_detail=f"후보 {len(vote_results)}개 도출, 개수 판단 중",
+        )
+
+        # 4. 투표 결과를 EnsembleResult로 변환
+        vision_candidates = self._vote_results_to_ensemble(vote_results)
+
+        # 5. 최종 상품 판단
+        delta_weight = item.delta_weight
+        vision_only = delta_weight == 0.0 and len(input_data.loadcells) == 0
+
+        active_products = item.cached_active_products or []
+        if active_products:
+            logger.info(
+                f"[TRIGGER-WORKER] active_products {len(active_products)}개 → engine.judge()에 전달"
+            )
+
+        result = self._engine.judge(
+            vision_candidates=vision_candidates,
+            delta_weight=delta_weight,
+            vision_only=vision_only,
+            active_products=active_products,
+        )
+
+        # 6. Node.js 상품 리스트에 없는 상품 제거 (v4.6)
+        filtered_engine_products = result.products
+        if (
+            self._active_product_store is not None
+            and self._active_product_store.has_products()
+        ):
+            allowed_ids = self._active_product_store.get_allowed_class_ids()
+            if allowed_ids:
+                allowed_ids_set = set(allowed_ids)
+                original_count = len(filtered_engine_products)
+                filtered_engine_products = [
+                    p for p in filtered_engine_products
+                    if p.product_id in allowed_ids_set
+                ]
+                removed_count = original_count - len(filtered_engine_products)
+                if removed_count > 0:
+                    logger.warning(
+                        f"[TRIGGER-WORKER] v4.6: {removed_count}개 상품 제거 "
+                        f"(Node.js 리스트에 없음)"
+                    )
+
+        # 7. SessionStore에 결과 저장
+        products = [
+            ProductResult(
+                product_id=p.product_id,
+                product_idx=self._get_product_idx(p.product_id),
+                name=p.name,
+                count=p.count,
+                price=p.unit_price,
+                confidence=p.confidence,
+            )
+            for p in filtered_engine_products
+        ]
+
+        final_total_price = sum(p.price * p.count for p in products)
+        vision_candidates_dicts = [vc.to_dict() for vc in vision_candidates]
+
+        session_data = SessionData(
+            session_id=session_id,
+            zone=input_data.zone,
+            products=products,
+            total_price=final_total_price,
+            delta_weight=delta_weight,
+            status="complete",
+            processing_stage="complete",
+            processing_stage_detail=f"상품 {len(products)}개 판단 완료",
+            confidence=result.confidence,
+            top_frames=stats.top_frames,
+            side_frames=stats.side_frames,
+            processing_time_ms=stats.processing_time_ms,
+            vision_candidates=vision_candidates_dicts,
+        )
+        self._session_store.save(session_id, session_data)
+
+        # 8. DoorSessionStore에 추가
+        door_session_id = None
+        if self._door_session_store is not None:
+            elapsed_ms = (time.time() - start_time) * 1000
+            trigger_result = TriggerResult(
+                trigger_id="",
+                session_id=session_id,
+                timestamp=time.time(),
+                products=products,
+                delta_weight=delta_weight,
+                confidence=result.confidence,
+                video_paths={
+                    "top": str(input_data.top_video_path) if input_data.top_video_path else "",
+                    "side": str(input_data.side_video_path) if input_data.side_video_path else "",
+                },
+                is_return=delta_weight > 0,
+                processing_time_ms=elapsed_ms,
+            )
+            door_session = self._door_session_store.add_trigger_with_global(
+                zone=input_data.zone,
+                result=trigger_result,
+            )
+            door_session_id = door_session.door_session_id
+
+            # v4.10: pending 카운터 감소
+            self._door_session_store.notify_trigger_processed(input_data.zone)
+
+            logger.info(
+                f"[TRIGGER-WORKER] Door session: {door_session_id}, "
+                f"triggers={door_session.trigger_count}, "
+                f"aggregated_products={len(door_session.aggregated_products)}"
+            )
+
+        elapsed_ms = (time.time() - start_time) * 1000
+        logger.info(f"[TRIGGER-WORKER] ========== 판단 결과 ==========")
+        logger.info(
+            f"[TRIGGER-WORKER] zone={input_data.zone}, status={result.status.value}, "
+            f"confidence={result.confidence:.3f}"
+        )
+        for p in filtered_engine_products:
+            logger.info(f"  - {p.name} x{p.count}: {p.total_price}원")
+        logger.info(
+            f"[TRIGGER-WORKER] total_price={final_total_price}원, "
+            f"elapsed={elapsed_ms:.1f}ms (wait={start_time - item.enqueued_at:.1f}s)"
+        )
+
+    def get_queue_stats(self) -> dict:
+        """
+        큐 상태 반환 (v4.10).
+
+        Returns:
+            큐 통계 정보
+        """
+        return {
+            "worker_running": (
+                self._worker_task is not None and not self._worker_task.done()
+            ),
+            "queue_size": self._queue.qsize() if self._queue else 0,
+            "queue_max_size": self.QUEUE_MAX_SIZE,
+        }
 
     async def process_trigger(self, input_data: TriggerInput) -> TriggerOutput:
         """

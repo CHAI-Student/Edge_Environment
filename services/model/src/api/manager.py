@@ -36,6 +36,7 @@ from vision import YOLOWrapper
 from session import SessionStore, DoorSessionStore
 from session.active_product_store import ActiveProductStore
 from api.deps import init_dependencies, cleanup_dependencies
+from container.service_container import get_global_container
 from api.routes import (
     health_router,
     trigger_router,
@@ -191,7 +192,12 @@ def create_lifespan(settings: Settings):
             active_product_store=active_product_store,
         )
 
-        # 7. 백그라운드 정리 태스크 시작
+        # 7. v4.10: Trigger 큐 워커 시작
+        trigger_svc = get_global_container().get_trigger_service_optional()
+        if trigger_svc is not None:
+            await trigger_svc.start_worker()
+
+        # 8. 백그라운드 정리 태스크 시작
         cleanup_stop_event = asyncio.Event()
         cleanup_interval = settings.buffer.cleanup_interval_seconds
         cleanup_task = asyncio.create_task(
@@ -220,6 +226,11 @@ def create_lifespan(settings: Settings):
 
         # 종료 처리
         logger.info("Model service shutting down...")
+
+        # 10. v4.10: Trigger 큐 워커 중지
+        trigger_svc = get_global_container().get_trigger_service_optional()
+        if trigger_svc is not None:
+            await trigger_svc.stop_worker()
 
         # 11. 백그라운드 태스크 종료 (v4.5)
         cleanup_stop_event.set()
