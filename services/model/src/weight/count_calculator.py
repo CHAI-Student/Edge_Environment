@@ -48,7 +48,7 @@ class WeightBasedCountCalculator:
     def __init__(
         self,
         tolerance_percent: float = 0.08,
-        tolerance_grams: float = 5.0,
+        tolerance_grams: float = 3.0,
         max_count: int = 10,
         min_weight_change: float = 5.0,
         use_stock_limit: bool = True,
@@ -56,11 +56,12 @@ class WeightBasedCountCalculator:
         """
         개수 계산기 초기화.
 
+        v5.1: tolerance_grams 기본값 5g → 3g 변경 (로드셀 정확도 반영)
         v4.10: ProductDatabase 제거 - Node.js active_products만 사용
 
         Args:
             tolerance_percent: 기본 허용 오차 비율 (기본값 8%)
-            tolerance_grams: 고정 허용 오차 (기본값 5g)
+            tolerance_grams: 고정 허용 오차 (기본값 3g, v5.1)
             max_count: 최대 개수 제한 (기본값 10)
             min_weight_change: 최소 무게 변화량 (기본값 5g)
             use_stock_limit: 재고 상한 사용 여부 (기본값 True, v4.3)

@@ -123,8 +123,8 @@ class WeightModel(BaseModel):
         description="Weight tolerance percentage (0.08 = 8%)",
     )
     tolerance_grams: float = Field(
-        default=5.0,
-        description="Fixed weight tolerance in grams (고정 허용 오차)",
+        default=3.0,
+        description="Fixed weight tolerance in grams (고정 허용 오차, v5.1: 5g→3g)",
     )
     min_weight_change: float = Field(
         default=5.0,
@@ -133,6 +133,48 @@ class WeightModel(BaseModel):
     max_combination_size: int = Field(
         default=2,
         description="Maximum combination size for weight matching",
+    )
+    strict_mode: bool = Field(
+        default=True,
+        description="엄격 무게 검증 모드 (v5.1: 무게로 설명 불가 시 NO_DETECTION)",
+    )
+    max_combination_items: int = Field(
+        default=5,
+        description="조합 검색 시 최대 상품 종류 수 (v5.1)",
+    )
+    # v5.2: StrictWeightMatcher 추가 설정
+    max_count_per_item: int = Field(
+        default=10,
+        description="상품당 최대 개수 (v5.2)",
+    )
+    max_combinations: int = Field(
+        default=100,
+        description="최대 조합 수 (성능 제한, v5.2)",
+    )
+    strict_mode_fallback: bool = Field(
+        default=False,
+        description="strict 모드 실패 시 기존 로직 폴백 여부 (v5.2)",
+    )
+
+
+class TriggerModel(BaseModel):
+    """Trigger service configuration settings (v5.2)."""
+
+    dedup_ttl_seconds: float = Field(
+        default=5.0,
+        description="Idempotency key 중복 체크 TTL (초)",
+    )
+    dedup_max_size: int = Field(
+        default=1000,
+        description="Deduplication 캐시 최대 크기 (메모리 누수 방지)",
+    )
+    queue_max_size: int = Field(
+        default=20,
+        description="Trigger 큐 최대 크기 (v4.10)",
+    )
+    min_weight_change_grams: float = Field(
+        default=5.0,
+        description="최소 무게 변화량 (이하면 비디오 처리 스킵)",
     )
 
 
@@ -204,6 +246,7 @@ class Settings(BaseSettings):
     weight: WeightModel = WeightModel()
     buffer: BufferModel = BufferModel()
     door_session: DoorSessionModel = DoorSessionModel()
+    trigger: TriggerModel = TriggerModel()  # v5.2
 
     # Node.js Orchestrator settings
     nodejs_url: str = Field(

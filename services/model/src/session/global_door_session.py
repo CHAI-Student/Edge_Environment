@@ -17,9 +17,9 @@ v4.7 변경사항:
     # zone별 DoorSession 추가
     global_session.zone_sessions[1] = door_session_zone_1
 
-    # 전체 통계
-    print(global_session.total_price)
-    print(global_session.total_product_count)
+    # 전체 통계 조회
+    total = global_session.total_price          # 총 가격
+    count = global_session.total_product_count  # 총 상품 수
 """
 
 import time

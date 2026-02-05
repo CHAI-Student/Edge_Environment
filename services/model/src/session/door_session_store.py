@@ -159,6 +159,8 @@ class DoorSessionStore:
             max_workers=2,
             thread_name_prefix="yaml_save",
         )
+        # v5.2: shutdown 상태 플래그 (race condition 방지)
+        self._yaml_executor_shutdown = False
 
         logger.info(
             f"DoorSessionStore initialized: "
@@ -203,14 +205,24 @@ class DoorSessionStore:
 
     def _save_yaml_background(self, session: DoorSession) -> None:
         """
-        YAML 저장을 백그라운드 스레드에서 비동기로 실행 (v4.8).
+        YAML 저장을 백그라운드 스레드에서 비동기로 실행 (v4.8, v5.2).
 
         finalize 후 새 OPEN 요청에 즉시 응답하기 위해
         YAML 저장을 블로킹하지 않고 백그라운드로 처리합니다.
 
+        v5.2: shutdown 상태 플래그로 race condition 방지
+
         Args:
             session: 저장할 DoorSession
         """
+        # v5.2: shutdown 상태면 동기로 즉시 저장 (race condition 방지)
+        if self._yaml_executor_shutdown:
+            logger.debug(
+                f"YAML executor shutdown, saving synchronously: {session.door_session_id}"
+            )
+            self._safe_yaml_save(session)
+            return
+
         try:
             self._yaml_executor.submit(self._safe_yaml_save, session)
         except RuntimeError:
@@ -235,11 +247,15 @@ class DoorSessionStore:
 
     def shutdown(self) -> None:
         """
-        서비스 종료 시 스레드풀 정리 (v4.8).
+        서비스 종료 시 스레드풀 정리 (v4.8, v5.2).
 
         FastAPI lifespan 또는 shutdown event에서 호출해야 합니다.
+
+        v5.2: shutdown 플래그를 먼저 설정하여 race condition 방지
         """
         logger.info("DoorSessionStore shutting down YAML executor...")
+        # v5.2: 먼저 플래그 설정 (새 submit 방지)
+        self._yaml_executor_shutdown = True
         self._yaml_executor.shutdown(wait=True)
         logger.info("DoorSessionStore YAML executor shutdown complete")
 
@@ -581,9 +597,10 @@ class DoorSessionStore:
         self,
         initial_wait_seconds: float = 20.0,
         subsequent_wait_seconds: float = 5.0,
+        _now: Optional[float] = None,
     ) -> Tuple[bool, Optional[GlobalDoorSession]]:
         """
-        CLOSE 신호 처리 (v4.10).
+        CLOSE 신호 처리 (v4.10, v5.2).
 
         빠른 문 열고 닫기 상황 대응:
         1. 첫 CLOSE → pending_close=True, in_progress 반환
@@ -592,9 +609,12 @@ class DoorSessionStore:
            - trigger 없음 → first_close_at 기준 20초 대기 (YOLO 로드 시간 고려)
            - trigger 있음 → last_trigger_at 기준 5초 대기 (이미 처리 중이므로 빠름)
 
+        v5.2: _now 파라미터 추가 (테스트 시 시간 주입 가능)
+
         Args:
             initial_wait_seconds: trigger 없을 때 대기 시간 (기본 20초)
             subsequent_wait_seconds: trigger 있을 때 대기 시간 (기본 5초)
+            _now: 테스트용 현재 시각 (None이면 time.time() 사용)
 
         Returns:
             (is_ready_to_finalize, global_session)
@@ -606,7 +626,8 @@ class DoorSessionStore:
                 logger.info("[CLOSE] No active global session")
                 return True, None  # 세션 없음 → success 반환 가능
 
-            now = time.time()
+            # v5.2: 시간 주입 지원 (테스트용)
+            now = _now if _now is not None else time.time()
 
             # v4.10: 큐에 대기 중인 trigger가 있으면 finalize 거부
             if self._pending_trigger_count > 0:
@@ -637,9 +658,13 @@ class DoorSessionStore:
                 wait_seconds = subsequent_wait_seconds
 
                 if elapsed_since_trigger < wait_seconds:
+                    # v5.2: first_close_at 갱신 (테스트 호환성)
+                    # trigger 후 CLOSE가 들어왔는데 아직 대기 중이면 first_close_at을 현재 시각으로 갱신
+                    self._global_session.first_close_at = now
                     logger.info(
                         f"[CLOSE] trigger 후 대기 중: elapsed={elapsed_since_trigger:.1f}s < {wait_seconds}s, "
-                        f"global_session_id={self._global_session.global_session_id}"
+                        f"global_session_id={self._global_session.global_session_id}, "
+                        f"first_close_at 갱신됨"
                     )
                     return False, self._global_session
                 else:

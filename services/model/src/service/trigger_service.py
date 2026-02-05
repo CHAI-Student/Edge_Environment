@@ -42,6 +42,7 @@ from engine import ProductDecisionEngine, EnsembleResult
 from session import SessionStore, SessionData, ProductResult, DoorSessionStore, TriggerResult
 from session.session_store import generate_session_id
 from session.active_product_store import ActiveProductStore
+from core.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -95,17 +96,21 @@ class TriggerService:
 
     YOLO 추론, 무게 계산, 상품 판단, 세션 저장을 담당.
 
+    v5.2: Deduplication 캐시 크기 제한 추가 (메모리 누수 방지)
     v4.10: asyncio.Queue 기반 순차 처리 워커
     v4.6: 무게 변화 5g 이하 스킵, Node.js 필터링 추가
     v4.5: Idempotency key 기반 중복 체크 추가
     """
 
+    # v5.2: 설정값 (config.trigger에서 가져옴, 클래스 상수는 기본값으로 유지)
     # v4.5: 중복 체크 TTL (초)
-    DEDUP_TTL_SECONDS = 5.0
+    DEDUP_TTL_SECONDS = config.trigger.dedup_ttl_seconds
+    # v5.2: 최대 캐시 크기 제한 (메모리 누수 방지)
+    DEDUP_MAX_SIZE = config.trigger.dedup_max_size
     # v4.6: 최소 무게 변화량 (이하면 비디오 처리 스킵)
-    MIN_WEIGHT_CHANGE_GRAMS = 5.0
+    MIN_WEIGHT_CHANGE_GRAMS = config.trigger.min_weight_change_grams
     # v4.10: 큐 최대 크기
-    QUEUE_MAX_SIZE = 20
+    QUEUE_MAX_SIZE = config.trigger.queue_max_size
 
     def __init__(
         self,
@@ -162,7 +167,10 @@ class TriggerService:
 
     def _check_duplicate(self, idempotency_key: str) -> Optional[str]:
         """
-        중복 요청 체크 (v4.5).
+        중복 요청 체크 (v4.5, v5.2).
+
+        v5.2: 캐시 크기 제한 추가 (메모리 누수 방지)
+        - DEDUP_MAX_SIZE 초과 시 가장 오래된 항목 제거
 
         Args:
             idempotency_key: Idempotency key
@@ -180,6 +188,22 @@ class TriggerService:
             ]
             for k in expired_keys:
                 del self._dedup_cache[k]
+
+            # v5.2: 캐시 크기 제한 (메모리 누수 방지)
+            while len(self._dedup_cache) >= self.DEDUP_MAX_SIZE:
+                # 가장 오래된 항목 제거
+                if self._dedup_cache:
+                    oldest_key = min(
+                        self._dedup_cache.keys(),
+                        key=lambda k: self._dedup_cache[k][0]
+                    )
+                    del self._dedup_cache[oldest_key]
+                    logger.debug(
+                        f"[DEDUP] v5.2: Cache size limit reached, removed oldest entry: "
+                        f"{oldest_key[:8]}..."
+                    )
+                else:
+                    break
 
             # 중복 체크
             if idempotency_key in self._dedup_cache:

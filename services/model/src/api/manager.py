@@ -42,6 +42,7 @@ from api.routes import (
     trigger_router,
     multi_zone_router,
 )
+from api.routes.multi_zone import shutdown_log_executor
 
 logger = get_logger(__name__)
 
@@ -258,6 +259,9 @@ def create_lifespan(settings: Settings):
 
             # v4.8: DoorSessionStore 스레드풀 정리 (백그라운드 YAML 저장 완료 대기)
             door_session_store.shutdown()
+
+        # v5.2: multi_zone 로그 기록용 ThreadPoolExecutor 정리
+        shutdown_log_executor()
 
         cleanup_dependencies()
         logger.info("Model service stopped")

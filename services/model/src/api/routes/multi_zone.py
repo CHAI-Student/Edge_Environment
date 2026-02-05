@@ -1,8 +1,12 @@
 """
-Multi-Zone Judge API Routes (v4.8).
+Multi-Zone Judge API Routes (v5.2).
 
 POST /api/judge/multi-zone - Node.js에서 10초 간격으로 폴링
 SessionStore에서 결과를 조회하여 반환.
+
+v5.2 변경사항:
+- daemon thread → ThreadPoolExecutor로 변경 (파일 핸들 누수 방지)
+- shutdown_log_executor() 함수 추가 (lifespan에서 호출)
 
 v4.8 변경사항:
 - Zone 기반 DoorSession 코드 제거 (dead code 정리)
@@ -36,6 +40,8 @@ v4.3 변경사항:
 6. Model이 zones 배열로 zone 1~5 최종 결과 반환
 """
 
+import atexit
+import concurrent.futures
 import json
 import logging
 import time
@@ -68,6 +74,41 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/judge", tags=["judge"])
 
+# ============================================================================
+# v5.2: ThreadPoolExecutor for Request Logging (replaces daemon threads)
+# ============================================================================
+
+# 모듈 레벨 ThreadPoolExecutor (서비스 전체에서 공유)
+_log_executor: Optional[concurrent.futures.ThreadPoolExecutor] = None
+_log_executor_shutdown = False
+
+
+def _get_log_executor() -> concurrent.futures.ThreadPoolExecutor:
+    """로그 기록용 ThreadPoolExecutor 가져오기 (lazy init)."""
+    global _log_executor
+    if _log_executor is None:
+        _log_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=2,
+            thread_name_prefix="multi_zone_log",
+        )
+    return _log_executor
+
+
+def shutdown_log_executor() -> None:
+    """
+    로그 기록용 ThreadPoolExecutor 종료 (v5.2).
+
+    FastAPI lifespan shutdown에서 호출해야 합니다.
+    서비스 종료 시 파일 I/O가 완전히 완료되도록 보장합니다.
+    """
+    global _log_executor, _log_executor_shutdown
+    _log_executor_shutdown = True
+    if _log_executor is not None:
+        logger.info("Shutting down multi_zone log executor...")
+        _log_executor.shutdown(wait=True, cancel_futures=False)
+        _log_executor = None
+        logger.info("multi_zone log executor shutdown complete")
+
 
 # ============================================================================
 # Request/Response Models
@@ -75,12 +116,17 @@ router = APIRouter(prefix="/api/judge", tags=["judge"])
 
 
 class ProductInfo(BaseModel):
-    """Node.js에서 전달하는 상품 정보."""
+    """
+    Node.js에서 전달하는 상품 정보.
+
+    Note: product_weight는 Node.js에서 string으로 전달됩니다.
+          ActiveProductStore.set_products()에서 float로 변환 처리됩니다.
+    """
 
     product_idx: str = Field(..., description="상품 ID (IF11)")
     product_name: str = Field(..., description="상품명")
     sale_price: int = Field(..., description="판매가격")
-    product_weight: Optional[str] = Field(default="0", description="상품 무게 (g), 없으면 0")
+    product_weight: Optional[str] = Field(default="0", description="상품 무게 (g), string→float 변환됨")
     stock_qty: Optional[int] = Field(default=None, description="재고 수량 (v4.6: None이면 무제한)")
     has_loadcell: str = Field(default="true", description="로드셀 사용 여부 (v4.8)")
 
@@ -292,18 +338,29 @@ def _log_request_to_file_sync(request: MultiZoneRequest, response: dict) -> None
 
 def _log_request_to_file(request: MultiZoneRequest, response: dict) -> None:
     """
-    Node.js 요청/응답을 로그 파일에 저장 (비동기 - 스레드로 실행).
+    Node.js 요청/응답을 로그 파일에 저장 (비동기 - ThreadPoolExecutor).
 
+    v5.2: daemon thread → ThreadPoolExecutor로 변경 (파일 핸들 누수 방지)
     v4.4: 동기 파일 I/O가 Uvicorn 블로킹을 유발하지 않도록
-    스레드에서 비동기적으로 실행합니다.
+    백그라운드에서 비동기적으로 실행합니다.
     """
-    import threading
-    thread = threading.Thread(
-        target=_log_request_to_file_sync,
-        args=(request, response),
-        daemon=True,
-    )
-    thread.start()
+    global _log_executor_shutdown
+
+    # v5.2: executor가 이미 shutdown된 경우 (서비스 종료 중)
+    if _log_executor_shutdown:
+        # 동기로 즉시 저장 시도 (graceful shutdown 보장)
+        try:
+            _log_request_to_file_sync(request, response)
+        except Exception as e:
+            logger.warning(f"[LOG] Sync log write failed during shutdown: {e}")
+        return
+
+    try:
+        executor = _get_log_executor()
+        executor.submit(_log_request_to_file_sync, request, response)
+    except RuntimeError:
+        # ThreadPoolExecutor가 이미 shutdown된 경우
+        logger.warning("[LOG] Log executor shutdown, skipping log write")
 
 
 # ============================================================================

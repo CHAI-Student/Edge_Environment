@@ -58,6 +58,7 @@ class ProductDecisionEngine:
         max_combination_size: Optional[int] = None,
         min_weight_change: Optional[float] = None,
         partial_threshold: float = 0.7,
+        strict_mode: Optional[bool] = None,
     ):
         """
         판단 엔진 초기화.
@@ -69,6 +70,7 @@ class ProductDecisionEngine:
             max_combination_size: 최대 조합 크기 (기본값 2)
             min_weight_change: 최소 무게 변화량 (기본값 5g)
             partial_threshold: PARTIAL/UNCERTAIN 구분 임계값 (기본값 0.7)
+            strict_mode: 엄격 무게 검증 모드 (v5.1, 기본값 True)
         """
         # if product_db is None:
         #     ProductDatabase = _get_product_database()
@@ -80,11 +82,12 @@ class ProductDecisionEngine:
         self.max_combination_size = max_combination_size or config.weight.max_combination_size
         self.min_weight_change = min_weight_change or config.weight.min_weight_change
         self.partial_threshold = partial_threshold
+        self.strict_mode = strict_mode if strict_mode is not None else config.weight.strict_mode
 
         WeightBasedCountCalculator = _get_count_calculator()
         self.count_calculator = WeightBasedCountCalculator(
             tolerance_percent=self.tolerance_percent,
-            tolerance_grams=config.weight.tolerance_grams,  # 고정 허용 오차 (기본 5g)
+            tolerance_grams=config.weight.tolerance_grams,  # 고정 허용 오차 (기본 3g)
         )
 
     def judge(
@@ -97,6 +100,7 @@ class ProductDecisionEngine:
         """
         상품 판단 수행.
 
+        v5.1: strict_mode 추가 - 무게로 설명 불가 시 NO_DETECTION 반환
         v4.7: active_products 파라미터 추가.
         ActiveProductStore의 상품 정보를 count_calculator에 전달하여
         stock 필터링 및 DEFAULT_PRODUCTS fallback 문제 해결.
@@ -116,7 +120,8 @@ class ProductDecisionEngine:
         logger.info(f"[ENGINE] ========== 판단 엔진 ==========")
         logger.info(
             f"[ENGINE] 후보: {len(vision_candidates)}개, "
-            f"delta_weight={delta_weight:.1f}g, vision_only={vision_only}"
+            f"delta_weight={delta_weight:.1f}g, vision_only={vision_only}, "
+            f"strict_mode={self.strict_mode}"
         )
         if active_products:
             logger.info(f"[ENGINE] v4.7: active_products {len(active_products)}개 수신")
@@ -135,6 +140,14 @@ class ProductDecisionEngine:
             logger.info(f"Weight change too small: {abs_weight:.1f}g < {self.min_weight_change}g")
             return self._create_no_detection_result(delta_weight, timestamp)
 
+        # v5.1: strict_mode 분기 - 무게 우선 엄격 매칭
+        if self.strict_mode:
+            logger.info("[ENGINE] v5.1: strict_mode 활성화 - 무게 우선 엄격 매칭")
+            return self._judge_strict(
+                vision_candidates, delta_weight, timestamp, active_products
+            )
+
+        # 기존 로직 (strict_mode=False)
         # 3. 개수 계산 (각 후보별) - v4.7: active_products 전달
         estimates = self.count_calculator.calculate(
             vision_candidates, delta_weight, active_products=active_products
@@ -166,6 +179,138 @@ class ProductDecisionEngine:
         # 6. 불완전 결과 반환 (최선의 추정)
         logger.info(f"[ENGINE] 전략: partial_result 반환 (매칭 실패)")
         return self._create_partial_result(estimates, delta_weight, timestamp)
+
+    def _judge_strict(
+        self,
+        vision_candidates: List[EnsembleResult],
+        delta_weight: float,
+        timestamp: float,
+        active_products: Optional[List] = None,
+    ) -> JudgmentResult:
+        """
+        무게 우선 엄격 판단 (v5.1).
+
+        로드셀이 매우 정확(±3g)하므로:
+        1. 무게로 가능한 모든 상품 조합을 찾음
+        2. 그 중 YOLO가 감지한 것만 필터링
+        3. Vision 신뢰도로 최종 선택
+        4. 무게로 설명 불가 시 NO_DETECTION 반환
+
+        Args:
+            vision_candidates: YOLO 후보
+            delta_weight: 무게 변화량
+            timestamp: 판단 시각
+            active_products: ActiveProductStore의 상품 정보
+
+        Returns:
+            JudgmentResult (status: COMPLETE 또는 NO_DETECTION)
+        """
+        from weight.strict_weight_matcher import StrictWeightMatcher
+
+        # StrictWeightMatcher 생성
+        matcher = StrictWeightMatcher(
+            tolerance=config.weight.tolerance_grams,
+            max_items=config.weight.max_combination_items,
+        )
+
+        # 유효한 조합 찾기
+        valid_combos = matcher.find_valid_combinations(
+            candidates=vision_candidates,
+            delta_weight=delta_weight,
+            active_products=active_products,
+        )
+
+        if not valid_combos:
+            # v5.2: strict_mode_fallback이면 기존 로직으로 폴백
+            if config.weight.strict_mode_fallback:
+                logger.warning(
+                    f"[ENGINE] v5.2 strict: 무게로 설명 불가, 기존 로직 폴백 "
+                    f"(delta={delta_weight:.1f}g, tolerance=±{config.weight.tolerance_grams}g)"
+                )
+                # 기존 non-strict 로직으로 폴백
+                estimates = self.count_calculator.calculate(
+                    vision_candidates, delta_weight, active_products=active_products
+                )
+                if estimates:
+                    return self._create_partial_result(estimates, delta_weight, timestamp)
+
+            # 무게로 설명 불가 → NO_DETECTION
+            logger.warning(
+                f"[ENGINE] v5.1 strict: 무게로 설명 불가 "
+                f"(delta={delta_weight:.1f}g, tolerance=±{config.weight.tolerance_grams}g) "
+                f"→ NO_DETECTION"
+            )
+            return self._create_no_detection_result(delta_weight, timestamp)
+
+        # 가장 신뢰도 높은 조합 선택 (이미 match_score 순 정렬됨)
+        best = valid_combos[0]
+
+        logger.info(
+            f"[ENGINE] v5.1 strict: 최적 조합 선택 - "
+            f"weight={best.total_weight:.1f}g (err={best.weight_error:.1f}g), "
+            f"score={best.match_score:.3f}"
+        )
+
+        # 조합에서 JudgmentResult 생성
+        return self._create_result_from_strict_combo(best, delta_weight, timestamp)
+
+    def _create_result_from_strict_combo(
+        self,
+        combo,  # ValidCombination
+        delta_weight: float,
+        timestamp: float,
+    ) -> JudgmentResult:
+        """
+        StrictWeightMatcher 조합에서 JudgmentResult 생성.
+
+        Args:
+            combo: ValidCombination 객체
+            delta_weight: 무게 변화량
+            timestamp: 판단 시각
+
+        Returns:
+            JudgmentResult (status: COMPLETE)
+        """
+        products = []
+        total_price = 0
+
+        for item in combo.items:
+            # 무게 기반이므로 신뢰도를 조합 match_score로 설정
+            confidence = combo.match_score
+
+            product = ProductJudgment(
+                product_id=item.candidate.class_id,
+                name=item.candidate.name,
+                count=item.count,
+                unit_price=item.candidate.unit_price,
+                total_price=item.candidate.unit_price * item.count,
+                confidence=confidence,
+                unit_weight=item.candidate.weight,
+            )
+            products.append(product)
+            total_price += product.total_price
+
+        # 평균 신뢰도
+        avg_confidence = combo.match_score
+
+        items_str = " + ".join(
+            f"{p.name}x{p.count}" for p in products
+        )
+        logger.info(
+            f"[ENGINE] v5.1 strict 결과: COMPLETE, {items_str}, "
+            f"total_price={total_price}원, confidence={avg_confidence:.3f}"
+        )
+
+        return JudgmentResult(
+            products=products,
+            total_price=total_price,
+            confidence=avg_confidence,
+            status=JudgmentStatus.COMPLETE,
+            weight_delta=delta_weight,
+            weight_explained=combo.total_weight,
+            weight_residual=combo.weight_error,
+            timestamp=timestamp,
+        )
 
     def _judge_vision_only(
         self,
