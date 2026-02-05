@@ -29,7 +29,6 @@ v4.2 변경사항:
 import asyncio
 import logging
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 

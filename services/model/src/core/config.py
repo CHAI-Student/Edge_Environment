@@ -178,6 +178,27 @@ class TriggerModel(BaseModel):
     )
 
 
+class AsyncStreamingModel(BaseModel):
+    """Async streaming video processing configuration (v5.3)."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Async streaming 비디오 처리 활성화 여부",
+    )
+    frame_queue_size: int = Field(
+        default=10,
+        description="프레임 큐 최대 크기 (Top/Side 인터리빙용)",
+    )
+    early_termination_enabled: bool = Field(
+        default=False,
+        description="조기 종료 기능 활성화 여부 (미래 확장용)",
+    )
+    early_termination_vote_threshold: int = Field(
+        default=50,
+        description="조기 종료를 위한 최소 투표 수 (미래 확장용)",
+    )
+
+
 class BufferModel(BaseModel):
     """Session store configuration settings (v4.2)."""
 
@@ -247,6 +268,7 @@ class Settings(BaseSettings):
     buffer: BufferModel = BufferModel()
     door_session: DoorSessionModel = DoorSessionModel()
     trigger: TriggerModel = TriggerModel()  # v5.2
+    async_streaming: AsyncStreamingModel = AsyncStreamingModel()  # v5.3
 
     # Node.js Orchestrator settings
     nodejs_url: str = Field(

@@ -11,12 +11,13 @@ Usage:
         pass
 """
 
+import asyncio
 import logging
 import subprocess
 import json
 import time
 from pathlib import Path
-from typing import Iterator, Optional, Tuple
+from typing import AsyncIterator, Iterator, Optional, Tuple
 
 import numpy as np
 
@@ -366,6 +367,75 @@ class StreamingFrameExtractor:
                 process.stderr.close()
                 process.terminate()
                 process.wait(timeout=5)
+
+    async def __aiter__(self) -> AsyncIterator[np.ndarray]:
+        """
+        Async iterate over frames (v5.3).
+
+        비동기 프레임 스트리밍. asyncio.create_subprocess_exec()를 사용하여
+        I/O 대기 중 다른 태스크가 실행될 수 있도록 합니다.
+
+        Yields:
+            Frame as numpy array (BGR format, H x W x 3)
+        """
+        if not self._probe_video():
+            return
+
+        logger.info(f"[FFMPEG-ASYNC] ========== 비동기 프레임 추출 시작 ==========")
+        logger.info(f"[FFMPEG-ASYNC] 비디오: {self.video_path}")
+        logger.info(f"[FFMPEG-ASYNC] 해상도: {self._width}x{self._height}, FPS: {self._fps:.1f}")
+        logger.info(f"[FFMPEG-ASYNC] 예상 프레임: {self._total_frames}개")
+        hwaccel_status = 'NVDEC' if self.use_hwaccel and self._hwaccel_available else 'CPU'
+        logger.info(f"[FFMPEG-ASYNC] HWACCEL: {hwaccel_status}")
+
+        cmd = self._build_ffmpeg_cmd()
+        logger.debug(f"FFmpeg async command: {' '.join(cmd)}")
+
+        process = None
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            frame_count = 0
+            while True:
+                # Read exactly one frame asynchronously
+                raw_frame = await process.stdout.read(self.frame_size)
+
+                if len(raw_frame) < self.frame_size:
+                    # End of stream or error
+                    break
+
+                # Convert to numpy array
+                frame = np.frombuffer(raw_frame, dtype=np.uint8)
+                frame = frame.reshape((self._height, self._width, 3))
+
+                frame_count += 1
+                yield frame
+
+            logger.info(f"[FFMPEG-ASYNC] 프레임 추출 완료: {frame_count}개")
+
+        except asyncio.CancelledError:
+            logger.warning("[FFMPEG-ASYNC] Frame extraction cancelled")
+            raise
+
+        except Exception as e:
+            logger.error(f"[FFMPEG-ASYNC] Frame extraction failed: {e}")
+
+        finally:
+            if process is not None:
+                # Cleanup: terminate process and close streams
+                try:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    logger.warning("[FFMPEG-ASYNC] Process kill timeout, forcing kill")
+                    process.kill()
+                    await process.wait()
+                except Exception as e:
+                    logger.warning(f"[FFMPEG-ASYNC] Cleanup error: {e}")
 
     def read_frame(self, frame_number: int) -> Optional[np.ndarray]:
         """

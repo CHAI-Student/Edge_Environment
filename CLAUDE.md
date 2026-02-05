@@ -1,9 +1,9 @@
 # Edge Environment Lite - Model 서비스
 
-AI 스마트 자판기 시스템의 Model 서비스 (v4.2 Service Layer + Docker)
+AI 스마트 자판기 시스템의 Model 서비스 (v5.3 Async Streaming Pipeline)
 **Jetson Orin Nano 4GB (JetPack 6.2) TensorRT 전용**
 
-> **최종 업데이트**: 2026-02-02
+> **최종 업데이트**: 2026-02-05
 
 ## 개요
 
@@ -11,7 +11,38 @@ AI 스마트 자판기 시스템의 Model 서비스 (v4.2 Service Layer + Docker
 **TensorRT 엔진(.engine)** 파일만 지원하며, **CUDA가 필수**입니다.
 Node.js, IO Board, Payment, Camera Driver는 별도 레포에서 관리됩니다.
 
-### v4.2 변경사항 (최신)
+### v5.3 변경사항 (최신)
+
+- **Async Streaming Video Processing**: Top/Side 비디오 I/O 병렬화
+  - `StreamingFrameExtractor.__aiter__()` - 비동기 프레임 스트리밍
+  - `VideoProcessor.process_videos_async()` - 인터리빙 처리
+  - `asyncio.Queue` 기반 Top/Side 프레임 인터리빙
+  - 단일 YOLO 인스턴스로 순차 추론 (GPU 메모리 제약)
+- **Feature Flag 기반 async/sync 선택**: `config.async_streaming.enabled`
+  - `True` (기본): 비동기 스트리밍 모드 사용
+  - `False`: 기존 동기 모드 (`asyncio.to_thread`) 사용
+- **처리 시간 개선**: I/O 병렬화로 20-30% 향상 목표
+  - 현재: 12-20초/트리거
+  - 목표: 8-14초/트리거
+- **신규 환경변수**: `MODEL__ASYNC_STREAMING__*` 설정 그룹 추가
+
+### v5.2 변경사항
+
+- **StrictWeightMatcher**: 무게 우선 엄격 매칭 알고리즘
+- **Deduplication 캐시 크기 제한**: 메모리 누수 방지 (`DEDUP_MAX_SIZE`)
+- **TriggerModel 설정**: `config.trigger.*` 설정 그룹 추가
+
+### v5.1 변경사항
+
+- **엄격 무게 검증 모드**: 무게로 설명 불가 시 NO_DETECTION 반환
+- **무게 허용 오차 축소**: 5g -> 3g
+
+### v5.0 변경사항
+
+- **반환 로직 강건성 개선**: Cross-zone return logic
+- **ProductDatabase 제거**: ActiveProductStore로 통합
+
+### v4.2 변경사항
 
 - **Service Layer 추가**: Controller-Service 패턴 적용
   - `src/service/trigger_service.py` - 트리거 비즈니스 로직
@@ -51,22 +82,25 @@ Node.js, IO Board, Payment, Camera Driver는 별도 레포에서 관리됩니다
 | FFmpeg 코덱 | `-c:v mjpeg` | AVI MJPEG 최적화 |
 | 배치 크기 | 1 (고정) | 4GB 메모리 제약 |
 | GPU 워밍업 | 서비스 시작 시 더미 추론 2회 | 첫 요청 지연 제거 |
+| Async Streaming (v5.3) | Top/Side I/O 병렬화 | 처리 시간 20-30% 감소 |
+| 프레임 큐 크기 | 10 (기본값) | 메모리/성능 균형 |
 
 ## 아키텍처 (v4.2)
 
 ```
 다른 레포                                 이 레포
 ┌─────────────────────────────┐          ┌─────────────────────────────┐
-│ Node.js Orchestrator (8888) │          │ React Client (3000)         │
-│   - 10초 간격 폴링          │          │   - setupProxy → 8888       │
-├─────────────────────────────┤          ├─────────────────────────────┤
-│ Camera Driver (8003)        │─────────►│ Model Service (8002)        │
-│   - POST /trigger 호출      │          │   - SessionStore            │
-│   - AVI 녹화 완료 시        │          │   - DoorSessionStore (v4.1) │
-├─────────────────────────────┤          │   - YOLO 추론               │
-│ IO Board (8000)             │          │   - 상품 판단               │
-│ Payment (5000/5001)         │          └─────────────────────────────┘
+│ Node.js Orchestrator (8888) │          │ Model Service (8002)        │
+│   - 10초 간격 폴링          │          │   - SessionStore            │
+├─────────────────────────────┤          │   - DoorSessionStore (v4.1) │
+│ Camera Driver (8003)        │─────────►│   - YOLO 추론               │
+│   - POST /trigger 호출      │          │   - 상품 판단               │
+│   - AVI 녹화 완료 시        │          └─────────────────────────────┘
+├─────────────────────────────┤
+│ IO Board (8000)             │
+│ Payment (5000/5001)         │
 │ MQTT Client (8006)          │
+│ React Client (3000)         │  ← dashboard/ 레포
 └─────────────────────────────┘
 ```
 
@@ -75,7 +109,7 @@ Node.js, IO Board, Payment, Camera Driver는 별도 레포에서 관리됩니다
 | 서비스 | 포트 | 설명 | 관리 위치 |
 |--------|------|------|-----------|
 | Model | 8002 | YOLO 추론 + 상품 판단 | **이 레포** |
-| React Client | 3000 | 웹 대시보드 UI | **이 레포** |
+| React Client | 3000 | 웹 대시보드 UI | dashboard/ 레포 |
 | Node.js | 8888 | 오케스트레이터 | 다른 레포 |
 | Camera Driver | 8003 | 카메라 + AVI 녹화 | 다른 레포 |
 | IO Board | 8000 | 로드셀 + 데드볼트 | 다른 레포 |
@@ -411,21 +445,69 @@ curl -X POST http://localhost:8002/api/products/sync \
 
 ## 환경 변수
 
+### API 설정
+
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | MODEL__API__HOST | 0.0.0.0 | 서버 호스트 |
 | MODEL__API__PORT | 8002 | 서버 포트 |
 | MODEL__API__LOG_LEVEL | info | 로그 레벨 |
+
+### Session 설정
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
 | MODEL__BUFFER__TTL_SECONDS | 300 | 세션 TTL (초) |
 | MODEL__BUFFER__MAX_SESSIONS | 100 | 최대 세션 수 |
+
+### Vision 설정
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
 | MODEL__VISION__YOLO_MODEL_PATH | models/siyeon_best.engine | TensorRT 엔진 경로 |
 | MODEL__VISION__TOP_WEIGHT | 0.5 | Top 카메라 가중치 |
 | MODEL__VISION__SIDE_WEIGHT | 0.5 | Side 카메라 가중치 |
 | MODEL__VISION__COMMON_CLASS_BONUS | 0.2 | 양쪽 감지 시 보너스 |
-| MODEL__NODEJS_URL | http://localhost:8888 | Node.js URL |
+
+### Async Streaming 설정 (v5.3)
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| MODEL__ASYNC_STREAMING__ENABLED | true | Async streaming 활성화 여부 |
+| MODEL__ASYNC_STREAMING__FRAME_QUEUE_SIZE | 10 | 프레임 큐 최대 크기 (Top/Side 인터리빙용) |
+| MODEL__ASYNC_STREAMING__EARLY_TERMINATION_ENABLED | false | 조기 종료 기능 (미래 확장용) |
+| MODEL__ASYNC_STREAMING__EARLY_TERMINATION_VOTE_THRESHOLD | 50 | 조기 종료 투표 임계값 (미래 확장용) |
+
+### Trigger 설정 (v5.2)
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| MODEL__TRIGGER__DEDUP_TTL_SECONDS | 5.0 | Idempotency key 중복 체크 TTL (초) |
+| MODEL__TRIGGER__DEDUP_MAX_SIZE | 1000 | Dedup 캐시 최대 크기 |
+| MODEL__TRIGGER__QUEUE_MAX_SIZE | 20 | Trigger 큐 최대 크기 (v4.10) |
+| MODEL__TRIGGER__MIN_WEIGHT_CHANGE_GRAMS | 5.0 | 최소 무게 변화량 (이하면 스킵) |
+
+### Weight 설정 (v5.1)
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| MODEL__WEIGHT__TOLERANCE_GRAMS | 3.0 | 무게 허용 오차 (g) |
+| MODEL__WEIGHT__STRICT_MODE | true | 엄격 무게 검증 모드 |
+| MODEL__WEIGHT__MAX_COMBINATION_SIZE | 2 | 최대 조합 크기 |
+
+### Door Session 설정
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
 | MODEL__DOOR_SESSION__TIMEOUT | 30.0 | Door Session 타임아웃 (초) |
-| MODEL__DOOR_SESSION__WEIGHT_TOLERANCE | 3.0 | 반환 무게 매칭 허용 오차 (g) |
+| MODEL__DOOR_SESSION__WEIGHT_TOLERANCE | 5.0 | 반환 무게 매칭 허용 오차 (g) |
 | MODEL__DOOR_SESSION__MAX_DURATION | 600.0 | Door Session 최대 지속 시간 (초) |
+
+### 기타 설정
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| MODEL__NODEJS_URL | http://localhost:8888 | Node.js URL |
 
 ## 프로젝트 구조
 
@@ -435,11 +517,16 @@ Edge_Environment/
 ├── CLAUDE.md                     # 이 문서
 ├── README.md                     # 기본 README
 ├── pyproject.toml                # Python 프로젝트 설정
-├── config/
-│   └── yolo_product_mapping.json # YOLO 클래스-상품 매핑
+├── data/
+│   └── sessions/                 # Door Session YAML 영속화
+├── logs/
+│   ├── judgment/                 # 판단 로그
+│   ├── system/                   # 시스템 로그
+│   └── weight/                   # 무게 로그
 ├── models/
 │   └── siyeon_best.engine        # TensorRT 엔진 (Jetson에서 생성)
-├── client/                       # React Frontend (포트 3000)
+├── scripts/
+│   └── setup_jetson.sh           # Jetson 환경 설정 스크립트
 └── services/
     └── model/                    # AI 상품 판단 (포트 8002)
         ├── main.py               # PM2 호환 진입점
@@ -466,9 +553,9 @@ Edge_Environment/
             │   ├── product_aggregator.py # 상품 통합/반환 처리
             │   └── yaml_persistence.py   # YAML 영속화
             ├── video/            # AVI 비디오 처리
-            │   ├── video_processor.py
-            │   ├── voting_ensemble.py
-            │   └── frame_extractor.py
+            │   ├── video_processor.py    # process_videos() + process_videos_async() (v5.3)
+            │   ├── voting_ensemble.py    # 투표 기반 앙상블
+            │   └── frame_extractor.py    # __iter__() + __aiter__() (v5.3)
             ├── vision/           # YOLO 추론
             │   └── yolo_wrapper.py   # TensorRT 래퍼 (480x480, FP16)
             ├── weight/           # 무게 계산
@@ -594,6 +681,47 @@ Edge_Environment/
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### Async Streaming 비디오 처리 (v5.3)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              VideoProcessor.process_videos_async()               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────────┐     asyncio.Queue     ┌──────────────────┐ │
+│  │ Top Extractor    │────►  (maxsize=10)  ◄────│ Side Extractor │ │
+│  │ __aiter__()      │       frame_queue       │ __aiter__()    │ │
+│  │ ┌────┐┌────┐     │                         │     ┌────┐┌────┐│ │
+│  │ │ F1 ││ F2 │ ... │                         │ ... │ F1 ││ F2 ││ │
+│  │ └────┘└────┘     │                         │     └────┘└────┘│ │
+│  └──────────────────┘                         └──────────────────┘ │
+│           │                                            │          │
+│           └──────────────┬─────────────────────────────┘          │
+│                          ▼                                        │
+│                 ┌────────────────────┐                            │
+│                 │ YOLO Inference     │  (단일 인스턴스)            │
+│                 │ yolo_inference_loop│  (인터리빙 처리)            │
+│                 │                    │                            │
+│                 │ top_frame → 추론   │                            │
+│                 │ side_frame → 추론  │                            │
+│                 │ top_frame → 추론   │                            │
+│                 │ ...                │                            │
+│                 └────────────────────┘                            │
+│                          │                                        │
+│                          ▼                                        │
+│                 ┌────────────────────┐                            │
+│                 │ Motion Filter +    │                            │
+│                 │ VotingEnsemble     │                            │
+│                 └────────────────────┘                            │
+│                          │                                        │
+│                          ▼                                        │
+│                 VideoProcessingResult                             │
+└─────────────────────────────────────────────────────────────────┘
+
+기존 (sync):  Top 처리 (10s) → Side 처리 (10s) = 20초
+v5.3 (async): Top/Side I/O 병렬 + 인터리빙 추론 = ~14초 (30% 개선)
+```
+
 ## 가중치 계산 (v4.0)
 
 ```
@@ -697,7 +825,24 @@ pytest services/model/tests --cov=services/model/src --cov-report=html
 | `test_pipeline.py` | E2E 파이프라인 | 8 |
 | `test_scenario.py` | 실제 시나리오 | 14 |
 | `test_error_handling.py` | 예외 처리 | 14 |
-| **총계** | | **116** |
+| `test_strict_weight_matcher.py` | StrictWeightMatcher 무게 매칭 (v5.1) | - |
+| `test_cross_zone_return.py` | Cross-zone 반환 로직 (v4.9) | - |
+| `test_global_door_session_integration.py` | 전역 DoorSession 통합 | - |
+| `test_full_scenario_with_trigger.py` | 전체 시나리오 + Trigger | - |
+| `test_async_streaming.py` | Async Streaming 파이프라인 (v5.3) | 12 |
+| **총계** | | **130+** |
+
+#### test_async_streaming.py 테스트 클래스 (v5.3)
+
+| 클래스 | 테스트 내용 |
+|--------|-------------|
+| `TestAsyncStreamingConfig` | AsyncStreamingModel 설정 검증 |
+| `TestStreamingFrameExtractorAsync` | `__aiter__()` 비동기 이터레이션 |
+| `TestVideoProcessorAsync` | `process_videos_async()` 결과 검증 |
+| `TestFeatureFlagIntegration` | Feature flag 기반 async/sync 선택 |
+| `TestAsyncQueueBehavior` | asyncio.Queue 인터리빙 동작 |
+| `TestApplyMotionFilterAndVotes` | Motion 필터링 헬퍼 메서드 |
+| `TestProcessingTimeImprovement` | 병렬 I/O 시간 개선 검증 |
 
 ## 삭제된 API (v3.0 → v4.0)
 
@@ -710,6 +855,7 @@ pytest services/model/tests --cov=services/model/src --cov-report=html
 ## 기타 서비스 디렉토리 위치
 
 '현위치': "~\VOICE\2026\crk\win_pc_test_sw2io_board\Edge_Environment"
+'dashboard': "~\VOICE\2026\crk\dashboard"
 'camera': "~\VOICE\2026\crk\CRK-CAMERA"
 'io board': "~\VOICE\2026\crk\CRK-IO-BOARD"
 'payment': "~\VOICE\2026\crk\CRK-PAYMENT"

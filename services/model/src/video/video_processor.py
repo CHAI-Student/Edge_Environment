@@ -10,6 +10,11 @@ Memory-efficient design for Jetson Orin Nano:
 - Immediate memory release after inference
 - Only vote counts are accumulated (not images)
 
+v5.3 추가:
+- Async streaming video processing (process_videos_async)
+- Top/Side 프레임 인터리빙으로 I/O 병렬화
+- 단일 YOLO 인스턴스로 순차 추론 (GPU 메모리 제약)
+
 v4.6 추가:
 - HandPathTracker: 손 경로 추적 기반 상품 필터링
 - product_weights 파라미터 추가 (로그용)
@@ -24,8 +29,15 @@ Usage:
         top_path="/path/to/top.avi",
         side_path="/path/to/side.avi"
     )
+
+    # Async streaming (v5.3)
+    results = await processor.process_videos_async(
+        top_path="/path/to/top.avi",
+        side_path="/path/to/side.avi"
+    )
 """
 
+import asyncio
 import logging
 import math
 import time
@@ -213,8 +225,6 @@ class VideoProcessor:
         self,
         top_path: Optional[str] = None,
         side_path: Optional[str] = None,
-        top_weight: float = 0.5,
-        side_weight: float = 0.5,
         allowed_class_ids: Optional[List[int]] = None,
         product_weights: Optional[Dict[int, float]] = None,
     ) -> VideoProcessingResult:
@@ -224,8 +234,6 @@ class VideoProcessor:
         Args:
             top_path: Path to top camera AVI file (optional)
             side_path: Path to side camera AVI file (optional)
-            top_weight: Weight for top camera in ensemble (default: 0.5)
-            side_weight: Weight for side camera in ensemble (default: 0.5)
             allowed_class_ids: 허용된 YOLO 클래스 ID 리스트 (v4.4)
                                None이면 모든 클래스 탐지
                                리스트가 있으면 해당 클래스만 탐지
@@ -333,6 +341,370 @@ class VideoProcessor:
             side_ensemble=side_ensemble,
             stats=stats,
         )
+
+    async def process_videos_async(
+        self,
+        top_path: Optional[str] = None,
+        side_path: Optional[str] = None,
+        allowed_class_ids: Optional[List[int]] = None,
+        product_weights: Optional[Dict[int, float]] = None,
+    ) -> VideoProcessingResult:
+        """
+        Async streaming video processing (v5.3).
+
+        Top과 Side 카메라의 프레임 추출을 병렬로 수행하고,
+        단일 YOLO 인스턴스에서 인터리빙 추론합니다.
+
+        I/O 병렬화로 처리 시간 20-30% 개선 예상:
+        - 현재: 12-20초/트리거
+        - 목표: 8-14초/트리거
+
+        Args:
+            top_path: Path to top camera AVI file (optional)
+            side_path: Path to side camera AVI file (optional)
+            allowed_class_ids: 허용된 YOLO 클래스 ID 리스트
+            product_weights: {class_id: weight_in_grams} for logging
+
+        Returns:
+            VideoProcessingResult with combined voting results
+        """
+        start_time = time.time()
+        stats = VideoProcessingStats()
+
+        logger.info(f"[VIDEO-ASYNC] ========== 비동기 스트리밍 처리 시작 ==========")
+        logger.info(f"[VIDEO-ASYNC] top_path={top_path}")
+        logger.info(f"[VIDEO-ASYNC] side_path={side_path}")
+        if allowed_class_ids is not None:
+            logger.info(f"[VIDEO-ASYNC] allowed_class_ids={len(allowed_class_ids)} classes")
+
+        top_ensemble = VotingEnsemble(min_vote_ratio=self.min_vote_ratio)
+        side_ensemble = VotingEnsemble(min_vote_ratio=self.min_vote_ratio)
+
+        # v5.3: 손 경로 추적기 (Top 카메라에서만 사용)
+        top_hand_tracker: Optional[HandPathTracker] = None
+        if self.hand_path_filter_enabled:
+            top_hand_tracker = HandPathTracker()
+
+        # 프레임 큐: (camera_type, frame_idx, frame, extractor_done)
+        # None frame = EOF marker
+        frame_queue: asyncio.Queue[Tuple[str, int, Optional["np.ndarray"]]] = asyncio.Queue(
+            maxsize=config.async_streaming.frame_queue_size
+        )
+
+        # Motion tracking
+        top_bbox_trackers: Dict[int, BboxTracker] = {}
+        side_bbox_trackers: Dict[int, BboxTracker] = {}
+        top_pending_votes: Dict[int, List[Tuple[float, str]]] = {}
+        side_pending_votes: Dict[int, List[Tuple[float, str]]] = {}
+
+        # Frame counters
+        top_frame_count = 0
+        side_frame_count = 0
+        top_detection_count = 0
+        side_detection_count = 0
+        roi_filtered_count = 0
+
+        # Active extractors count
+        active_extractors = 0
+        if top_path:
+            active_extractors += 1
+        if side_path:
+            active_extractors += 1
+
+        if active_extractors == 0:
+            logger.warning("[VIDEO-ASYNC] No video paths provided")
+            return VideoProcessingResult(
+                vote_results=[],
+                top_ensemble=top_ensemble,
+                side_ensemble=side_ensemble,
+                stats=stats,
+            )
+
+        async def extract_frames(path: str, camera_type: str) -> None:
+            """프레임 추출 태스크 (비동기)."""
+            nonlocal top_frame_count, side_frame_count
+
+            extractor = create_frame_extractor(
+                path,
+                prefer_ffmpeg=True,
+                use_hwaccel=self.use_hwaccel,
+                camera_type=camera_type,
+            )
+
+            frame_idx = 0
+            try:
+                async for frame in extractor:
+                    await frame_queue.put((camera_type, frame_idx, frame))
+                    frame_idx += 1
+
+                    # Update frame count
+                    if camera_type == "top":
+                        top_frame_count = frame_idx
+                    else:
+                        side_frame_count = frame_idx
+
+            except asyncio.CancelledError:
+                logger.warning(f"[VIDEO-ASYNC] {camera_type} extraction cancelled at frame {frame_idx}")
+                raise
+            finally:
+                # EOF marker
+                await frame_queue.put((camera_type, -1, None))
+                logger.info(f"[VIDEO-ASYNC] {camera_type} 추출 완료: {frame_idx}개 프레임")
+
+        async def yolo_inference_loop() -> None:
+            """YOLO 추론 루프 (단일 인스턴스)."""
+            nonlocal top_detection_count, side_detection_count, roi_filtered_count
+
+            eof_received = 0
+            expected_eofs = active_extractors
+
+            while eof_received < expected_eofs:
+                try:
+                    camera_type, frame_idx, frame = await asyncio.wait_for(
+                        frame_queue.get(),
+                        timeout=60.0  # 60초 타임아웃
+                    )
+                except asyncio.TimeoutError:
+                    logger.error("[VIDEO-ASYNC] Frame queue timeout")
+                    break
+
+                # EOF marker
+                if frame is None:
+                    eof_received += 1
+                    logger.debug(f"[VIDEO-ASYNC] EOF received from {camera_type} ({eof_received}/{expected_eofs})")
+                    continue
+
+                # YOLO 추론 (to_thread로 CPU 양보)
+                detections = await asyncio.to_thread(
+                    self.yolo.detect, frame, allowed_class_ids
+                )
+
+                # 카메라별 처리
+                if camera_type == "top":
+                    # 손 경로 추적 업데이트
+                    if top_hand_tracker is not None:
+                        top_hand_tracker.update_frame(detections, frame_idx)
+
+                    for det in detections:
+                        if det.is_hand or det.conf < self.confidence_threshold:
+                            continue
+
+                        class_id = det.cls
+                        center = det.center
+
+                        # 동적 임계값 계산
+                        bbox_size = max(det.x2 - det.x1, det.y2 - det.y1)
+                        dynamic_threshold = max(15.0, bbox_size * 0.10)
+
+                        if class_id not in top_bbox_trackers:
+                            top_bbox_trackers[class_id] = BboxTracker()
+                        top_bbox_trackers[class_id].update(center, frame_idx)
+                        top_bbox_trackers[class_id].dynamic_threshold = max(
+                            top_bbox_trackers[class_id].dynamic_threshold,
+                            dynamic_threshold
+                        )
+
+                        if class_id not in top_pending_votes:
+                            top_pending_votes[class_id] = []
+                        top_pending_votes[class_id].append((det.conf, det.name))
+                        top_detection_count += 1
+
+                else:  # side
+                    for det in detections:
+                        if det.is_hand or det.conf < self.confidence_threshold:
+                            continue
+
+                        # Side ROI 필터
+                        center_x = det.center[0]
+                        if center_x > self.side_roi_x_max:
+                            roi_filtered_count += 1
+                            continue
+
+                        class_id = det.cls
+                        center = det.center
+
+                        bbox_size = max(det.x2 - det.x1, det.y2 - det.y1)
+                        dynamic_threshold = max(15.0, bbox_size * 0.10)
+
+                        if class_id not in side_bbox_trackers:
+                            side_bbox_trackers[class_id] = BboxTracker()
+                        side_bbox_trackers[class_id].update(center, frame_idx)
+                        side_bbox_trackers[class_id].dynamic_threshold = max(
+                            side_bbox_trackers[class_id].dynamic_threshold,
+                            dynamic_threshold
+                        )
+
+                        if class_id not in side_pending_votes:
+                            side_pending_votes[class_id] = []
+                        side_pending_votes[class_id].append((det.conf, det.name))
+                        side_detection_count += 1
+
+                # 진행 로그 (50프레임마다)
+                total_frames = top_frame_count + side_frame_count
+                if total_frames > 0 and total_frames % 50 == 0:
+                    logger.info(
+                        f"[VIDEO-ASYNC] 처리 중: top={top_frame_count}, side={side_frame_count}, "
+                        f"탐지={top_detection_count + side_detection_count}"
+                    )
+
+        # 태스크 실행
+        try:
+            async with asyncio.TaskGroup() as tg:
+                # 프레임 추출 태스크들
+                if top_path:
+                    tg.create_task(extract_frames(top_path, "top"))
+                if side_path:
+                    tg.create_task(extract_frames(side_path, "side"))
+                # YOLO 추론 태스크
+                tg.create_task(yolo_inference_loop())
+
+        except* asyncio.CancelledError as cg:
+            # CancelledError는 정상적인 취소 (warning 레벨)
+            logger.warning(
+                f"[VIDEO-ASYNC] Tasks cancelled: {len(cg.exceptions)} task(s), "
+                f"processed frames: top={top_frame_count}, side={side_frame_count}"
+            )
+            # 부분 결과라도 반환
+
+        except* Exception as eg:
+            # 실제 에러는 error 레벨
+            for exc in eg.exceptions:
+                logger.error(f"[VIDEO-ASYNC] Task error: {type(exc).__name__}: {exc}")
+            # 부분 결과라도 반환
+
+        # Frame counts 설정
+        top_ensemble.set_frame_count(top_frame_count)
+        side_ensemble.set_frame_count(side_frame_count)
+
+        # Motion 필터링 및 투표 적용 (Top)
+        top_motion_filtered = self._apply_motion_filter_and_votes(
+            "top", top_pending_votes, top_bbox_trackers, top_ensemble
+        )
+
+        # Motion 필터링 및 투표 적용 (Side)
+        side_motion_filtered = self._apply_motion_filter_and_votes(
+            "side", side_pending_votes, side_bbox_trackers, side_ensemble
+        )
+
+        stats.top_frames = top_frame_count
+        stats.side_frames = side_frame_count
+        stats.top_detections = top_detection_count
+        stats.side_detections = side_detection_count
+        stats.motion_filtered_classes = top_motion_filtered + side_motion_filtered
+
+        # Side ROI 필터링 로그
+        if roi_filtered_count > 0:
+            logger.info(
+                f"[VIDEO-ASYNC] ROI 필터링: {roi_filtered_count}개 탐지 제외 "
+                f"(center_x > {self.side_roi_x_max}px)"
+            )
+
+        # 앙상블 결합
+        combined_results = VotingEnsemble.combine(
+            top_ensemble=top_ensemble,
+            side_ensemble=side_ensemble,
+            top_weight=config.top_weight,
+            side_weight=config.side_weight,
+            common_class_bonus=config.common_class_bonus,
+            product_weights=product_weights,
+        )
+
+        # 손 경로 필터링
+        if top_hand_tracker is not None and self.hand_path_filter_enabled:
+            candidate_class_ids = [r.class_id for r in combined_results]
+            valid_class_ids = top_hand_tracker.filter_products_by_path(candidate_class_ids)
+            valid_class_ids_set = set(valid_class_ids)
+
+            before_count = len(combined_results)
+            combined_results = [r for r in combined_results if r.class_id in valid_class_ids_set]
+            stats.hand_path_filtered_classes = before_count - len(combined_results)
+
+            if stats.hand_path_filtered_classes > 0:
+                logger.info(
+                    f"[VIDEO-ASYNC] 손 경로 필터링: {stats.hand_path_filtered_classes}개 제외"
+                )
+
+        # 최소 투표 필터링
+        min_vote_count = 3
+        filtered_results = [
+            r for r in combined_results
+            if r.vote_ratio >= self.min_vote_ratio or r.vote_count >= min_vote_count
+        ]
+
+        stats.processing_time_ms = (time.time() - start_time) * 1000
+
+        logger.info(f"[VIDEO-ASYNC] ========== 비동기 처리 완료 ==========")
+        logger.info(
+            f"[VIDEO-ASYNC] 프레임: top={top_frame_count}, side={side_frame_count}, "
+            f"후보={len(filtered_results)}개, 시간={stats.processing_time_ms:.1f}ms"
+        )
+
+        return VideoProcessingResult(
+            vote_results=filtered_results,
+            top_ensemble=top_ensemble,
+            side_ensemble=side_ensemble,
+            stats=stats,
+        )
+
+    def _apply_motion_filter_and_votes(
+        self,
+        camera_type: str,
+        pending_votes: Dict[int, List[Tuple[float, str]]],
+        bbox_trackers: Dict[int, BboxTracker],
+        ensemble: VotingEnsemble,
+    ) -> int:
+        """
+        Motion 필터링 적용 및 투표 등록 (v5.3).
+
+        Args:
+            camera_type: "top" or "side"
+            pending_votes: 대기 중인 투표 (class_id -> [(conf, name), ...])
+            bbox_trackers: BboxTracker 딕셔너리
+            ensemble: 투표를 등록할 VotingEnsemble
+
+        Returns:
+            필터링된 클래스 수
+        """
+        motion_filtered_count = 0
+        motion_passed_count = 0
+
+        for class_id, votes in pending_votes.items():
+            tracker = bbox_trackers.get(class_id)
+
+            has_motion = True
+            if self.motion_filter_enabled and tracker is not None:
+                has_motion = tracker.has_motion(self.min_motion_displacement)
+
+            if has_motion:
+                for conf, class_name in votes:
+                    ensemble.add_vote(
+                        class_id=class_id,
+                        confidence=conf,
+                        class_name=class_name,
+                    )
+                motion_passed_count += 1
+
+                if tracker:
+                    threshold_used = tracker.dynamic_threshold if tracker.dynamic_threshold > 0 else self.min_motion_displacement
+                    logger.debug(
+                        f"[MOTION-ASYNC] {camera_type} class {class_id}: PASSED "
+                        f"(displacement={tracker.total_displacement:.1f}px, "
+                        f"threshold={threshold_used:.1f}px)"
+                    )
+            else:
+                motion_filtered_count += 1
+                if tracker:
+                    threshold_used = tracker.dynamic_threshold if tracker.dynamic_threshold > 0 else self.min_motion_displacement
+                    logger.info(
+                        f"[MOTION-ASYNC] {camera_type} class {class_id}: FILTERED "
+                        f"(displacement={tracker.total_displacement:.1f}px < threshold={threshold_used:.1f}px)"
+                    )
+
+        logger.info(
+            f"[MOTION-ASYNC] {camera_type} 필터링: 통과={motion_passed_count}, 제외={motion_filtered_count}"
+        )
+
+        return motion_filtered_count
 
     def _process_single_video(
         self,

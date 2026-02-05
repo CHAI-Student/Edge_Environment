@@ -560,13 +560,23 @@ class TriggerService:
         )
 
         # 2. 비디오 처리 (YOLO 추론) - GPU 독점
-        processing_result = await asyncio.to_thread(
-            self._video_processor.process_videos,
-            top_path=input_data.top_video_path,
-            side_path=input_data.side_video_path,
-            allowed_class_ids=item.allowed_class_ids,
-            product_weights=item.product_weights or {},
-        )
+        # v5.3: feature flag 기반 async/sync 선택
+        if config.async_streaming.enabled:
+            logger.info("[TRIGGER-WORKER] v5.3: Async streaming 모드로 비디오 처리")
+            processing_result = await self._video_processor.process_videos_async(
+                top_path=input_data.top_video_path,
+                side_path=input_data.side_video_path,
+                allowed_class_ids=item.allowed_class_ids,
+                product_weights=item.product_weights or {},
+            )
+        else:
+            processing_result = await asyncio.to_thread(
+                self._video_processor.process_videos,
+                top_path=input_data.top_video_path,
+                side_path=input_data.side_video_path,
+                allowed_class_ids=item.allowed_class_ids,
+                product_weights=item.product_weights or {},
+            )
 
         vote_results = processing_result.vote_results
         stats = processing_result.stats
@@ -870,13 +880,23 @@ class TriggerService:
             if cached_active_products:
                 logger.info(f"[TRIGGER] v4.11: active_products {len(cached_active_products)}개 캐시됨")
 
-        processing_result = await asyncio.to_thread(
-            self._video_processor.process_videos,
-            top_path=input_data.top_video_path,
-            side_path=input_data.side_video_path,
-            allowed_class_ids=allowed_class_ids,
-            product_weights=product_weights,
-        )
+        # v5.3: feature flag 기반 async/sync 선택
+        if config.async_streaming.enabled:
+            logger.info("[TRIGGER] v5.3: Async streaming 모드로 비디오 처리")
+            processing_result = await self._video_processor.process_videos_async(
+                top_path=input_data.top_video_path,
+                side_path=input_data.side_video_path,
+                allowed_class_ids=allowed_class_ids,
+                product_weights=product_weights,
+            )
+        else:
+            processing_result = await asyncio.to_thread(
+                self._video_processor.process_videos,
+                top_path=input_data.top_video_path,
+                side_path=input_data.side_video_path,
+                allowed_class_ids=allowed_class_ids,
+                product_weights=product_weights,
+            )
 
         vote_results = processing_result.vote_results
         stats = processing_result.stats
