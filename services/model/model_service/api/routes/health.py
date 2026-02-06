@@ -11,8 +11,8 @@ from pathlib import Path
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from core.config import config
-from api.deps import is_initialized, get_status
+from model_service.core.config import config
+from model_service.api.deps import is_initialized, get_status
 
 router = APIRouter(prefix="/api", tags=["health"])
 
@@ -31,7 +31,7 @@ class DetailedHealthResponse(BaseModel):
     """상세 헬스 체크 응답."""
 
     service: str = "model"
-    version: str = "4.0.0"
+    version: str = "5.3.0"
     status: str = "ok"
     dependencies: dict = {}
     config: dict = {}
@@ -96,7 +96,7 @@ async def detailed_health_check():
 
     return DetailedHealthResponse(
         service="model",
-        version="4.0.0",
+        version="5.3.0",
         status="ok" if is_initialized() else "initializing",
         dependencies=serializable_deps,
         config={

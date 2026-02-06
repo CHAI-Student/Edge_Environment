@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-smart-vending"
-version = "4.0.0"
+version = "5.3.0"
 description = "AI Smart Vending Machine - Model Service (Jetson Orin Nano TensorRT)"
 readme = "README.md"
 requires-python = ">=3.10,<3.12"
@@ -40,6 +40,12 @@ dependencies = [
     "pyyaml>=6.0.0",
 ]
 
+# =============================================================================
+# Entry Points
+# =============================================================================
+[project.scripts]
+model-service = "model_service.main:run"
+
 [project.optional-dependencies]
 # 개발 도구
 dev = [
@@ -57,7 +63,16 @@ test = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["services"]
+packages = ["services/model/model_service"]
+
+[tool.hatch.build.targets.wheel.sources]
+"services/model" = ""
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "services/model/model_service/**/*.py",
+    "services/model/tests/**/*.py",
+]
 
 # =============================================================================
 # UV Configuration (Jetson Orin Nano)

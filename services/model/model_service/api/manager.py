@@ -29,20 +29,20 @@ from typing import Optional
 from fastapi import FastAPI
 from uvicorn import Config as UvicornConfig, Server
 
-from core.config import Settings
-from core.logging_config import get_logger
-from engine import ProductDecisionEngine
-from vision import YOLOWrapper
-from session import SessionStore, DoorSessionStore
-from session.active_product_store import ActiveProductStore
-from api.deps import init_dependencies, cleanup_dependencies
-from container.service_container import get_global_container
-from api.routes import (
+from model_service.core.config import Settings
+from model_service.core.logging_config import get_logger
+from model_service.engine import ProductDecisionEngine
+from model_service.vision import YOLOWrapper
+from model_service.session import SessionStore, DoorSessionStore
+from model_service.session.active_product_store import ActiveProductStore
+from model_service.api.deps import init_dependencies, cleanup_dependencies
+from model_service.container.service_container import get_global_container
+from model_service.api.routes import (
     health_router,
     trigger_router,
     multi_zone_router,
 )
-from api.routes.multi_zone import shutdown_log_executor
+from model_service.api.routes.multi_zone import shutdown_log_executor
 
 logger = get_logger(__name__)
 
@@ -286,8 +286,8 @@ def create_app(settings: Settings) -> FastAPI:
     """
     app = FastAPI(
         title="Model Service",
-        description="AI 상품 판단 서비스 - AVI Trigger + Vision + Weight Fusion (v4.0)",
-        version="4.0.0",
+        description="AI 상품 판단 서비스 - AVI Trigger + Vision + Weight Fusion (v5.3)",
+        version="5.3.0",
         lifespan=create_lifespan(settings),
     )
 
@@ -301,7 +301,7 @@ def create_app(settings: Settings) -> FastAPI:
         """루트 엔드포인트."""
         return {
             "service": "model",
-            "version": "4.0.0",
+            "version": "5.3.0",
             "description": "AI 상품 판단 서비스 (AVI Trigger API)",
         }
 

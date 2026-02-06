@@ -21,7 +21,7 @@ from typing import AsyncIterator, Iterator, Optional, Tuple
 
 import numpy as np
 
-from core.config import config
+from model_service.core.config import config
 
 logger = logging.getLogger(__name__)
 

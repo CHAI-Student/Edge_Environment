@@ -9,10 +9,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from session import SessionStore, SessionData, ProductResult, DoorSessionStore
-from session.door_session import DoorSession, AggregatedProduct
-from session.active_product_store import ActiveProductStore
-from engine import ProductDecisionEngine, EnsembleResult
+from model_service.session import SessionStore, SessionData, ProductResult, DoorSessionStore
+from model_service.session.door_session import DoorSession, AggregatedProduct
+from model_service.session.active_product_store import ActiveProductStore
+from model_service.engine import ProductDecisionEngine, EnsembleResult
 
 logger = logging.getLogger(__name__)
 

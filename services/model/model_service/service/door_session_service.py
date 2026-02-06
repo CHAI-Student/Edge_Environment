@@ -13,8 +13,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from session import DoorSessionStore
-from session.door_session import DoorSession
+from model_service.session import DoorSessionStore
+from model_service.session.door_session import DoorSession
 
 logger = logging.getLogger(__name__)
 

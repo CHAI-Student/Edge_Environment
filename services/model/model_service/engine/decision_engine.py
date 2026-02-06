@@ -26,15 +26,15 @@ from .models import (
     JudgmentResult,
     JudgmentStatus,
 )
-from core.config import config
-from session.active_product_store import ActiveProductStore
+from model_service.core.config import config
+from model_service.session.active_product_store import ActiveProductStore
 
 logger = logging.getLogger(__name__)
 
 
 def _get_count_calculator():
     """Lazy import WeightBasedCountCalculator to avoid circular import."""
-    from weight.count_calculator import WeightBasedCountCalculator
+    from model_service.weight.count_calculator import WeightBasedCountCalculator
     return WeightBasedCountCalculator
 
 
@@ -205,7 +205,7 @@ class ProductDecisionEngine:
         Returns:
             JudgmentResult (status: COMPLETE 또는 NO_DETECTION)
         """
-        from weight.strict_weight_matcher import StrictWeightMatcher
+        from model_service.weight.strict_weight_matcher import StrictWeightMatcher
 
         # StrictWeightMatcher 생성
         matcher = StrictWeightMatcher(

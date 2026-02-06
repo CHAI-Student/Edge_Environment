@@ -46,9 +46,9 @@ from typing import Dict, List, Optional, Tuple
 
 from .frame_extractor import create_frame_extractor
 from .voting_ensemble import VotingEnsemble, VoteResult
-from vision import YOLOWrapper
-from vision.hand_path_tracker import HandPathTracker
-from core.config import config
+from model_service.vision import YOLOWrapper
+from model_service.vision.hand_path_tracker import HandPathTracker
+from model_service.core.config import config
 
 logger = logging.getLogger(__name__)
 

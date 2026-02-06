@@ -27,8 +27,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 import logging
 
-from engine.models import EnsembleResult
-from core.config import config as app_config
+from model_service.engine.models import EnsembleResult
+from model_service.core.config import config as app_config
 
 logger = logging.getLogger(__name__)
 

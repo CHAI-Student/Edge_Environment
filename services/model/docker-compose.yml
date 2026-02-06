@@ -1,8 +1,10 @@
-# Model Service Docker Compose
+# Model Service Docker Compose (v5.3)
 #
 # Jetson Orin Nano 4GB 최적화 구성
+# uv를 사용한 패키지 관리
 #
 # 사용법:
+#   cd services/model
 #   docker-compose up -d        # 시작
 #   docker-compose logs -f      # 로그 확인
 #   docker-compose down         # 종료
@@ -17,8 +19,9 @@ version: '3.8'
 services:
   model:
     build:
-      context: .
-      dockerfile: Dockerfile
+      # 프로젝트 루트 (pyproject.toml 위치)
+      context: ../..
+      dockerfile: services/model/Dockerfile
     image: model-service:latest
     container_name: model-service
 
@@ -43,12 +46,12 @@ services:
 
     # 볼륨 마운트
     volumes:
-      # TensorRT 엔진 파일
-      - ${MODELS_PATH:-./../../models}:/data/models:ro
-      # YOLO 매핑 파일
-      - ${CONFIG_PATH:-./../../config}:/app/config:ro
-      # Door Session YAML 저장
+      # TensorRT 엔진 파일 (프로젝트 루트의 models/)
+      - ${MODELS_PATH:-../../models}:/data/models:ro
+      # Door Session YAML 저장 (로컬 데이터)
       - ${SESSIONS_PATH:-./data/sessions}:/data/sessions:rw
+      # 로그 파일
+      - ${LOGS_PATH:-./logs}:/app/logs:rw
 
     # 환경 변수 (override via .env file)
     environment:
@@ -59,7 +62,6 @@ services:
 
       # YOLO 모델 경로
       - MODEL__VISION__YOLO_MODEL_PATH=/data/models/${YOLO_MODEL:-siyeon_best.engine}
-      - MODEL__VISION__CONF_THRESHOLD=${CONF_THRESHOLD:-0.01}
 
       # 세션 설정
       - MODEL__BUFFER__TTL_SECONDS=${TTL_SECONDS:-300}
@@ -72,6 +74,11 @@ services:
       - MODEL__DOOR_SESSION__WEIGHT_TOLERANCE=${WEIGHT_TOLERANCE:-3.0}
       - MODEL__DOOR_SESSION__MAX_DURATION=${MAX_DURATION:-600.0}
       - MODEL__DOOR_SESSION__YAML_RETENTION_DAYS=${YAML_RETENTION_DAYS:-7}
+      - MODEL__DOOR_SESSION__YAML_DIR=/data/sessions
+
+      # Async Streaming 설정 (v5.3)
+      - MODEL__ASYNC_STREAMING__ENABLED=${ASYNC_STREAMING_ENABLED:-true}
+      - MODEL__ASYNC_STREAMING__FRAME_QUEUE_SIZE=${FRAME_QUEUE_SIZE:-10}
 
       # Node.js 연동
       - MODEL__NODEJS_URL=${NODEJS_URL:-http://host.docker.internal:8888}
@@ -95,7 +102,9 @@ services:
         max-file: "3"
 
 # 네트워크 설정 (다른 서비스와 연결 시)
+# 단독 실행 시 아래를 주석 처리하거나 네트워크를 먼저 생성:
+#   docker network create edge-network
 networks:
   default:
     name: edge-network
-    external: true
+    driver: bridge

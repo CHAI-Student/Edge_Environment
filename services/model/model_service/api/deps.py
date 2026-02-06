@@ -23,14 +23,14 @@ v4.0 변경사항:
 import logging
 from typing import Optional
 
-from session import SessionStore, DoorSessionStore
-from session.active_product_store import ActiveProductStore
-from vision import YOLOWrapper
-from engine import ProductDecisionEngine
-from video import VideoProcessor
-from service.trigger_service import TriggerService
-from container import ServiceContainer
-from container.service_container import get_global_container, set_global_container, reset_global_container
+from model_service.session import SessionStore, DoorSessionStore
+from model_service.session.active_product_store import ActiveProductStore
+from model_service.vision import YOLOWrapper
+from model_service.engine import ProductDecisionEngine
+from model_service.video import VideoProcessor
+from model_service.service.trigger_service import TriggerService
+from model_service.container import ServiceContainer
+from model_service.container.service_container import get_global_container, set_global_container, reset_global_container
 
 logger = logging.getLogger(__name__)
 

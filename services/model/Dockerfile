@@ -1,10 +1,10 @@
-# Model Service Dockerfile for Jetson Orin Nano 4GB
+# Model Service Dockerfile for Jetson Orin Nano 4GB (v5.3)
 #
 # Jetson Orin Nano (JetPack 6.2) TensorRT 전용
-# 멀티스테이지 빌드로 이미지 크기 최소화
+# uv를 사용한 패키지 설치 (CUDA/TensorRT 시스템 패키지 상속)
 #
-# Build:
-#   docker build -t model-service:latest .
+# Build (from Edge_Environment directory):
+#   docker build -t model-service:latest -f services/model/Dockerfile .
 #
 # Run:
 #   docker run --runtime nvidia -p 8002:8002 model-service:latest
@@ -18,31 +18,39 @@ FROM nvcr.io/nvidia/l4t-pytorch:r36.2.0-pth2.1-py3 AS base
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Seoul
 
-# 시스템 패키지 설치
+# 시스템 패키지 설치 + uv + curl (healthcheck 용)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsm6 \
     libxext6 \
     libgl1-mesa-glx \
-    && rm -rf /var/lib/apt/lists/*
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# uv를 PATH에 추가
+ENV PATH="/root/.local/bin:$PATH"
 
 # Python 패키지 디렉토리
 WORKDIR /app
 
 # ==============================================================================
-# Stage 2: Dependencies
+# Stage 2: Dependencies with uv
 # ==============================================================================
 FROM base AS deps
-
-# pip 업그레이드
-RUN pip3 install --no-cache-dir --upgrade pip
 
 # pyproject.toml 복사 (캐시 활용)
 COPY pyproject.toml ./
 
-# 의존성 설치 (--system-site-packages 필요 - CUDA/TensorRT 상속)
-# uv 대신 pip 사용 (Docker 환경에서 더 안정적)
-RUN pip3 install --no-cache-dir \
+# uv로 가상환경 생성 (시스템 패키지 상속 - CUDA/TensorRT 필수!)
+RUN uv venv --system-site-packages --python python3.10 .venv
+
+# 가상환경 활성화
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+
+# 의존성 설치 (NumPy < 2.0 강제)
+RUN uv pip install --no-cache \
     fastapi>=0.109.0 \
     uvicorn>=0.25.0 \
     pydantic>=2.5.0 \
@@ -50,27 +58,30 @@ RUN pip3 install --no-cache-dir \
     pyyaml>=6.0 \
     python-multipart>=0.0.6 \
     httpx>=0.25.0 \
-    numpy>=1.24.0,\<2.0.0 \
+    aiohttp>=3.8.0 \
+    "numpy>=1.24.0,<2.0.0" \
     opencv-python-headless>=4.8.0 \
-    ultralytics>=8.1.0
+    ultralytics>=8.1.0 \
+    pillow>=10.0.0
 
 # ==============================================================================
 # Stage 3: Application
 # ==============================================================================
 FROM deps AS app
 
-# 소스 코드 복사
-COPY main.py ./
-COPY src/ ./src/
+# 패키지 소스 코드 복사 (model_service 패키지)
+COPY services/model/model_service/ ./model_service/
 
-# 설정 파일 복사
-COPY ../../config/ /app/config/
+# pyproject.toml 다시 복사 (패키지 설치에 필요)
+COPY pyproject.toml ./
 
-# 비root 사용자 생성 (보안)
-RUN useradd -m -u 1000 modeluser
-USER modeluser
+# 패키지 설치 (non-editable mode for production)
+RUN uv pip install --no-cache .
 
-# 헬스체크
+# 데이터 디렉토리 생성
+RUN mkdir -p /data/models /data/sessions /app/logs
+
+# 헬스체크 (curl은 root로 설치됨)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8002/api/health || exit 1
 
@@ -86,9 +97,10 @@ ENV MODEL__BUFFER__TTL_SECONDS=300
 ENV MODEL__BUFFER__MAX_SESSIONS=100
 ENV MODEL__DOOR_SESSION__ENABLED=true
 ENV MODEL__DOOR_SESSION__TIMEOUT=30.0
+ENV MODEL__DOOR_SESSION__YAML_DIR=/data/sessions
 
 # 볼륨 마운트 포인트
-VOLUME ["/data/models", "/data/sessions"]
+VOLUME ["/data/models", "/data/sessions", "/app/logs"]
 
-# 실행
-CMD ["python3", "main.py"]
+# 실행 (가상환경 PATH에 있으므로 직접 실행)
+CMD ["python", "-m", "model_service"]

@@ -25,8 +25,8 @@ v4.7 변경사항:
 from typing import Any, Dict, List, Optional
 import logging
 
-from engine.models import EnsembleResult, CountEstimate
-from session.active_product_store import ActiveProductStore
+from model_service.engine.models import EnsembleResult, CountEstimate
+from model_service.session.active_product_store import ActiveProductStore
 logger = logging.getLogger(__name__)
 
 

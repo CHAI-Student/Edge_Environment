@@ -14,7 +14,7 @@ from typing import List, Tuple, Optional
 import logging
 
 from .yolo_wrapper import YOLODetection
-from core.config import config
+from model_service.core.config import config
 
 logger = logging.getLogger(__name__)
 

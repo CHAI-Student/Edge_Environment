@@ -8,15 +8,8 @@ import time
 import tempfile
 import pytest
 
-import sys
-from pathlib import Path
-
-# Add src to path for imports
-src_path = Path(__file__).parent.parent / "src"
-sys.path.insert(0, str(src_path))
-
-from session import ProductResult, DoorSessionStore
-from session.door_session import TriggerResult
+from model_service.session import ProductResult, DoorSessionStore
+from model_service.session.door_session import TriggerResult
 
 
 class TestCrossZoneReturn:
@@ -268,7 +261,7 @@ class TestCrossZoneReturn:
         assert session_dict["cross_zone_returns"][0]["target_zone"] == 1
 
         # from_dict로 복원
-        from session.door_session import DoorSession
+        from model_service.session.door_session import DoorSession
 
         restored = DoorSession.from_dict(session_dict)
         assert len(restored.cross_zone_returns) == 1

@@ -24,13 +24,13 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}=======================================${NC}"
-echo -e "${BLUE} Jetson Orin Nano 환경 설정 (uv)${NC}"
+echo -e "${BLUE} Jetson Orin Nano 환경 설정 (uv) v5.3${NC}"
 echo -e "${BLUE}=======================================${NC}"
 
 # -----------------------------------------------------------------------------
 # 1. 시스템 환경 확인
 # -----------------------------------------------------------------------------
-echo -e "\n${YELLOW}[1/6] 시스템 환경 확인...${NC}"
+echo -e "\n${YELLOW}[1/7] 시스템 환경 확인...${NC}"
 
 # Jetson 확인
 if [ ! -f /etc/nv_tegra_release ]; then
@@ -78,7 +78,7 @@ fi
 # -----------------------------------------------------------------------------
 # 2. uv 설치
 # -----------------------------------------------------------------------------
-echo -e "\n${YELLOW}[2/6] uv 설치 확인...${NC}"
+echo -e "\n${YELLOW}[2/7] uv 설치 확인...${NC}"
 
 if ! command -v uv &> /dev/null; then
     echo "uv 설치 중..."
@@ -101,7 +101,7 @@ fi
 # -----------------------------------------------------------------------------
 # 3. 가상환경 생성 (시스템 패키지 상속)
 # -----------------------------------------------------------------------------
-echo -e "\n${YELLOW}[3/6] 가상환경 생성...${NC}"
+echo -e "\n${YELLOW}[3/7] 가상환경 생성...${NC}"
 
 # 프로젝트 루트로 이동
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -125,7 +125,7 @@ echo -e "${GREEN}✓ 가상환경 생성 완료${NC}"
 # -----------------------------------------------------------------------------
 # 4. 의존성 설치
 # -----------------------------------------------------------------------------
-echo -e "\n${YELLOW}[4/6] 의존성 설치...${NC}"
+echo -e "\n${YELLOW}[4/7] 의존성 설치...${NC}"
 
 # 가상환경 활성화
 source .venv/bin/activate
@@ -148,7 +148,7 @@ echo -e "${GREEN}✓ 의존성 설치 완료${NC}"
 # -----------------------------------------------------------------------------
 # 5. TensorRT 엔진 확인
 # -----------------------------------------------------------------------------
-echo -e "\n${YELLOW}[5/6] TensorRT 엔진 확인...${NC}"
+echo -e "\n${YELLOW}[5/7] TensorRT 엔진 확인...${NC}"
 
 ENGINE_PATH="$PROJECT_ROOT/models/0204_siyeon.engine"
 PT_PATH="$PROJECT_ROOT/models/siyeon_best.pt"
@@ -164,9 +164,40 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 6. 환경 검증
+# 6. Entry Point 검증 (v5.3)
 # -----------------------------------------------------------------------------
-echo -e "\n${YELLOW}[6/6] 환경 검증...${NC}"
+echo -e "\n${YELLOW}[6/7] Entry Point 검증...${NC}"
+
+# 가상환경 활성화 확인 (Step 4에서 이미 활성화됨)
+if [ -z "$VIRTUAL_ENV" ]; then
+    source .venv/bin/activate
+fi
+
+# model-service entry point 테스트
+if uv run model-service --help > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ model-service entry point 정상${NC}"
+else
+    echo -e "${YELLOW}⚠ entry point 미등록, 직접 import 테스트...${NC}"
+    # 가상환경 내의 python 사용 (python3 대신 python)
+    if python -c "from model_service.main import main; print('OK')" 2>/dev/null; then
+        echo -e "${GREEN}✓ model_service 패키지 import 정상${NC}"
+        echo -e "${YELLOW}  uv pip install -e . 로 entry point 재등록 시도...${NC}"
+        uv pip install -e .
+        if uv run model-service --help > /dev/null 2>&1; then
+            echo -e "${GREEN}✓ entry point 등록 완료${NC}"
+        fi
+    else
+        echo -e "${RED}✗ model_service 패키지 import 실패${NC}"
+        echo -e "${YELLOW}  패키지 구조를 확인하세요:${NC}"
+        echo -e "    services/model/model_service/__init__.py"
+        echo -e "    services/model/model_service/main.py (run 함수 필요)"
+    fi
+fi
+
+# -----------------------------------------------------------------------------
+# 7. 환경 검증
+# -----------------------------------------------------------------------------
+echo -e "\n${YELLOW}[7/7] 환경 검증...${NC}"
 
 python3 << 'EOF'
 import sys
@@ -238,8 +269,11 @@ echo ""
 echo -e "가상환경 활성화:"
 echo -e "  ${BLUE}source .venv/bin/activate${NC}"
 echo ""
-echo -e "서비스 시작:"
-echo -e "  ${BLUE}cd services/model && python main.py${NC}"
+echo -e "서비스 시작 (v5.3 uv):"
+echo -e "  ${BLUE}uv run model-service${NC}"
+echo ""
+echo -e "테스트 실행:"
+echo -e "  ${BLUE}uv run pytest services/model/tests -v${NC}"
 echo ""
 echo -e "헬스 체크:"
 echo -e "  ${BLUE}curl http://localhost:8002/api/health${NC}"

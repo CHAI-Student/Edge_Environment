@@ -17,8 +17,8 @@ import logging
 
 from .yolo_wrapper import YOLODetection
 from .hand_filter import HandProximityFilter
-from engine.models import EnsembleResult
-from core.config import config
+from model_service.engine.models import EnsembleResult
+from model_service.core.config import config
 
 logger = logging.getLogger(__name__)
 

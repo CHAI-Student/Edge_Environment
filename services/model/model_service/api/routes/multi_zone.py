@@ -52,7 +52,7 @@ from typing import Any, List, Optional, TYPE_CHECKING
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from session import (
+from model_service.session import (
     SessionStore,
     SessionData,
     ProductResult,
@@ -61,9 +61,9 @@ from session import (
     DoorSession,
     AggregatedProduct,
 )
-from session.active_product_store import ActiveProductStore
-from engine import ProductDecisionEngine, EnsembleResult
-from api.deps import (
+from model_service.session.active_product_store import ActiveProductStore
+from model_service.engine import ProductDecisionEngine, EnsembleResult
+from model_service.api.deps import (
     get_session_store,
     get_decision_engine,
     get_door_session_store_optional,

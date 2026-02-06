@@ -1,6 +1,6 @@
 """Core module for Model service."""
 
-from core.exceptions import (
+from model_service.core.exceptions import (
     FFmpegError,
     InvalidLoadcellValueError,
     LoadcellDataError,
@@ -15,12 +15,12 @@ from core.exceptions import (
     YOLOInferenceError,
     YOLOModelNotLoadedError,
 )
-from core.config import (
+from model_service.core.config import (
     Settings,
     config,
     generate_session_id,
 )
-from core.logging_config import (
+from model_service.core.logging_config import (
     PerformanceLogger,
     clear_correlation_id,
     get_correlation_id,

@@ -3,7 +3,7 @@
 AI 스마트 자판기 시스템의 Model 서비스 (v5.3 Async Streaming Pipeline)
 **Jetson Orin Nano 4GB (JetPack 6.2) TensorRT 전용**
 
-> **최종 업데이트**: 2026-02-05
+> **최종 업데이트**: 2026-02-06
 
 ## 개요
 
@@ -11,7 +11,13 @@ AI 스마트 자판기 시스템의 Model 서비스 (v5.3 Async Streaming Pipeli
 **TensorRT 엔진(.engine)** 파일만 지원하며, **CUDA가 필수**입니다.
 Node.js, IO Board, Payment, Camera Driver는 별도 레포에서 관리됩니다.
 
-### v5.3 변경사항 (최신)
+### v5.4 변경사항 (최신)
+
+- **프로젝트 구조 마이그레이션**: `services/model/src/` -> `services/model/model_service/`
+- **Entry Point 변경**: `python main.py` -> `uv run model-service`
+- **패키지 구조 개선**: pyproject.toml의 hatch 빌드 설정 업데이트
+
+### v5.3 변경사항
 
 - **Async Streaming Video Processing**: Top/Side 비디오 I/O 병렬화
   - `StreamingFrameExtractor.__aiter__()` - 비동기 프레임 스트리밍
@@ -45,10 +51,10 @@ Node.js, IO Board, Payment, Camera Driver는 별도 레포에서 관리됩니다
 ### v4.2 변경사항
 
 - **Service Layer 추가**: Controller-Service 패턴 적용
-  - `src/service/trigger_service.py` - 트리거 비즈니스 로직
-  - `src/service/judgment_service.py` - 판단 비즈니스 로직
-  - `src/service/door_session_service.py` - DoorSession 관리
-- **Config 통합**: `src/config.py` 제거, `core.config`로 일원화
+  - `model_service/service/trigger_service.py` - 트리거 비즈니스 로직
+  - `model_service/service/judgment_service.py` - 판단 비즈니스 로직
+  - `model_service/service/door_session_service.py` - DoorSession 관리
+- **Config 통합**: `core.config`로 일원화
 - **Docker 지원**: Jetson Orin Nano 4GB 최적화 컨테이너
   - `Dockerfile` - 멀티스테이지 빌드
   - `docker-compose.yml` - 메모리 3G 제한
@@ -216,8 +222,11 @@ uv pip install -e ".[dev]"
 ### 3. 서비스 실행
 
 ```bash
-# Model 서비스 직접 실행
-cd services/model && python main.py
+# Model 서비스 실행 (uv 사용)
+uv run model-service
+
+# 또는 직접 실행
+python -m model_service.main
 ```
 
 ### 4. Docker 실행 (v4.2)
@@ -516,7 +525,7 @@ Edge_Environment/
 ├── .env.example                  # 환경변수 예제
 ├── CLAUDE.md                     # 이 문서
 ├── README.md                     # 기본 README
-├── pyproject.toml                # Python 프로젝트 설정
+├── pyproject.toml                # Python 프로젝트 설정 (uv)
 ├── data/
 │   └── sessions/                 # Door Session YAML 영속화
 ├── logs/
@@ -529,11 +538,13 @@ Edge_Environment/
 │   └── setup_jetson.sh           # Jetson 환경 설정 스크립트
 └── services/
     └── model/                    # AI 상품 판단 (포트 8002)
-        ├── main.py               # PM2 호환 진입점
         ├── Dockerfile            # Docker 빌드 (v4.2)
         ├── docker-compose.yml    # Docker Compose (v4.2)
         ├── .env.docker           # Docker 환경변수 템플릿 (v4.2)
-        └── src/
+        ├── tests/                # 테스트 코드
+        └── model_service/        # 소스 코드 (v5.4 마이그레이션)
+            ├── __init__.py
+            ├── main.py           # Entry point (uv run model-service)
             ├── api/
             │   ├── routes/       # 분리된 라우터
             │   │   ├── health.py     # GET /api/health
@@ -798,17 +809,16 @@ ffmpeg -codecs | grep mjpeg
 ## 테스트 실행
 
 ```bash
-# 전체 테스트 실행
-cd Edge_Environment
-pytest services/model/tests -v
+# 전체 테스트 실행 (uv 사용)
+uv run pytest services/model/tests -v
 
 # 특정 테스트 파일 실행
-pytest services/model/tests/test_door_session_store.py -v
-pytest services/model/tests/test_product_aggregator.py -v
-pytest services/model/tests/test_voting_ensemble.py -v
+uv run pytest services/model/tests/test_door_session_store.py -v
+uv run pytest services/model/tests/test_product_aggregator.py -v
+uv run pytest services/model/tests/test_voting_ensemble.py -v
 
 # 테스트 커버리지 (pytest-cov 필요)
-pytest services/model/tests --cov=services/model/src --cov-report=html
+uv run pytest services/model/tests --cov=services/model/model_service --cov-report=html
 ```
 
 ### 테스트 파일 구조
@@ -878,6 +888,6 @@ pytest services/model/tests --cov=services/model/src --cov-report=html
 3. Vision-only 모드: 로드셀 없는 하드웨어에서는 YOLO 추론 결과만으로 상품 판단
 
 **영향 범위**:
-- `services/model/src/api/routes/multi_zone.py` - ProductInfo 모델
-- `services/model/src/engine/decision_engine.py` - 무게 기반 개수 계산
-- `services/model/src/session/product_aggregator.py` - 반환 처리 (무게 매칭)
+- `services/model/model_service/api/routes/multi_zone.py` - ProductInfo 모델
+- `services/model/model_service/engine/decision_engine.py` - 무게 기반 개수 계산
+- `services/model/model_service/session/product_aggregator.py` - 반환 처리 (무게 매칭)

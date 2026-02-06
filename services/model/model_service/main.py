@@ -1,11 +1,11 @@
 """
 Model Service - FastAPI Entry Point.
 
-AI 상품 판단 서비스 (v4.0 - AVI Trigger API).
+AI 상품 판단 서비스 (v5.3 - Async Streaming Pipeline).
 Jetson Orin Nano TensorRT 전용.
 
 실행 방법:
-    python main.py
+    uv run model-service
 
 기능:
     - POST /trigger: Camera에서 AVI 녹화 완료 시 YOLO 추론
@@ -21,9 +21,9 @@ import argparse
 import asyncio
 import sys
 
-from api.manager import serve_api
-from core.config import Settings
-from core.logging_config import get_logger, setup_logging
+from model_service.api.manager import serve_api
+from model_service.core.config import Settings
+from model_service.core.logging_config import get_logger, setup_logging
 
 
 def main():
@@ -35,7 +35,7 @@ def main():
     setup_logging(settings.log_level.upper())
     logger = get_logger(__name__)
 
-    parser = argparse.ArgumentParser(description="Model Service (v4.0 AVI Trigger)")
+    parser = argparse.ArgumentParser(description="Model Service (v5.3 Async Streaming)")
     parser.add_argument(
         "--host",
         type=str,
@@ -58,12 +58,12 @@ def main():
         settings.api.port = args.port
 
     # 서버 시작
-    logger.info(f"Starting Model Service v4.0 on {settings.host}:{settings.port}")
+    logger.info(f"Starting Model Service v5.3 on {settings.host}:{settings.port}")
     asyncio.run(serve_api(settings))
 
 
 def run():
-    """Run the Model service (entry point for PM2)."""
+    """Run the Model service (entry point for uv run / PM2)."""
     try:
         main()
     except KeyboardInterrupt:

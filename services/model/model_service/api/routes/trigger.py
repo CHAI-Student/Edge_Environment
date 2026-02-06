@@ -36,12 +36,12 @@ import numpy as np
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
-from video import VideoProcessor, VoteResult
-from engine import ProductDecisionEngine, EnsembleResult
-from session import SessionStore, SessionData, ProductResult, DoorSessionStore, TriggerResult
-from session.session_store import generate_session_id
-from service.trigger_service import TriggerService, TriggerInput, TriggerOutput, LoadcellReading
-from api.deps import (
+from model_service.video import VideoProcessor, VoteResult
+from model_service.engine import ProductDecisionEngine, EnsembleResult
+from model_service.session import SessionStore, SessionData, ProductResult, DoorSessionStore, TriggerResult
+from model_service.session.session_store import generate_session_id
+from model_service.service.trigger_service import TriggerService, TriggerInput, TriggerOutput, LoadcellReading
+from model_service.api.deps import (
     get_decision_engine,
     get_video_processor,
     get_session_store,
@@ -49,8 +49,8 @@ from api.deps import (
     get_door_session_store_optional,
     get_trigger_service_optional,
 )
-from session.active_product_store import ActiveProductStore
-from core.exceptions import (
+from model_service.session.active_product_store import ActiveProductStore
+from model_service.core.exceptions import (
     VideoProcessingError,
     VideoCorruptedError,
     FFmpegError,

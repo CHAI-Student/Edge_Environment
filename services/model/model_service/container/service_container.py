@@ -39,12 +39,12 @@ import threading
 from typing import Callable, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from session import SessionStore, DoorSessionStore
-    from session.active_product_store import ActiveProductStore
-    from vision import YOLOWrapper
-    from engine import ProductDecisionEngine
-    from video import VideoProcessor
-    from service.trigger_service import TriggerService
+    from model_service.session import SessionStore, DoorSessionStore
+    from model_service.session.active_product_store import ActiveProductStore
+    from model_service.vision import YOLOWrapper
+    from model_service.engine import ProductDecisionEngine
+    from model_service.video import VideoProcessor
+    from model_service.service.trigger_service import TriggerService
 
 logger = logging.getLogger(__name__)
 
@@ -88,8 +88,8 @@ class ServiceContainer:
             door_session_store: DoorSessionStore 인스턴스 (선택, v4.1)
             active_product_store: ActiveProductStore 인스턴스 (선택, v4.5)
         """
-        from video import VideoProcessor
-        from service.trigger_service import TriggerService
+        from model_service.video import VideoProcessor
+        from model_service.service.trigger_service import TriggerService
 
         self._session_store = session_store
         self._yolo = yolo
