@@ -1,893 +1,216 @@
 # Edge Environment Lite - Model 서비스
 
-AI 스마트 자판기 시스템의 Model 서비스 (v5.3 Async Streaming Pipeline)
+AI 스마트 자판기 시스템의 Model 서비스 (v5.4)
 **Jetson Orin Nano 4GB (JetPack 6.2) TensorRT 전용**
 
-> **최종 업데이트**: 2026-02-06
+> **최종 업데이트**: 2026-02-06 | **버전**: 5.4.0
 
 ## 개요
 
 이 레포는 **Model** 서비스만 관리합니다.
-**TensorRT 엔진(.engine)** 파일만 지원하며, **CUDA가 필수**입니다.
-Node.js, IO Board, Payment, Camera Driver는 별도 레포에서 관리됩니다.
+**TensorRT 엔진(.engine)** 전용, **CUDA 필수**.
+Node.js, IO Board, Payment, Camera Driver, Dashboard는 별도 레포에서 관리됩니다.
 
-### v5.4 변경사항 (최신)
+## 최신 변경사항
 
-- **프로젝트 구조 마이그레이션**: `services/model/src/` -> `services/model/model_service/`
-- **Entry Point 변경**: `python main.py` -> `uv run model-service`
-- **패키지 구조 개선**: pyproject.toml의 hatch 빌드 설정 업데이트
+### v5.4 (최신)
+- 프로젝트 구조 마이그레이션: `src/` -> `model_service/`
+- Entry Point 변경: `uv run model-service`
 
-### v5.3 변경사항
+### v5.3
+- Async Streaming Video Processing: Top/Side I/O 병렬화
+- Feature Flag: `MODEL__ASYNC_STREAMING__ENABLED`
+- 처리 시간 20-30% 개선 (12-20초 -> 8-14초/트리거)
 
-- **Async Streaming Video Processing**: Top/Side 비디오 I/O 병렬화
-  - `StreamingFrameExtractor.__aiter__()` - 비동기 프레임 스트리밍
-  - `VideoProcessor.process_videos_async()` - 인터리빙 처리
-  - `asyncio.Queue` 기반 Top/Side 프레임 인터리빙
-  - 단일 YOLO 인스턴스로 순차 추론 (GPU 메모리 제약)
-- **Feature Flag 기반 async/sync 선택**: `config.async_streaming.enabled`
-  - `True` (기본): 비동기 스트리밍 모드 사용
-  - `False`: 기존 동기 모드 (`asyncio.to_thread`) 사용
-- **처리 시간 개선**: I/O 병렬화로 20-30% 향상 목표
-  - 현재: 12-20초/트리거
-  - 목표: 8-14초/트리거
-- **신규 환경변수**: `MODEL__ASYNC_STREAMING__*` 설정 그룹 추가
+### v5.0-5.2
+- StrictWeightMatcher: 무게 우선 엄격 매칭
+- Cross-zone return logic 개선
+- Deduplication 캐시 크기 제한
 
-### v5.2 변경사항
+> 전체 변경 이력: [CHANGELOG_v4.8.md](./CHANGELOG_v4.8.md)
 
-- **StrictWeightMatcher**: 무게 우선 엄격 매칭 알고리즘
-- **Deduplication 캐시 크기 제한**: 메모리 누수 방지 (`DEDUP_MAX_SIZE`)
-- **TriggerModel 설정**: `config.trigger.*` 설정 그룹 추가
-
-### v5.1 변경사항
-
-- **엄격 무게 검증 모드**: 무게로 설명 불가 시 NO_DETECTION 반환
-- **무게 허용 오차 축소**: 5g -> 3g
-
-### v5.0 변경사항
-
-- **반환 로직 강건성 개선**: Cross-zone return logic
-- **ProductDatabase 제거**: ActiveProductStore로 통합
-
-### v4.2 변경사항
-
-- **Service Layer 추가**: Controller-Service 패턴 적용
-  - `model_service/service/trigger_service.py` - 트리거 비즈니스 로직
-  - `model_service/service/judgment_service.py` - 판단 비즈니스 로직
-  - `model_service/service/door_session_service.py` - DoorSession 관리
-- **Config 통합**: `core.config`로 일원화
-- **Docker 지원**: Jetson Orin Nano 4GB 최적화 컨테이너
-  - `Dockerfile` - 멀티스테이지 빌드
-  - `docker-compose.yml` - 메모리 3G 제한
-  - `.env.docker` - 환경변수 템플릿
-- **TTL 자동 정리**: 백그라운드 태스크로 좀비 세션 정리
-- **YAML Lock 분리**: Copy-on-write로 파일 I/O 중 블로킹 제거
-
-### v4.1 변경사항
-
-- **Door Session 추가**: 문 열림~닫힘 동안의 여러 trigger를 하나의 세션으로 통합 관리
-- **ProductAggregator**: 다중 trigger 상품 합산, 반환(무게 증가) 시 차감 처리
-- **YAML 영속화**: Door Session 데이터를 YAML 파일로 저장 (서비스 재시작 시 복구)
-- **신규 API 엔드포인트**: Door Session 조회/통계/강제종료
-
-### v4.0 변경사항
-
-- **Frame Buffer 제거**: AVI Trigger 방식만 사용
-- **API 단순화**: 2개 API로 통합
-  - `POST /trigger` - Camera에서 호출, 즉시 YOLO 추론
-  - `POST /api/judge/multi-zone` - Node.js 10초 폴링
-- **SessionStore 추가**: 추론 결과 저장 (TTL 기반 자동 정리)
-- **Jetson 4GB 최적화**: 480x480 입력, FP16, max_det=20
-
-### Jetson Orin Nano 4GB 최적화
-
-| 항목 | 설정 | 효과 |
-|------|------|------|
-| 입력 크기 | 480x480 (640x480에서 오른쪽 160px 크롭) | 메모리 44% 감소 |
-| FP16 추론 | `half=True` | 메모리 50% 감소 |
-| 최대 탐지 | `max_det=20` | 후처리 부하 감소 |
-| FFmpeg 코덱 | `-c:v mjpeg` | AVI MJPEG 최적화 |
-| 배치 크기 | 1 (고정) | 4GB 메모리 제약 |
-| GPU 워밍업 | 서비스 시작 시 더미 추론 2회 | 첫 요청 지연 제거 |
-| Async Streaming (v5.3) | Top/Side I/O 병렬화 | 처리 시간 20-30% 감소 |
-| 프레임 큐 크기 | 10 (기본값) | 메모리/성능 균형 |
-
-## 아키텍처 (v4.2)
+## 아키텍처
 
 ```
-다른 레포                                 이 레포
-┌─────────────────────────────┐          ┌─────────────────────────────┐
-│ Node.js Orchestrator (8888) │          │ Model Service (8002)        │
-│   - 10초 간격 폴링          │          │   - SessionStore            │
-├─────────────────────────────┤          │   - DoorSessionStore (v4.1) │
-│ Camera Driver (8003)        │─────────►│   - YOLO 추론               │
-│   - POST /trigger 호출      │          │   - 상품 판단               │
-│   - AVI 녹화 완료 시        │          └─────────────────────────────┘
-├─────────────────────────────┤
-│ IO Board (8000)             │
-│ Payment (5000/5001)         │
-│ MQTT Client (8006)          │
-│ React Client (3000)         │  ← dashboard/ 레포
-└─────────────────────────────┘
+다른 레포                              이 레포
+┌─────────────────────────┐          ┌─────────────────────────┐
+│ Node.js (8888) - 폴링   │          │ Model Service (8002)    │
+├─────────────────────────┤          │ - SessionStore          │
+│ Camera (8003)           │────────► │ - DoorSessionStore      │
+│ - POST /trigger         │          │ - YOLO TensorRT 추론    │
+├─────────────────────────┤          └─────────────────────────┘
+│ IO Board (8000)         │
+│ Dashboard (3000)        │  ← dashboard/ 레포
+└─────────────────────────┘
 ```
 
 ## 서비스 포트
 
-| 서비스 | 포트 | 설명 | 관리 위치 |
-|--------|------|------|-----------|
-| Model | 8002 | YOLO 추론 + 상품 판단 | **이 레포** |
-| React Client | 3000 | 웹 대시보드 UI | dashboard/ 레포 |
-| Node.js | 8888 | 오케스트레이터 | 다른 레포 |
-| Camera Driver | 8003 | 카메라 + AVI 녹화 | 다른 레포 |
-| IO Board | 8000 | 로드셀 + 데드볼트 | 다른 레포 |
-| Payment | 5000 | 결제 터미널 | 다른 레포 |
-
-## Jetson Orin Nano 환경 설정
-
-### 요구사항
-
-| 항목 | 버전 | 비고 |
-|------|------|------|
-| 하드웨어 | Jetson Orin Nano Developer Kit | **4GB 모델** |
-| OS | JetPack 6.2 (Ubuntu 22.04) | |
-| Python | 3.10.x | JetPack 포함 |
-| CUDA | 12.x | JetPack 포함 |
-| cuDNN | 9.x | JetPack 포함 |
-| TensorRT | 10.x | JetPack 포함 |
-| FFmpeg | 4.x 이상 | `apt install ffmpeg` |
-| NumPy | **1.x (< 2.0)** | 시스템 패키지 호환 필수 |
-
-### uv 기반 환경 설정 (권장)
-
-```bash
-# 1. uv 설치 (없으면)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-export PATH="$HOME/.cargo/bin:$PATH"
-
-# 2. 자동 설정 스크립트 실행
-chmod +x scripts/setup_jetson.sh
-./scripts/setup_jetson.sh
-
-# 3. 가상환경 활성화
-source .venv/bin/activate
-```
-
-### 수동 설정 (uv)
-
-```bash
-# 1. uv로 가상환경 생성 (시스템 패키지 상속 - CUDA/torch/tensorrt 필수!)
-uv venv --system-site-packages --python python3.10 .venv
-source .venv/bin/activate
-
-# 2. 의존성 설치
-uv pip install -e ".[dev]"
-
-# 3. NumPy 버전 확인 (반드시 1.x)
-python -c "import numpy; print(numpy.__version__)"
-# 2.x면 다운그레이드:
-uv pip install "numpy>=1.24.0,<2.0.0"
-```
-
-### TensorRT 엔진 변환
-
-```bash
-# .pt → .engine 변환 (Jetson에서만 가능, GPU 아키텍처 종속)
-yolo export model=models/siyeon_best.pt format=engine device=0 half=True imgsz=480
-
-# 결과 확인
-ls -la models/siyeon_best.engine
-```
-
-### 환경 검증
-
-```bash
-# 1. CUDA 확인
-python3 -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
-# 기대: CUDA available: True
-
-# 2. GPU 정보
-python3 -c "import torch; print(torch.cuda.get_device_name(0))"
-# 기대: Orin (또는 유사한 Jetson GPU 이름)
-
-# 3. TensorRT 버전
-python3 -c "import tensorrt; print(f'TensorRT: {tensorrt.__version__}')"
-
-# 4. NumPy 버전 (반드시 1.x)
-python3 -c "import numpy; print(f'NumPy: {numpy.__version__}')"
-# 기대: 1.24.x 또는 1.26.x (NOT 2.x)
-
-# 5. 서비스 시작 후 헬스 체크
-curl http://localhost:8002/api/health
-```
+| 서비스 | 포트 | 관리 위치 |
+|--------|------|-----------|
+| Model | 8002 | **이 레포** |
+| Dashboard | 3000 | dashboard/ 레포 |
+| Node.js | 8888 | 다른 레포 |
+| Camera | 8003 | 다른 레포 |
+| IO Board | 8000 | CRK-IO-BOARD |
+| Payment | 5000 | CRK-PAYMENT |
 
 ## 빠른 시작
 
-### 1. 환경 설정
 ```bash
-cp .env.example .env
+cd Edge_Environment
 
-# .env 주요 설정 (TensorRT 전용)
-MODEL__VISION__YOLO_MODEL_PATH=models/siyeon_best.engine
-MODEL__BUFFER__TTL_SECONDS=300
-MODEL__BUFFER__MAX_SESSIONS=100
-```
+# 1. 환경 설정 (최초 1회)
+./scripts/setup_jetson.sh
 
-### 2. 의존성 설치 (uv)
-```bash
-# Jetson: uv + 시스템 패키지 상속
-uv venv --system-site-packages --python python3.10 .venv
+# 2. 가상환경 활성화
 source .venv/bin/activate
-uv pip install -e ".[dev]"
-```
 
-### 3. 서비스 실행
-
-```bash
-# Model 서비스 실행 (uv 사용)
+# 3. Model 서비스 시작
 uv run model-service
-
-# 또는 직접 실행
-python -m model_service.main
 ```
-
-### 4. Docker 실행 (v4.2)
-
-```bash
-cd services/model
-
-# 환경변수 설정
-cp .env.docker .env
-
-# Docker Compose로 실행 (Jetson GPU 사용)
-docker-compose up -d
-
-# 로그 확인
-docker-compose logs -f model
-
-# 헬스 체크
-curl http://localhost:8002/api/health
-```
-
-## API 엔드포인트 (v4.2)
-
-### 1. POST /trigger (Camera → Model)
-
-Camera에서 녹화 완료 시 호출. 즉시 YOLO 추론 실행.
-
-**Request:**
-```json
-{
-  "zone": 1,
-  "loadcells": [
-    {
-      "timestamp": "2026-02-01T14:30:25.123Z",
-      "raw_value": ["+12345", "+12345"],
-      "filtered_value": ["+12344", "+12346"],
-      "filter_method": "none"
-    }
-  ],
-  "videos": {
-    "top": "/data/videos/top.avi",
-    "side": "/data/videos/side.avi"
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "session_id": "zone_1_260201_143025",
-  "door_session_id": "door_zone_1_260201_143000",
-  "message": "추론 완료"
-}
-```
-
-### 2. POST /api/judge/multi-zone (Node.js → Model)
-
-데드볼트 문 열리면 10초 간격으로 폴링.
-
-**Request:**
-```json
-{
-  "session_id": "zone_1_260201_143025",
-  "zone": 1,
-  "products": [
-    {"product_idx": "26", "product_name": "치킨마요", "sale_price": 3500, "product_weight": "365"}
-  ]
-}
-```
-
-**Response 1: Door Session 진행 중 (in_progress)**
-```json
-{
-  "success": false,
-  "status": "in_progress",
-  "zone": 1,
-  "door_session_id": "door_zone_1_260201_143000",
-  "processing_stage": "door_session_active",
-  "processing_stage_detail": "Door session 활성: 2개 trigger 수신",
-  "interim_products": [
-    {"productIdx": "26", "productId": 26, "name": "치킨마요", "count": 2, "price": 3500}
-  ],
-  "interimProductCount": 2,
-  "interimTotalPrice": 7000,
-  "doorSessionInfo": {
-    "triggerCount": 2,
-    "durationSeconds": 15.5,
-    "createdAt": 1738476600.0,
-    "lastTriggerAt": 1738476615.5
-  }
-}
-```
-
-**Response 2: Door Session 완료 (complete)**
-```json
-{
-  "success": true,
-  "status": "complete",
-  "zone": 1,
-  "door_session_id": "door_zone_1_260201_143000",
-  "processing_stage": "complete",
-  "processing_stage_detail": "Door session 완료: 3개 trigger 통합",
-  "products": [
-    {"productIdx": "26", "productId": 26, "name": "치킨마요", "count": 1, "price": 3500}
-  ],
-  "productCount": 1,
-  "totalPrice": 3500,
-  "confidence": 0.92,
-  "weightInfo": {
-    "delta": -365.0,
-    "isRemoval": true
-  },
-  "doorSessionInfo": {
-    "triggerCount": 3,
-    "durationSeconds": 45.2,
-    "createdAt": 1738476600.0,
-    "finalizedAt": 1738476645.2
-  }
-}
-```
-
-### 3. GET /api/judge/session/{session_id} (세션 상태 조회)
-
-**Response:**
-```json
-{
-  "found": true,
-  "session_id": "zone_1_260201_143025",
-  "data": {
-    "zone": 1,
-    "status": "complete",
-    "products": [...]
-  }
-}
-```
-
-### 4. GET /api/judge/sessions/stats (세션 통계)
-
-**Response:**
-```json
-{
-  "total_sessions": 10,
-  "active_sessions": 3,
-  "ttl_seconds": 300,
-  "max_sessions": 100,
-  "door_session_store": {
-    "active_sessions": 1,
-    "active_zones": [1]
-  },
-  "timestamp": 1738476700.0
-}
-```
-
-### 5. GET /api/judge/door-sessions/stats (Door Session 통계)
-
-**Response:**
-```json
-{
-  "enabled": true,
-  "active_sessions": 2,
-  "active_zones": [1, 2],
-  "session_timeout": 30.0,
-  "weight_tolerance": 3.0,
-  "max_duration": 600.0,
-  "timestamp": 1738476700.0
-}
-```
-
-### 6. GET /api/judge/door-session/{zone} (Door Session 조회)
-
-**Response:**
-```json
-{
-  "found": true,
-  "zone": 1,
-  "data": {
-    "door_session_id": "door_zone_1_260201_143000",
-    "status": "active",
-    "triggers": [...],
-    "aggregated_products": {...}
-  }
-}
-```
-
-### 7. POST /api/judge/door-session/{zone}/finalize (Door Session 강제 종료)
-
-**Response:**
-```json
-{
-  "success": true,
-  "zone": 1,
-  "door_session_id": "door_zone_1_260201_143000",
-  "trigger_count": 3,
-  "product_count": 2,
-  "total_price": 7000,
-  "message": "Door session finalized successfully"
-}
-```
-
-### 헬스 체크
-
-```bash
-curl http://localhost:8002/api/health
-# {"model": "HEALTHY", "status": "ok", "yolo_loaded": true, "session_store_ready": true}
-
-curl http://localhost:8002/api/health/detailed
-# 상세 정보 포함
-```
-
-### 상품 관리
-
-```bash
-# 상품 목록
-curl http://localhost:8002/api/products
-
-# IF11 상품 동기화
-curl -X POST http://localhost:8002/api/products/sync \
-  -H "Content-Type: application/json" \
-  -d '{
-    "products": [
-      {"saleItemIdx": 26, "itemName": "치킨마요주먹밥", "salePrice": 3500, "weight": 520}
-    ]
-  }'
-```
-
-## 환경 변수
-
-### API 설정
-
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| MODEL__API__HOST | 0.0.0.0 | 서버 호스트 |
-| MODEL__API__PORT | 8002 | 서버 포트 |
-| MODEL__API__LOG_LEVEL | info | 로그 레벨 |
-
-### Session 설정
-
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| MODEL__BUFFER__TTL_SECONDS | 300 | 세션 TTL (초) |
-| MODEL__BUFFER__MAX_SESSIONS | 100 | 최대 세션 수 |
-
-### Vision 설정
-
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| MODEL__VISION__YOLO_MODEL_PATH | models/siyeon_best.engine | TensorRT 엔진 경로 |
-| MODEL__VISION__TOP_WEIGHT | 0.5 | Top 카메라 가중치 |
-| MODEL__VISION__SIDE_WEIGHT | 0.5 | Side 카메라 가중치 |
-| MODEL__VISION__COMMON_CLASS_BONUS | 0.2 | 양쪽 감지 시 보너스 |
-
-### Async Streaming 설정 (v5.3)
-
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| MODEL__ASYNC_STREAMING__ENABLED | true | Async streaming 활성화 여부 |
-| MODEL__ASYNC_STREAMING__FRAME_QUEUE_SIZE | 10 | 프레임 큐 최대 크기 (Top/Side 인터리빙용) |
-| MODEL__ASYNC_STREAMING__EARLY_TERMINATION_ENABLED | false | 조기 종료 기능 (미래 확장용) |
-| MODEL__ASYNC_STREAMING__EARLY_TERMINATION_VOTE_THRESHOLD | 50 | 조기 종료 투표 임계값 (미래 확장용) |
-
-### Trigger 설정 (v5.2)
-
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| MODEL__TRIGGER__DEDUP_TTL_SECONDS | 5.0 | Idempotency key 중복 체크 TTL (초) |
-| MODEL__TRIGGER__DEDUP_MAX_SIZE | 1000 | Dedup 캐시 최대 크기 |
-| MODEL__TRIGGER__QUEUE_MAX_SIZE | 20 | Trigger 큐 최대 크기 (v4.10) |
-| MODEL__TRIGGER__MIN_WEIGHT_CHANGE_GRAMS | 5.0 | 최소 무게 변화량 (이하면 스킵) |
-
-### Weight 설정 (v5.1)
-
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| MODEL__WEIGHT__TOLERANCE_GRAMS | 3.0 | 무게 허용 오차 (g) |
-| MODEL__WEIGHT__STRICT_MODE | true | 엄격 무게 검증 모드 |
-| MODEL__WEIGHT__MAX_COMBINATION_SIZE | 2 | 최대 조합 크기 |
-
-### Door Session 설정
-
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| MODEL__DOOR_SESSION__TIMEOUT | 30.0 | Door Session 타임아웃 (초) |
-| MODEL__DOOR_SESSION__WEIGHT_TOLERANCE | 5.0 | 반환 무게 매칭 허용 오차 (g) |
-| MODEL__DOOR_SESSION__MAX_DURATION | 600.0 | Door Session 최대 지속 시간 (초) |
-
-### 기타 설정
-
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| MODEL__NODEJS_URL | http://localhost:8888 | Node.js URL |
 
 ## 프로젝트 구조
 
 ```
 Edge_Environment/
-├── .env.example                  # 환경변수 예제
-├── CLAUDE.md                     # 이 문서
-├── README.md                     # 기본 README
-├── pyproject.toml                # Python 프로젝트 설정 (uv)
-├── data/
-│   └── sessions/                 # Door Session YAML 영속화
-├── logs/
-│   ├── judgment/                 # 판단 로그
-│   ├── system/                   # 시스템 로그
-│   └── weight/                   # 무게 로그
-├── models/
-│   └── siyeon_best.engine        # TensorRT 엔진 (Jetson에서 생성)
-├── scripts/
-│   └── setup_jetson.sh           # Jetson 환경 설정 스크립트
-└── services/
-    └── model/                    # AI 상품 판단 (포트 8002)
-        ├── Dockerfile            # Docker 빌드 (v4.2)
-        ├── docker-compose.yml    # Docker Compose (v4.2)
-        ├── .env.docker           # Docker 환경변수 템플릿 (v4.2)
-        ├── tests/                # 테스트 코드
-        └── model_service/        # 소스 코드 (v5.4 마이그레이션)
-            ├── __init__.py
-            ├── main.py           # Entry point (uv run model-service)
-            ├── api/
-            │   ├── routes/       # 분리된 라우터
-            │   │   ├── health.py     # GET /api/health
-            │   │   ├── trigger.py    # POST /trigger
-            │   │   ├── multi_zone.py # POST /api/judge/multi-zone
-            │   │   └── products.py   # 상품 관리
-            │   ├── deps.py       # 의존성 주입
-            │   └── manager.py    # FastAPI 앱 팩토리 + TTL cleanup
-            ├── service/          # 비즈니스 로직 레이어 (v4.2)
-            │   ├── trigger_service.py      # 트리거 처리 서비스
-            │   ├── judgment_service.py     # 판단 서비스
-            │   └── door_session_service.py # DoorSession 서비스
-            ├── session/          # 세션 저장소
-            │   ├── session_store.py      # 기본 세션 저장소
-            │   ├── door_session_store.py # Door Session 저장소 (v4.1)
-            │   ├── door_session.py       # Door Session 데이터 모델
-            │   ├── product_aggregator.py # 상품 통합/반환 처리
-            │   └── yaml_persistence.py   # YAML 영속화
-            ├── video/            # AVI 비디오 처리
-            │   ├── video_processor.py    # process_videos() + process_videos_async() (v5.3)
-            │   ├── voting_ensemble.py    # 투표 기반 앙상블
-            │   └── frame_extractor.py    # __iter__() + __aiter__() (v5.3)
-            ├── vision/           # YOLO 추론
-            │   └── yolo_wrapper.py   # TensorRT 래퍼 (480x480, FP16)
-            ├── weight/           # 무게 계산
-            │   └── count_calculator.py
-            ├── engine/           # 판단 엔진
-            │   ├── decision_engine.py
-            │   └── models.py
-            ├── database/         # 상품 DB
-            │   └── product_db.py
-            └── core/             # 설정 (통합됨)
-                ├── config.py     # 모든 설정 (유일한 config 파일)
-                ├── exceptions.py
-                └── logging_config.py
+├── services/model/           # AI 판단 서비스 (8002)
+│   ├── model_service/        # 소스 코드 (v5.4)
+│   │   ├── main.py           # Entry point
+│   │   ├── api/routes/       # API 라우터
+│   │   ├── service/          # 비즈니스 로직
+│   │   ├── session/          # 세션 저장소
+│   │   ├── video/            # 비디오 처리, Async Streaming (v5.3)
+│   │   ├── vision/           # YOLO TensorRT 추론
+│   │   ├── weight/           # 무게 계산
+│   │   ├── engine/           # 판단 엔진
+│   │   └── core/             # 설정 (config.py)
+│   └── tests/                # 테스트 (130+)
+├── data/sessions/            # Door Session YAML 영속화
+├── logs/                     # 로그
+├── models/                   # TensorRT 엔진 (.engine)
+├── scripts/                  # 설정 스크립트
+├── docs/                     # 상세 문서
+│   ├── JETSON_SETUP.md       # Jetson 설치 가이드
+│   └── REFERENCE.md          # API 상세 스펙
+└── pyproject.toml
 ```
 
-## 데이터 흐름 (v4.2)
+## API 요약
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      데드볼트 문 열림                        │
-└─────────────────────────────────────────────────────────────┘
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        │                     │                     │
-        ▼                     ▼                     ▼
-   [Camera]             [Node.js]              [IO Board]
-   녹화 시작            폴링 시작              로드셀 모니터링
-        │                  │                        │
-        │                  │ POST /api/judge/multi-zone
-        │                  │ (10초 간격)
-        │                  ▼
-        │            ┌─────────────────────────┐
-        │            │ Model 서비스             │
-        │            │ Door Session 없음        │
-        │            │ → processing (waiting)   │
-        │            └─────────────────────────┘
-        │
-        ▼ (녹화 완료 - 첫 번째)
-   POST /trigger
-   (zone=1, loadcells, videos)
-        │
-        ▼
-┌────────────────────────────────────────────┐
-│ Model 서비스 - 첫 번째 trigger             │
-│                                            │
-│ 1. VideoProcessor (AVI 처리)               │
-│    - YOLO TensorRT 추론 → 치킨마요 2개     │
-│                                            │
-│ 2. delta_weight = -730g (제거)             │
-│                                            │
-│ 3. DoorSessionStore에 추가                 │
-│    - 새 Door Session 생성                  │
-│    - door_session_id 발급                  │
-│    - ProductAggregator: 치킨마요 x2 합산   │
-│                                            │
-│ 4. SessionStore에도 저장 (하위 호환)       │
-└────────────────────────────────────────────┘
-        │
-        ▼
-   [Node.js 폴링]
-   POST /api/judge/multi-zone (zone=1)
-        │
-        ▼
-┌────────────────────────────────────────────┐
-│ Model 서비스                                │
-│ DoorSession 활성 → in_progress 응답        │
-│ interim_products: 치킨마요 x2              │
-└────────────────────────────────────────────┘
-        │
-        ▼
-   [Camera 두 번째 trigger - 반환 감지]
-   POST /trigger (delta=+365g)
-        │
-        ▼
-┌────────────────────────────────────────────┐
-│ Model 서비스 - 두 번째 trigger (반환)      │
-│                                            │
-│ 1. delta_weight = +365g (반환)             │
-│    - is_return = true                      │
-│                                            │
-│ 2. DoorSessionStore에 추가                 │
-│    - ProductAggregator: 무게 매칭          │
-│    - 치킨마요(365g) 1개 차감               │
-│    - 결과: 치킨마요 x1                     │
-└────────────────────────────────────────────┘
-        │
-        ▼
-   [30초 타임아웃 - 문 닫힘]
-        │
-        ▼
-   [Node.js 폴링]
-   POST /api/judge/multi-zone (zone=1)
-        │
-        ▼
-┌────────────────────────────────────────────┐
-│ Model 서비스                                │
-│ DoorSession 타임아웃 → complete 응답       │
-│ products: 치킨마요 x1                      │
-│ totalPrice: 3500                           │
-└────────────────────────────────────────────┘
-```
+### 핵심 API
 
-### Door Session 개념 (v4.1)
+| API | 설명 |
+|-----|------|
+| `GET /api/health` | 헬스 체크 |
+| `POST /trigger` | Camera에서 호출, YOLO 추론 실행 |
+| `POST /api/judge/multi-zone` | Node.js 10초 폴링, 판단 결과 |
+| `GET /api/judge/door-sessions/stats` | Door Session 통계 |
+| `POST /api/judge/door-session/{zone}/finalize` | 강제 종료 |
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      Door Session                                │
-│  (문 열림 ~ 타임아웃까지의 모든 trigger 통합)                     │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  trigger_001 (제거)     trigger_002 (제거)    trigger_003 (반환) │
-│  ├─ delta: -730g        ├─ delta: -250g       ├─ delta: +365g   │
-│  ├─ 치킨마요 x2         ├─ 참치마요 x1        └─ (무게 매칭)    │
-│  └─ is_return: false    └─ is_return: false       is_return: true│
-│                                                                  │
-│                    ▼ ProductAggregator ▼                        │
-│                                                                  │
-│  aggregated_products:                                            │
-│  ├─ 치킨마요: 2 - 1 = 1개 (반환 1개 차감)                        │
-│  └─ 참치마요: 1개                                                │
-│                                                                  │
-│  최종 결과: 치킨마요 3500원 + 참치마요 3000원 = 6500원           │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Async Streaming 비디오 처리 (v5.3)
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│              VideoProcessor.process_videos_async()               │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────────┐     asyncio.Queue     ┌──────────────────┐ │
-│  │ Top Extractor    │────►  (maxsize=10)  ◄────│ Side Extractor │ │
-│  │ __aiter__()      │       frame_queue       │ __aiter__()    │ │
-│  │ ┌────┐┌────┐     │                         │     ┌────┐┌────┐│ │
-│  │ │ F1 ││ F2 │ ... │                         │ ... │ F1 ││ F2 ││ │
-│  │ └────┘└────┘     │                         │     └────┘└────┘│ │
-│  └──────────────────┘                         └──────────────────┘ │
-│           │                                            │          │
-│           └──────────────┬─────────────────────────────┘          │
-│                          ▼                                        │
-│                 ┌────────────────────┐                            │
-│                 │ YOLO Inference     │  (단일 인스턴스)            │
-│                 │ yolo_inference_loop│  (인터리빙 처리)            │
-│                 │                    │                            │
-│                 │ top_frame → 추론   │                            │
-│                 │ side_frame → 추론  │                            │
-│                 │ top_frame → 추론   │                            │
-│                 │ ...                │                            │
-│                 └────────────────────┘                            │
-│                          │                                        │
-│                          ▼                                        │
-│                 ┌────────────────────┐                            │
-│                 │ Motion Filter +    │                            │
-│                 │ VotingEnsemble     │                            │
-│                 └────────────────────┘                            │
-│                          │                                        │
-│                          ▼                                        │
-│                 VideoProcessingResult                             │
-└─────────────────────────────────────────────────────────────────┘
-
-기존 (sync):  Top 처리 (10s) → Side 처리 (10s) = 20초
-v5.3 (async): Top/Side I/O 병렬 + 인터리빙 추론 = ~14초 (30% 개선)
-```
-
-## 가중치 계산 (v4.0)
-
-```
-상품 A: Top(0.8) + Side(0.7) 감지
-  = 0.8 × 0.5 + 0.7 × 0.5 + 0.2 = 0.95
-
-상품 B: Top(0.9) only
-  = 0.9 × 0.5 = 0.45
-
-상품 C: Side(0.85) only
-  = 0.85 × 0.5 = 0.425
-```
-
-## 에러 처리
-
-### HTTP 상태 코드
-
-| 코드 | 상황 | 에러 코드 |
-|------|------|-----------|
-| 400 | 비디오 파일 없음 | `VIDEO_FILE_NOT_FOUND` |
-| 400 | 잘못된 요청 | `VALIDATION_ERROR` |
-| 500 | 비디오 손상 | `VIDEO_CORRUPTED` |
-| 500 | FFmpeg 오류 | `FFMPEG_ERROR` |
-| 500 | YOLO GPU 오류 | `YOLO_GPU_ERROR` |
-| 503 | YOLO 모델 미로드 | `YOLO_MODEL_NOT_LOADED` |
-
-### 에러 응답 형식
-
-```json
-{
-  "detail": {
-    "error_code": "VIDEO_FILE_NOT_FOUND",
-    "message": "Video file not found: /path/to/video.avi",
-    "video_path": "/path/to/video.avi"
-  }
-}
-```
-
-## 트러블슈팅
-
-### CUDA 관련
+### 빠른 테스트
 
 ```bash
-# CUDA 사용 불가
-# → JetPack 재설치 또는 CUDA 경로 확인
-export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+# 헬스 체크
+curl http://localhost:8002/api/health
 
-# TensorRT 버전 불일치
-# → Jetson에서 .engine 파일 재생성
-yolo export model=models/siyeon_best.pt format=engine device=0 half=True imgsz=480
+# Trigger
+curl -X POST http://localhost:8002/trigger \
+  -H "Content-Type: application/json" \
+  -d '{"zone": 1, "videos": {"top": "/path/top.avi", "side": "/path/side.avi"}, "loadcells": []}'
+
+# 판단 결과 폴링
+curl -X POST http://localhost:8002/api/judge/multi-zone \
+  -H "Content-Type: application/json" \
+  -d '{"zone": 1}'
 ```
 
-### 메모리 부족
+> API 상세: [docs/REFERENCE.md](./docs/REFERENCE.md)
 
-```bash
-# GPU 메모리 모니터링
-tegrastats
+## 환경 변수
 
-# 성능 모드 설정 (MAXN)
-sudo nvpmodel -m 0
-sudo jetson_clocks
-```
+### 필수 설정
 
-### FFmpeg 오류
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| MODEL__API__PORT | 8002 | 서버 포트 |
+| MODEL__VISION__YOLO_MODEL_PATH | models/siyeon_best.engine | TensorRT 엔진 |
+| MODEL__BUFFER__TTL_SECONDS | 300 | 세션 TTL (초) |
 
-```bash
-# FFmpeg 설치 확인
-ffmpeg -version
+### Async Streaming (v5.3)
 
-# MJPEG 코덱 지원 확인
-ffmpeg -codecs | grep mjpeg
-```
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| MODEL__ASYNC_STREAMING__ENABLED | true | Async 모드 활성화 |
+| MODEL__ASYNC_STREAMING__FRAME_QUEUE_SIZE | 10 | 프레임 큐 크기 |
+
+### Weight (v5.1)
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| MODEL__WEIGHT__TOLERANCE_GRAMS | 3.0 | 무게 허용 오차 (g) |
+| MODEL__WEIGHT__STRICT_MODE | true | 엄격 무게 검증 |
+
+> 전체 환경변수: `.env.example` 참조
+
+## 요구사항
+
+| 항목 | 버전 |
+|------|------|
+| 하드웨어 | Jetson Orin Nano 4GB |
+| OS | JetPack 6.2 (Ubuntu 22.04) |
+| Python | 3.10.x |
+| CUDA | 12.x (JetPack 포함) |
+| TensorRT | 10.x (JetPack 포함) |
+| NumPy | **< 2.0** (필수) |
+
+> 상세 설치 가이드: [docs/JETSON_SETUP.md](./docs/JETSON_SETUP.md)
+
+## Jetson 4GB 최적화
+
+| 항목 | 설정 | 효과 |
+|------|------|------|
+| 입력 크기 | 480x480 | 메모리 44% 감소 |
+| FP16 추론 | half=True | 메모리 50% 감소 |
+| 최대 탐지 | max_det=20 | 후처리 부하 감소 |
+| Async Streaming | Top/Side I/O 병렬화 | 처리 시간 30% 감소 |
 
 ## 테스트 실행
 
 ```bash
-# 전체 테스트 실행 (uv 사용)
+# 전체 테스트 (130+)
 uv run pytest services/model/tests -v
 
-# 특정 테스트 파일 실행
+# 특정 테스트
+uv run pytest services/model/tests/test_async_streaming.py -v
 uv run pytest services/model/tests/test_door_session_store.py -v
-uv run pytest services/model/tests/test_product_aggregator.py -v
-uv run pytest services/model/tests/test_voting_ensemble.py -v
-
-# 테스트 커버리지 (pytest-cov 필요)
-uv run pytest services/model/tests --cov=services/model/model_service --cov-report=html
 ```
 
-### 테스트 파일 구조
+## 데이터 흐름
 
-| 파일 | 테스트 대상 | 테스트 수 |
-|------|------------|----------|
-| `test_session_store.py` | SessionStore CRUD, TTL | 11 |
-| `test_door_session_store.py` | DoorSessionStore, 타임아웃, 동시성 | 12 |
-| `test_product_aggregator.py` | 상품 합산, 반환 처리 | 10 |
-| `test_voting_ensemble.py` | 투표 앙상블, Top/Side 결합 | 14 |
-| `test_trigger_helpers.py` | 무게 계산 헬퍼 | 15 |
-| `test_api_routes.py` | API 엔드포인트 | 7 |
-| `test_deps.py` | 의존성 주입 | 8 |
-| `test_pipeline.py` | E2E 파이프라인 | 8 |
-| `test_scenario.py` | 실제 시나리오 | 14 |
-| `test_error_handling.py` | 예외 처리 | 14 |
-| `test_strict_weight_matcher.py` | StrictWeightMatcher 무게 매칭 (v5.1) | - |
-| `test_cross_zone_return.py` | Cross-zone 반환 로직 (v4.9) | - |
-| `test_global_door_session_integration.py` | 전역 DoorSession 통합 | - |
-| `test_full_scenario_with_trigger.py` | 전체 시나리오 + Trigger | - |
-| `test_async_streaming.py` | Async Streaming 파이프라인 (v5.3) | 12 |
-| **총계** | | **130+** |
+```
+1. Camera Driver → AVI 녹화 완료
+2. Camera → Model (POST /trigger + videos + loadcells)
+3. Model: YOLO TensorRT 추론 → VotingEnsemble → DoorSessionStore
+4. (반복) 추가 trigger → 같은 Door Session에 통합
+5. Node.js → Model (POST /api/judge/multi-zone) 10초 간격 폴링
+6. Model: DoorSession 타임아웃 → 완료 시 결과 응답
+```
 
-#### test_async_streaming.py 테스트 클래스 (v5.3)
+## 관련 레포 위치
 
-| 클래스 | 테스트 내용 |
-|--------|-------------|
-| `TestAsyncStreamingConfig` | AsyncStreamingModel 설정 검증 |
-| `TestStreamingFrameExtractorAsync` | `__aiter__()` 비동기 이터레이션 |
-| `TestVideoProcessorAsync` | `process_videos_async()` 결과 검증 |
-| `TestFeatureFlagIntegration` | Feature flag 기반 async/sync 선택 |
-| `TestAsyncQueueBehavior` | asyncio.Queue 인터리빙 동작 |
-| `TestApplyMotionFilterAndVotes` | Motion 필터링 헬퍼 메서드 |
-| `TestProcessingTimeImprovement` | 병렬 I/O 시간 개선 검증 |
+| 레포 | 경로 |
+|------|------|
+| 현위치 | `~\VOICE\2026\crk\win_pc_test_sw2io_board\Edge_Environment` |
+| Dashboard | `~\VOICE\2026\crk\dashboard` |
+| Camera | `~\VOICE\2026\crk\CRK-CAMERA` |
+| IO Board | `~\VOICE\2026\crk\CRK-IO-BOARD` |
+| Payment | `~\VOICE\2026\crk\CRK-PAYMENT` |
+| Node.js | `~\VOICE\2026\crk\Edge_Environment` |
 
-## 삭제된 API (v3.0 → v4.0)
+## 문서 참조
 
-| API | 대체 방법 |
-|-----|----------|
-| POST /api/frame | 제거 (AVI Trigger만 사용) |
-| POST /api/judge | POST /api/judge/multi-zone 사용 |
-| GET /api/frame/stats | GET /trigger/stats 사용 |
-
-## 기타 서비스 디렉토리 위치
-
-'현위치': "~\VOICE\2026\crk\win_pc_test_sw2io_board\Edge_Environment"
-'dashboard': "~\VOICE\2026\crk\dashboard"
-'camera': "~\VOICE\2026\crk\CRK-CAMERA"
-'io board': "~\VOICE\2026\crk\CRK-IO-BOARD"
-'payment': "~\VOICE\2026\crk\CRK-PAYMENT"
-'node': "~\VOICE\2026\crk\Edge_Environment"
-
-## TODO (추후 구현)
-
-### has_loadcell 필드 지원
-
-**배경**: 자판기 하드웨어 모델에 따라 로드셀이 있는 모델과 없는 모델이 존재함.
-
-**현재 상태**:
-- Node.js가 `has_loadcell: "true"/"false"/"null"` 필드를 전송
-- Model 서비스의 `ProductInfo`는 `loadcell` 필드명으로 정의되어 있어 무시됨
-- 현재는 모든 상품에 대해 로드셀 기반 무게 검증을 수행
-
-**구현 필요 사항**:
-1. `ProductInfo.loadcell` → `has_loadcell`로 필드명 변경
-2. `has_loadcell == "false"` 또는 `"null"`인 상품은 무게 검증 로직에서 제외
-3. Vision-only 모드: 로드셀 없는 하드웨어에서는 YOLO 추론 결과만으로 상품 판단
-
-**영향 범위**:
-- `services/model/model_service/api/routes/multi_zone.py` - ProductInfo 모델
-- `services/model/model_service/engine/decision_engine.py` - 무게 기반 개수 계산
-- `services/model/model_service/session/product_aggregator.py` - 반환 처리 (무게 매칭)
+- [README.md](./README.md) - 빠른 시작 가이드
+- [docs/JETSON_SETUP.md](./docs/JETSON_SETUP.md) - Jetson 상세 설치 가이드
+- [docs/REFERENCE.md](./docs/REFERENCE.md) - API 상세 스펙
+- [CHANGELOG_v4.8.md](./CHANGELOG_v4.8.md) - 전체 변경 이력

@@ -1,8 +1,8 @@
-# API Reference (v4.1)
+# API Reference (v5.4)
 
 Model Service API 상세 스펙
 
-> **최종 업데이트**: 2026-02-02
+> **최종 업데이트**: 2026-02-06
 
 ---
 
@@ -55,7 +55,7 @@ Camera에서 AVI 녹화 완료 시 호출.
   "zone": 1,
   "loadcells": [
     {
-      "timestamp": "2026-02-02T14:30:25.123Z",
+      "timestamp": "2026-02-06T14:30:25.123Z",
       "raw_value": ["+12345", "+12345"],
       "filtered_value": ["+12344", "+12346"],
       "filter_method": "none"
@@ -78,8 +78,8 @@ Camera에서 AVI 녹화 완료 시 호출.
 ```json
 {
   "success": true,
-  "session_id": "zone_1_260202_143025",
-  "door_session_id": "door_zone_1_260202_143000",
+  "session_id": "zone_1_260206_143025",
+  "door_session_id": "door_zone_1_260206_143000",
   "message": "추론 완료",
   "processing_time_ms": 1500.5
 }
@@ -95,6 +95,8 @@ Camera에서 AVI 녹화 완료 시 호출.
   }
 }
 ```
+
+### 에러 코드
 
 | 에러 코드 | HTTP | 설명 |
 |----------|------|------|
@@ -116,7 +118,7 @@ Node.js에서 10초 간격 폴링.
 **Request:**
 ```json
 {
-  "session_id": "zone_1_260202_143025",
+  "session_id": "zone_1_260206_143025",
   "zone": 1,
   "products": [
     {
@@ -131,9 +133,9 @@ Node.js에서 10초 간격 폴링.
 
 | 필드 | 타입 | 필수 | 설명 |
 |------|------|------|------|
-| session_id | string | X | 세션 ID (없으면 최근 세션 자동 선택) |
-| zone | int | X | Zone 번호 (Door Session 조회용) |
-| products | array | X | 상품 목록 (무게 보정용) |
+| session_id | string | X | 세션 ID |
+| zone | int | X | Zone 번호 |
+| products | array | X | 상품 목록 |
 
 **Response 1: 대기 중 (processing)**
 ```json
@@ -142,9 +144,7 @@ Node.js에서 10초 간격 폴링.
   "status": "processing",
   "message": "YOLO 추론 대기 중",
   "reason": "not_found",
-  "device_id": null,
-  "processing_stage": "waiting",
-  "processing_stage_detail": "세션 생성 대기 중"
+  "processing_stage": "waiting"
 }
 ```
 
@@ -153,21 +153,11 @@ Node.js에서 10초 간격 폴링.
 {
   "success": false,
   "status": "in_progress",
-  "device_id": null,
   "zone": 1,
-  "door_session_id": "door_zone_1_260202_143000",
-  "session_id": "zone_1_260202_143025",
+  "door_session_id": "door_zone_1_260206_143000",
   "processing_stage": "door_session_active",
-  "processing_stage_detail": "Door session 활성: 2개 trigger 수신",
   "interim_products": [
-    {
-      "productIdx": "26",
-      "productId": 26,
-      "name": "치킨마요",
-      "count": 2,
-      "price": 3500,
-      "confidence": 0.92
-    }
+    {"productIdx": "26", "productId": 26, "name": "치킨마요", "count": 2, "price": 3500}
   ],
   "interimProductCount": 2,
   "interimTotalPrice": 7000,
@@ -176,11 +166,6 @@ Node.js에서 10초 간격 폴링.
     "durationSeconds": 15.5,
     "createdAt": 1738476600.0,
     "lastTriggerAt": 1738476615.5
-  },
-  "stats": {
-    "topFrames": 0,
-    "sideFrames": 0,
-    "processingTimeMs": 3000.5
   }
 }
 ```
@@ -190,39 +175,21 @@ Node.js에서 10초 간격 폴링.
 {
   "success": true,
   "status": "complete",
-  "device_id": null,
   "zone": 1,
-  "door_session_id": "door_zone_1_260202_143000",
-  "session_id": "zone_1_260202_143025",
+  "door_session_id": "door_zone_1_260206_143000",
   "processing_stage": "complete",
-  "processing_stage_detail": "Door session 완료: 3개 trigger 통합",
   "products": [
-    {
-      "productIdx": "26",
-      "productId": 26,
-      "name": "치킨마요",
-      "count": 1,
-      "price": 3500,
-      "confidence": 0.92
-    }
+    {"productIdx": "26", "productId": 26, "name": "치킨마요", "count": 1, "price": 3500}
   ],
   "productCount": 1,
   "totalPrice": 3500,
   "confidence": 0.92,
-  "weightInfo": {
-    "delta": -365.0,
-    "isRemoval": true
-  },
+  "weightInfo": {"delta": -365.0, "isRemoval": true},
   "doorSessionInfo": {
     "triggerCount": 3,
     "durationSeconds": 45.2,
     "createdAt": 1738476600.0,
     "finalizedAt": 1738476645.2
-  },
-  "stats": {
-    "topFrames": 150,
-    "sideFrames": 150,
-    "processingTimeMs": 4500.5
   }
 }
 ```
@@ -239,14 +206,12 @@ Node.js에서 10초 간격 폴링.
 ```json
 {
   "found": true,
-  "session_id": "zone_1_260202_143025",
+  "session_id": "zone_1_260206_143025",
   "data": {
     "zone": 1,
     "status": "complete",
     "products": [...],
-    "total_price": 3500,
-    "delta_weight": -365.0,
-    "confidence": 0.92
+    "total_price": 3500
   }
 }
 ```
@@ -255,7 +220,7 @@ Node.js에서 10초 간격 폴링.
 ```json
 {
   "found": false,
-  "session_id": "zone_1_260202_143025",
+  "session_id": "zone_1_260206_143025",
   "message": "Session not found or expired"
 }
 ```
@@ -277,9 +242,7 @@ Node.js에서 10초 간격 폴링.
   "max_sessions": 100,
   "door_session_store": {
     "active_sessions": 1,
-    "active_zones": [1],
-    "session_timeout": 30.0,
-    "weight_tolerance": 3.0
+    "active_zones": [1]
   },
   "timestamp": 1738476700.0
 }
@@ -287,7 +250,7 @@ Node.js에서 10초 간격 폴링.
 
 ---
 
-## 6. Door Session API (v4.1)
+## 6. Door Session API
 
 ### GET /api/judge/door-sessions/stats
 
@@ -302,7 +265,6 @@ Door Session 저장소 통계.
   "session_timeout": 30.0,
   "weight_tolerance": 3.0,
   "max_duration": 600.0,
-  "yaml_dir": "data/sessions",
   "timestamp": 1738476700.0
 }
 ```
@@ -311,37 +273,16 @@ Door Session 저장소 통계.
 
 특정 Zone의 Door Session 조회.
 
-**Response (찾음):**
+**Response:**
 ```json
 {
   "found": true,
   "zone": 1,
   "data": {
-    "door_session_id": "door_zone_1_260202_143000",
-    "zone": 1,
+    "door_session_id": "door_zone_1_260206_143000",
     "status": "active",
-    "triggers": [
-      {
-        "trigger_id": "trigger_001",
-        "session_id": "zone_1_260202_143025",
-        "timestamp": 1738476600.0,
-        "products": [...],
-        "delta_weight": -365.0,
-        "is_return": false
-      }
-    ],
-    "aggregated_products": {
-      "26": {
-        "product_id": 26,
-        "product_idx": "26",
-        "name": "치킨마요",
-        "count": 1,
-        "unit_price": 3500,
-        "weight": 365.0
-      }
-    },
-    "created_at": 1738476600.0,
-    "last_trigger_at": 1738476615.5
+    "triggers": [...],
+    "aggregated_products": {...}
   }
 }
 ```
@@ -355,7 +296,7 @@ Door Session 강제 종료.
 {
   "success": true,
   "zone": 1,
-  "door_session_id": "door_zone_1_260202_143000",
+  "door_session_id": "door_zone_1_260206_143000",
   "trigger_count": 3,
   "product_count": 2,
   "total_price": 6500,
@@ -396,12 +337,7 @@ IF11 상품 동기화.
 ```json
 {
   "products": [
-    {
-      "saleItemIdx": 26,
-      "itemName": "치킨마요주먹밥",
-      "salePrice": 3500,
-      "weight": 365
-    }
+    {"saleItemIdx": 26, "itemName": "치킨마요주먹밥", "salePrice": 3500, "weight": 365}
   ]
 }
 ```
@@ -435,7 +371,7 @@ IF11 상품 동기화.
 | 필드 | 타입 | 설명 |
 |------|------|------|
 | delta | float | 무게 변화량 (g) |
-| isRemoval | bool | 제거 여부 (음수면 true) |
+| isRemoval | bool | 제거 여부 |
 
 ### DoorSessionInfo
 
@@ -445,7 +381,7 @@ IF11 상품 동기화.
 | durationSeconds | float | 세션 지속 시간 (초) |
 | createdAt | float | 생성 시각 (epoch) |
 | lastTriggerAt | float | 마지막 trigger 시각 |
-| finalizedAt | float | 종료 시각 (complete일 때) |
+| finalizedAt | float | 종료 시각 |
 
 ### ProcessingStats
 
