@@ -399,71 +399,6 @@ async function startProcess(token, CardMethod) {
       }
 }
 
-/**
- * 결제 취소 요청 함수
- * @param {Object} paymentResult - 결제 승인(Approve) 후 받은 응답 데이터
- * @param {string} originalToken - SSE로 받았던 초기 토큰 (vankey_hash)
- * @param {string} amount - 취소할 금액
- * @param {string} CardMethod - 'S'(삼성페이) or 'N'(일반)
- */
-// async function cancelPayment(paymentResult, originalToken, amount, CardMethod) {
-//     console.log(`[PAYMENT] Initiating Cancellation... Method: ${CardMethod}`);
-
-//     try {
-//         let cancelPayload = {};
-//         let cancelEndpoint = "";
-//         const authDate = paymentResult.authorization_date;
-//         const authNum = paymentResult.authorization_number;
-
-//         if (!authDate || !authNum) {
-//             throw new Error("Cannot cancel: Missing authorization info from payment result.");
-//         }
-
-//         if (CardMethod === "S") {
-//             cancelEndpoint = `${config.cardTerminalApi}/payment/samsung-pay/cancel`;
-            
-//             cancelPayload = {
-//                 amount: amount,
-//                 original_authorization_date: authDate,
-//                 original_authorization_number: authNum,
-//                 vankey: paymentResult.vankey
-//             };
-
-//         } else if (CardMethod === "N") {
-//             cancelEndpoint = `${config.cardTerminalApi}/payment/token/cancel`;
-
-//             cancelPayload = {
-//                 amount: amount,
-//                 original_authorization_date: authDate,
-//                 original_authorization_number: authNum,
-//                 vankey_hash: originalToken
-//             };
-//         } else {
-//             throw new Error("Unknown Payment Method");
-//         }
-
-//         console.log(`[PAYMENT] Sending Cancel Request to ${cancelEndpoint}`, cancelPayload);
-
-//         const response = await axios.post(cancelEndpoint, cancelPayload);
-
-//         if (response.data && response.data.status === "ok") { // 또는 성공 코드 확인
-//             console.log("[PAYMENT] Cancellation Successful:", response.data);
-//             return true;
-//         } else {
-//             console.error("[PAYMENT] Cancellation Failed:", response.data);
-//             return false;
-//         }
-
-//     } catch (error) {
-//         console.error("[PAYMENT] Cancel API Error:", error.message);
-//         if (error.response) {
-//             console.error("Detail:", error.response.data);
-//         }
-//         return false;
-//     }
-// }
-
-
 // let LoadcellData = null
 let paymentResponse = null;
 let inferenceResult = null;
@@ -643,7 +578,9 @@ async function Payments(token, CardMethod) {
                 amount: preAmount,
                 original_authorization_date: preAuthDate,
                 original_authorization_number: preAuthNum,
-                vankey: samsungpayToken || token
+                vankey: samsungpayToken
+            }).then((response) => {
+              console.log('canceled samsung-pay : ', response.data)
             })
           }
           // 일반 카드

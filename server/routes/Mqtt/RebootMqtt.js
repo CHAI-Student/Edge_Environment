@@ -6,6 +6,7 @@ const config = require("../../config/key");
 const { exec } = require("child_process");
 
 // 실코드/테스트 동일 경로로 고정
+// 운영 중인 상태에 대해서 payment 상태 체크 필요
 const REBOOT_FLAG = path.resolve(__dirname, "../../log/reboot.flag");
 
 async function fileExists(p) {
