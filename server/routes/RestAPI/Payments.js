@@ -7,7 +7,8 @@ const { CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI, CameraStatu
 const { ProductList } = require("./ProductList");
 const fs = require("fs");
 const path = require("path");
-const { callApiToControlDeadbolt } = require('../Mqtt/DeadboltApiService'); // [추가] 도어 제어 함수 임포트 가정
+const { callApiToControlDeadbolt } = require('../Mqtt/DeadboltApiService');
+const { getProcessing, setProcessing } = require("./PaymentProcessing");
 const { EventSource } = require('eventsource');
 const { sendToPNT } = require("./PaymentStore");
 const { exec } = require("child_process");
@@ -360,14 +361,15 @@ async function init() {
 // --- 2. 프로세스 시작 및 상태 체크 ---
 async function startProcess(token, CardMethod) {
     // [수정] 1. 프로세스가 이미 실행 중이면 요청 무시 (Busy Check)
-    if (isProcessing) {
+    if (getProcessing()) {
         console.warn('[SYSTEM] Device is busy. Ignoring new request');
         // 필요 시 사용자에게 "사용 중입니다" 음성 안내 추가 가능
         playDeviceRunningVoice()
         return; 
     }
     // [수정] 2. 프로세스 잠금 (Lock)
-    isProcessing = true;
+    // isProcessing = true;
+    setProcessing(true);
     try {
       const CameraStatus = await CameraStatusAPI()
       const CardTerminalStatus = await CardTerminalStatusAPI()
@@ -390,7 +392,8 @@ async function startProcess(token, CardMethod) {
       } finally {
           // [수정] 3. 프로세스 잠금 해제 (Unlock)
           // 성공하든 실패하든 반드시 실행되어야 함.
-          isProcessing = false;
+          // isProcessing = false;
+          setProcessing(false);
           
           // [권장] 다음 결제를 위해 전역 토큰 변수 초기화
           resetGlobalTokens(); 
