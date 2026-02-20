@@ -33,6 +33,7 @@ const productUploadSchema = mongoose.Schema({
         모델 학습/검증 완료 후 CI/CD 배포 완료: 7
         모델 검증 실패, 재학습(데이터셋 재수집) 필요: 8
     */
+   // 제거
     trainingStatus: {
         type: String,
     },

@@ -20,6 +20,7 @@ const divisionUploadSchema = mongoose.Schema({
         type: String
     },
     //PNT에 등록된 매장별 신규 상품 리스트
+    // 해당 productIdx에 대해서 object 하나 더 넣어서 이거에 대한 status 값을 따로 관리할 수 있도록 { training_status }
     products: [{
         type: Schema.Types.ObjectId,
         ref: "ProductUpload",
