@@ -1,6 +1,21 @@
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
+const StoreProductSchema = new Schema(
+  {
+    product: {
+      type: Schema.Types.ObjectId,
+      ref: "ProductUpload",
+      required: true,
+    },
+    training_status: {
+      type: String,
+      default: "0", // 너 enum/정책에 맞춰 (0=미학습 등)
+    },
+  },
+  { _id: false }
+);
+
 const divisionUploadSchema = mongoose.Schema({
     //mongoDB 고유 id값
     divisionMetaIdx: mongoose.Schema.Types.ObjectId,
@@ -22,7 +37,7 @@ const divisionUploadSchema = mongoose.Schema({
     //PNT에 등록된 매장별 신규 상품 리스트
     // 해당 productIdx에 대해서 object 하나 더 넣어서 이거에 대한 status 값을 따로 관리할 수 있도록 { training_status }
     products: [{
-        type: Schema.Types.ObjectId,
+        type: [StoreProductSchema],
         ref: "ProductUpload",
     }],
     //모델 학습 상태 정보 (매장별)

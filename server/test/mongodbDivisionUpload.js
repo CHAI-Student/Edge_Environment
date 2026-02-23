@@ -83,29 +83,40 @@ async function main() {
   // device 2개 상품을 union
   const productIdxSet = new Set();
 
-  for (const d of deviceList) {
-    const deviceIdx = d.device_idx;
+  // for (const d of deviceList) {
+  //   const deviceIdx = d.device_idx;
 
-    const pl = await ProductList({
-      division_idx: divisionIdx,
-      device_idx: null,
-    });
+  //   const pl = await ProductList({
+  //     division_idx: divisionIdx,
+  //     device_idx: null,
+  //   });
 
-    const products = pl.DATA.product_list ?? [];
-    console.log(`[ProductList] device=${deviceIdx} items=${products.length}`);
+  const pl = await ProductList({ division_idx: divisionIdx, device_idx: null });
 
-    for (const p of products) {
-      productIdxSet.add(p.product_idx);
+  const products = pl.DATA.product_list ?? [];
+  // console.log(`[ProductList] device=${deviceIdx} items=${products.length}`);
+  console.log(`[ProductList] division=${divisionIdx} devices=${deviceList.length} items=${products.length}`);
 
-      // ProductUpload 갱신(정책: device용은 trainingStatus=2)
-      const updateSetProduct = {
-        categoryIdx: p.category_idx ?? "null",
-        isNew: p.is_new,
-        trainingStatus: "2",
-        productLoadcellWeight: p.product_weight ?? "null",
-      };
+  for (const p of products) {
+    productIdxSet.add(p.product_idx);
 
-      // 신규 insert시에만 폴더 생성
+    // ProductUpload 갱신(정책: device용은 trainingStatus=2)
+    const updateSetProduct = {
+      categoryIdx: p.category_idx ?? "null",
+      isNew: p.is_new,
+      trainingStatus: "2",
+      productLoadcellWeight: p.product_weight ?? "null",
+    };
+
+    // 상품이 이미 존재하는지 체크 (trainProductIdx만 조회)
+    const existing = await ProductUpload.findOne(
+      { productIdx: p.product_idx },
+      { _id: 1, trainProductIdx: 1, foldername: 1, folderpath: 1 }
+    ).lean();
+
+    // 신규일 때만 seq++ + 폴더 생성 + setOnInsert 구성
+    let setOnInsert = {};
+    if (!existing) {
       const insertNow = new Date();
       const trainProductIdx = ++seq;
 
@@ -113,26 +124,57 @@ async function main() {
       const foldername = `${trainProductIdx}_${p.product_eng_name}_${stamp}`;
       const folderpath = `/chaiimage/productImg/${foldername}/`;
 
-      await ProductUpload.updateOne(
-        { productIdx: p.product_idx },
-        {
-          $set: updateSetProduct,
-          $setOnInsert: {
-            productIdx: p.product_idx,
-            productName: p.product_name,
-            productEngName: p.product_eng_name,
-            trainProductIdx,
-            createDate: insertNow,
-            foldername,
-            folderpath,
-            filelength: null,
-            updateDate: null,
-            eventPromotion: [],
-          },
-        },
-        { upsert: true }
-      );
+      setOnInsert = {
+        productIdx: p.product_idx,
+        productName: p.product_name,
+        productEngName: p.product_eng_name,
+        trainProductIdx,
+        createDate: insertNow,
+        foldername,
+        folderpath,
+        filelength: null,
+        updateDate: null,
+        eventPromotion: [],
+      };
     }
+
+    await ProductUpload.updateOne(
+      { productIdx: p.product_idx },
+      {
+        $set: updateSetProduct,
+        ...(Object.keys(setOnInsert).length ? { $setOnInsert: setOnInsert } : {}),
+      },
+      { upsert: true }
+    );
+
+    // // 신규 insert시에만 폴더 생성
+    // const insertNow = new Date();
+    // const trainProductIdx = ++seq;
+
+    // const stamp = FolderName(insertNow);
+    // const foldername = `${trainProductIdx}_${p.product_eng_name}_${stamp}`;
+    // const folderpath = `/chaiimage/productImg/${foldername}/`;
+
+    // await ProductUpload.updateOne(
+    //   { productIdx: p.product_idx },
+    //   {
+    //     $set: updateSetProduct,
+    //     $setOnInsert: {
+    //       productIdx: p.product_idx,
+    //       productName: p.product_name,
+    //       productEngName: p.product_eng_name,
+    //       trainProductIdx,
+    //       createDate: insertNow,
+    //       foldername,
+    //       folderpath,
+    //       filelength: null,
+    //       updateDate: null,
+    //       eventPromotion: [],
+    //     },
+    //   },
+    //   { upsert: true }
+    // );
+    // }
   }
 
   // union된 productIdx -> ObjectId
@@ -140,17 +182,30 @@ async function main() {
   const productDocs = productIdxList.length
     ? await ProductUpload.find({ productIdx: { $in: productIdxList } }, { _id: 1 }).lean()
     : [];
-  const productObjectIds = productDocs.map((x) => x._id);
+  // const productObjectIds = productDocs.map((x) => x._id);
 
-  // 매장 전체 상품으로 최종 반영
-  await DivisionUpload.updateOne(
-    { divisionIdx },
-    { $set: { products: productObjectIds } }
-  );
+  // // 매장 전체 상품으로 최종 반영
+  // await DivisionUpload.updateOne(
+  //   { divisionIdx },
+  //   { $set: { products: productObjectIds } }
+  // );
+
+  const productMappings = productDocs.map((x) => ({
+    product: x._id,
+    training_status: "2",  // 이미 AI 서버 내 데이터 존재
+  }));
+
+  // await DivisionUpload.updateOne(
+  //   { divisionIdx },
+  //   { $set: { products: productMappings } }
+  // );
+  await DivisionUpload.updateOne({ divisionIdx }, { $set: { products: [] } });
+  await DivisionUpload.updateOne({ divisionIdx }, { $set: { products: productMappings } });
 
   // populate로 상품 상세 확인
   const division = await DivisionUpload.findOne({ divisionIdx })
-    .populate("products")
+    // .populate("products")
+    .populate("products.product")
     .lean();
 
   console.log("[Division] divisionIdx:", division?.divisionIdx);
@@ -168,3 +223,15 @@ if (require.main === module) {
     process.exit(1);
   });
 }
+
+// 상태 업데이트 코드
+// await DivisionUpload.updateOne(
+//   { divisionIdx, "products.product": productObjectId },
+//   {
+//     $set: {
+//       "products.$.training_status": "3",
+//       "products.$.updated_at": new Date(),
+//       "products.$.last_error": null,
+//     },
+//   }
+// );
