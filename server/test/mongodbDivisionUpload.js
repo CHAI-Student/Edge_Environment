@@ -62,7 +62,7 @@ async function main() {
         divisionIdx,
         deviceIdx: deviceIdxArr,
         modelVersion: d0.model_version == null ? "v0.0.1" : d0.model_version,
-        brunchName: `${divisionIdx}`,
+        brunchName: `${divisionIdx}_${d0.storage_type}`,
         trainingStatus: "2",
         trainingDate: now,
         retrainingDate: null,
