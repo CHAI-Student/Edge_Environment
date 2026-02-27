@@ -6,6 +6,9 @@ const crypto = require("crypto");
 const path = require("path");
 const Minio = require("minio");
 const config = require("../../config/key");
+const fs = require("fs");
+
+const sha1 = (buffer) => crypto.createHash("sha1").update(buffer).digest("hex");
 
 //=================================
 //        Product Upload

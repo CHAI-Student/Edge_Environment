@@ -38,4 +38,7 @@ module.exports = {
 
     // 임베딩 모델 버전
     modelVersion: "v1.0.0",
+
+    storageType: "C",
+    hasLoadcell: "Y",
 }

@@ -130,3 +130,53 @@ main().catch((e) => {
   console.error("❌ ERROR:", e?.message || e);
   process.exit(1);
 });
+
+async function uploadProductData(productIdx, timestamp, localRoot) {
+  const minioClient = new Minio.Client({
+    endPoint: config.minioURL,
+    port: 9000,
+    useSSL: false,
+    accessKey: config.minioAccessKey,
+    secretKey: config.minioSecretKey,
+  });
+
+  const BUCKET = config.minioBucket;
+  const basePrefix = `productImg/${safe(productIdx)}_${timestamp}`;
+
+  const targets = [
+    { cam: "cam_0", dir: path.join(localRoot, "images", "cam_0") },
+    { cam: "cam_2", dir: path.join(localRoot, "images", "cam_2") },
+  ];
+
+  const uploads = [];
+  for (const t of targets) {
+    if (!fs.existsSync(t.dir)) continue; // 폴더가 없으면 건너뜀
+    
+    const files = fs.readdirSync(t.dir).filter((f) => path.extname(f).toLowerCase() === ".jpg");
+    for (const fname of files) {
+      uploads.push({
+        localPath: path.join(t.dir, fname),
+        key: `${basePrefix}/${t.cam}/${fname}`,
+      });
+    }
+  }
+
+  if (uploads.length === 0) return { success: false, message: "No images found" };
+
+  // 1) 업로드 수행
+  for (const u of uploads) {
+    await minioClient.fPutObject(BUCKET, u.key, u.localPath, {});
+  }
+
+  // 2) 로컬 파일 삭제 (업로드 성공 후)
+  for (const u of uploads) {
+    try { fs.unlinkSync(u.localPath); } catch (e) {}
+  }
+
+  // 3) 빈 폴더 정리
+  for (const t of targets) removeDirIfEmpty(t.dir);
+  removeDirIfEmpty(path.join(localRoot, "images"));
+  removeDirIfEmpty(localRoot);
+
+  return { success: true, count: uploads.length };
+}
