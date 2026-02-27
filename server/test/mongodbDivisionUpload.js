@@ -37,6 +37,7 @@ async function main() {
 
   const deviceList = mb.DATA.device_list ?? [];
   console.log("[ModelBrunchCheck] devices:", deviceList.length);
+  console.log('mb.DATA', mb.DATA)
   if (!deviceList.length) {
     console.log("[DivisionUpload] no devices found");
     await mongoose.disconnect();
@@ -83,19 +84,12 @@ async function main() {
   // device 2개 상품을 union
   const productIdxSet = new Set();
 
-  // for (const d of deviceList) {
-  //   const deviceIdx = d.device_idx;
-
-  //   const pl = await ProductList({
-  //     division_idx: divisionIdx,
-  //     device_idx: null,
-  //   });
-
   const pl = await ProductList({ division_idx: divisionIdx, device_idx: null });
 
   const products = pl.DATA.product_list ?? [];
   // console.log(`[ProductList] device=${deviceIdx} items=${products.length}`);
   console.log(`[ProductList] division=${divisionIdx} devices=${deviceList.length} items=${products.length}`);
+  console.log(products)
 
   for (const p of products) {
     productIdxSet.add(p.product_idx);
@@ -146,35 +140,6 @@ async function main() {
       },
       { upsert: true }
     );
-
-    // // 신규 insert시에만 폴더 생성
-    // const insertNow = new Date();
-    // const trainProductIdx = ++seq;
-
-    // const stamp = FolderName(insertNow);
-    // const foldername = `${trainProductIdx}_${p.product_eng_name}_${stamp}`;
-    // const folderpath = `/chaiimage/productImg/${foldername}/`;
-
-    // await ProductUpload.updateOne(
-    //   { productIdx: p.product_idx },
-    //   {
-    //     $set: updateSetProduct,
-    //     $setOnInsert: {
-    //       productIdx: p.product_idx,
-    //       productName: p.product_name,
-    //       productEngName: p.product_eng_name,
-    //       trainProductIdx,
-    //       createDate: insertNow,
-    //       foldername,
-    //       folderpath,
-    //       filelength: null,
-    //       updateDate: null,
-    //       eventPromotion: [],
-    //     },
-    //   },
-    //   { upsert: true }
-    // );
-    // }
   }
 
   // union된 productIdx -> ObjectId
@@ -182,23 +147,12 @@ async function main() {
   const productDocs = productIdxList.length
     ? await ProductUpload.find({ productIdx: { $in: productIdxList } }, { _id: 1 }).lean()
     : [];
-  // const productObjectIds = productDocs.map((x) => x._id);
-
-  // // 매장 전체 상품으로 최종 반영
-  // await DivisionUpload.updateOne(
-  //   { divisionIdx },
-  //   { $set: { products: productObjectIds } }
-  // );
 
   const productMappings = productDocs.map((x) => ({
     product: x._id,
     training_status: "2",  // 이미 AI 서버 내 데이터 존재
   }));
 
-  // await DivisionUpload.updateOne(
-  //   { divisionIdx },
-  //   { $set: { products: productMappings } }
-  // );
   await DivisionUpload.updateOne({ divisionIdx }, { $set: { products: [] } });
   await DivisionUpload.updateOne({ divisionIdx }, { $set: { products: productMappings } });
 

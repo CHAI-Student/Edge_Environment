@@ -46,6 +46,9 @@ const productUploadSchema = mongoose.Schema({
         type: String,
         default: 'null'
     },
+    storageType: {
+        type: String
+    },
     //이미지 스냅샷 폴더명
     foldername: {
         type: String
@@ -77,7 +80,8 @@ const productUploadSchema = mongoose.Schema({
     }, { versionKey: false, timestamps: false }
 )
 
-productUploadSchema.index({ productIdx: 1, productEngName: 1, trainProductIdx: 1 }, { unique: true });
+productUploadSchema.index({ productIdx: 1, productEngName: 1 }, { unique: true });
+productUploadSchema.index({ trainProductIdx: 1 }, { unique: true });
 
 // const ProductUpload = mongoose.model('ProductUpload', productUploadSchema);
 const ProductUpload = mongoose.model('ProductUpload', productUploadSchema, 'ProductsList');
