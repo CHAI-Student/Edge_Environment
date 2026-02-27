@@ -40,4 +40,7 @@ module.exports = {
     get modelVersion() {
         return process.env.MODEL_VERSION;
     }
+    // modelVersion: "v1.0.0",
+    // storageType: "C",
+    // hasLoadcell: "Y",
 }

@@ -43,6 +43,7 @@ app.locals.minioBucket = "chaiimage"; // 또는 config로
 
 app.use(cors())
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 //to not get any deprecation warning or error
 //support parsing of application/x-www-form-urlencoded post data
