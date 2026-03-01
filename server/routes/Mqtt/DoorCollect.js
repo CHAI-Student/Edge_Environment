@@ -125,11 +125,11 @@ async function ProductRegistration() {
             if (reqDoorState === 'OPEN') {
                 const CurrentDoorState = await fetchCurrentDoorState();
                 if (CurrentDoorState === "CLOSE") {
-                    const folderPath = path.join(process.cwd(), "productImg") // 폴더 경로 지정
+                    // const folderPath = path.join(process.cwd(), "productImg") // 폴더 경로 지정
                     // [질문] 지금 해당 경로가 원본 데이터셋 폴더(상위 폴더) 경로이긴 한데
                     // 이 값이 IF06으로 전달되는 것도 아니고, IF04에서 폴더 경로를 픽앤탁에 보내야 하는 것도 아니고
                     // 어차피 IF06에서 상위 폴더/하위 폴더 경로까지 정해서 카메라 API로 전달하는데 여기서 꼭 지정해야할 필요가 있나?
-                    const openResult = await callApiToControlDeadbolt("OPEN"); //문 열기 제어(데드볼트 열기)
+                    await callApiToControlDeadbolt("OPEN"); //문 열기 제어(데드볼트 열기)
                     
                     const { CameraStatus, DeadboltHealth, LoadcellHealth, isSuccess, resultMsg } = await ProductCollectionHealth();
                     const timestamp = makeTimestampFolderName();
@@ -187,22 +187,22 @@ async function ProductRegistration() {
                 let CurrentModelVersion = myDevice.model_version;
                 console.log("[ProductCollection] 현재 모델 버전", CurrentModelVersion);
                 // 불러온 모델의 버전 26.0.1이면 그냥 마지막 값에 +1 한 값(26.0.2)으로 업데이트하였음
-                let UpdateModelVersion = ModelVersionUpdate(currentVersion);
+                // let UpdateModelVersion = ModelVersionUpdate(currentVersion);
 
                 // MongoDB에 training_status 변화 저장/반영 및 모델 버전 업데이트
                 await ensureMongoConnected();
                 const result = await ProductUpload.updateMany(
                     { productIdx: { $in: toUpdateIds } },
                     { $set: { training_status: "2",
-                        model_version: UpdateModelVersion
+                        model_version: CurrentModelVersion
                     } }
                 );
                 console.log(`[ProductCollection] CLOSE: trainingStatus=2 반영 완료 (matched=${result.matchedCount}, modified=${result.modifiedCount})`);
 
                 // 1:1 매핑 확인
-                deviceList = await DeviceInfo();
-                myDevice = deviceList.find(device => device.device_idx === config.deviceIdx);
-                CurrentModelVersion = myDevice.model_version;
+                // deviceList = await DeviceInfo();
+                // myDevice = deviceList.find(device => device.device_idx === config.deviceIdx);
+                // CurrentModelVersion = myDevice.model_version;
                 
                 // AI 서버 쪽으로 신규 상품이 전달되었음을 API로 전달
                 for (let i = 0; i<deviceList.length; i++){

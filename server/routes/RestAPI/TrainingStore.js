@@ -5,8 +5,6 @@ const { v4: uuidv4 } = require("uuid");
 
 /**
  * [IF_13] 장비 정보 조회 서비스
- * @param {string} divisionIdx - 매장코드 
- * @param {string} deviceIdx - 장비코드 
  */
 async function TrainingStore(productIdx, product_eng_name, training_status) {
     try {
@@ -34,7 +32,7 @@ async function TrainingStore(productIdx, product_eng_name, training_status) {
         };
         
         const response = await axios.post(targetUrl, payload);
-        return response.data.DATA; // 장비 리스트 배열 반환 [cite: 3]
+        return response.data.DATA;
 
     } catch (error) {
         console.error(`[IF07] 통신 실패: ${error.message}`);
