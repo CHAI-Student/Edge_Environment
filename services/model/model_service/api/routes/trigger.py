@@ -128,6 +128,21 @@ def _parse_loadcell_value(value: str) -> float:
         return 0.0
 
 
+def _avg_loadcell_channels(values: list) -> float:
+    """filtered_value 배열 전체 채널 평균. 비거나 파싱 실패 시 0.0."""
+    parsed = []
+    for v in values:
+        try:
+            cleaned = str(v).strip()
+            if cleaned.startswith("+"):
+                parsed.append(float(cleaned[1:]))
+            else:
+                parsed.append(float(cleaned))
+        except (ValueError, AttributeError):
+            pass
+    return sum(parsed) / len(parsed) if parsed else 0.0
+
+
 def _detect_stable_regions(
     loadcells: List[LoadcellData],
     window_size: int = 5,
@@ -152,11 +167,11 @@ def _detect_stable_regions(
     if len(loadcells) < window_size * 2:
         return _simple_delta_values(loadcells)
 
-    # filtered_value 추출 (첫 번째 채널 사용)
+    # filtered_value 추출 (전체 채널 평균)
     values = []
     for lc in loadcells:
         if lc.filtered_value:
-            val = _parse_loadcell_value(lc.filtered_value[0])
+            val = _avg_loadcell_channels(lc.filtered_value)
             values.append(val)
 
     if len(values) < window_size * 2:
@@ -205,10 +220,8 @@ def _simple_delta_values(loadcells: List[LoadcellData]) -> Tuple[float, float, b
         return 0.0, 0.0, False
 
     try:
-        start_val = loadcells[0].filtered_value[0] if loadcells[0].filtered_value else "0"
-        end_val = loadcells[-1].filtered_value[0] if loadcells[-1].filtered_value else "0"
-        start = _parse_loadcell_value(start_val)
-        end = _parse_loadcell_value(end_val)
+        start = _avg_loadcell_channels(loadcells[0].filtered_value) if loadcells[0].filtered_value else 0.0
+        end = _avg_loadcell_channels(loadcells[-1].filtered_value) if loadcells[-1].filtered_value else 0.0
         return start, end, True
     except (IndexError, AttributeError):
         return 0.0, 0.0, False

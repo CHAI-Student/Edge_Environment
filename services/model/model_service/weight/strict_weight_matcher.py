@@ -458,3 +458,93 @@ class StrictWeightMatcher:
             avg_vision_confidence=avg_vision_confidence,
             match_score=match_score,
         )
+
+    def find_return_combination(
+        self,
+        aggregated: dict,
+        delta_weight: float,
+    ) -> Optional[Dict[int, int]]:
+        """
+        반품 조합 탐색 (vision 없이 무게만으로).
+
+        단일 상품 매칭 실패 후 폴백으로 사용.
+        aggregated에서 count>0, weight>0인 상품들로 delta_weight를
+        설명하는 조합을 backtracking으로 탐색합니다.
+
+        Args:
+            aggregated: {product_id: AggregatedProduct}
+            delta_weight: 반납 무게 (양수)
+
+        Returns:
+            {product_id: count} 또는 None (조합 없음)
+        """
+        if delta_weight <= self.tolerance:
+            return None
+
+        # 후보 추출: count > 0, weight > 0 (무거운 것부터 - pruning 효율화)
+        candidates = sorted(
+            [
+                (pid, agg.weight, agg.count)
+                for pid, agg in aggregated.items()
+                if agg.count > 0 and agg.weight > 0
+            ],
+            key=lambda x: -x[1],
+        )
+
+        if not candidates:
+            return None
+
+        result: Dict[int, int] = {}
+        found = self._backtrack_return(candidates, delta_weight, 0, result)
+        return result if found else None
+
+    def _backtrack_return(
+        self,
+        candidates: list,
+        remaining: float,
+        start_idx: int,
+        result: Dict[int, int],
+    ) -> bool:
+        """
+        반품 조합 백트래킹.
+
+        Args:
+            candidates: [(product_id, weight, max_count), ...]
+            remaining: 아직 설명해야 할 무게 (g)
+            start_idx: 탐색 시작 인덱스
+            result: 현재까지의 조합 (in-place 수정)
+
+        Returns:
+            True if valid combination found
+        """
+        # 기저 조건: 허용 오차 내 → 성공
+        if abs(remaining) <= self.tolerance:
+            return True
+
+        # Pruning: remaining이 음수 → 초과
+        if remaining < -self.tolerance:
+            return False
+
+        # 모든 후보 소진
+        if start_idx >= len(candidates):
+            return False
+
+        # 깊이 제한
+        if sum(result.values()) >= self.max_items:
+            return False
+
+        product_id, weight, max_count = candidates[start_idx]
+        capped = min(max_count, self.max_count_per_item)
+
+        # 이 상품을 1~capped개 사용
+        for count in range(1, capped + 1):
+            used_weight = weight * count
+            if used_weight > remaining + self.tolerance:
+                break  # 이미 초과, 더 늘려도 의미없음
+            result[product_id] = count
+            if self._backtrack_return(candidates, remaining - used_weight, start_idx + 1, result):
+                return True
+            del result[product_id]
+
+        # 이 상품 스킵
+        return self._backtrack_return(candidates, remaining, start_idx + 1, result)

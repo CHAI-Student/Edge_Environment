@@ -29,6 +29,7 @@ v4.5 변경사항:
 import asyncio
 import hashlib
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -157,10 +158,20 @@ class TriggerService:
         Returns:
             Idempotency key (MD5 hash)
         """
+        def _file_sig(path: str) -> str:
+            """파일 mtime+size로 고유 서명 생성. 파일 없으면 'missing'."""
+            try:
+                st = os.stat(path)
+                return f"{st.st_mtime_ns}_{st.st_size}"
+            except OSError:
+                return "missing"
+
         key_parts = [
             str(input_data.zone),
             input_data.top_video_path or "",
+            _file_sig(input_data.top_video_path or ""),
             input_data.side_video_path or "",
+            _file_sig(input_data.side_video_path or ""),
         ]
         key_str = "|".join(key_parts)
         return hashlib.md5(key_str.encode()).hexdigest()
@@ -1070,10 +1081,8 @@ class TriggerService:
         if not is_valid:
             logger.warning("Could not detect stable regions, using simple delta")
             try:
-                start_val = loadcells[0].filtered_value[0] if loadcells[0].filtered_value else "0"
-                end_val = loadcells[-1].filtered_value[0] if loadcells[-1].filtered_value else "0"
-                start = self._parse_loadcell_value(start_val)
-                end = self._parse_loadcell_value(end_val)
+                start = self._avg_loadcell_channels(loadcells[0].filtered_value) if loadcells[0].filtered_value else 0.0
+                end = self._avg_loadcell_channels(loadcells[-1].filtered_value) if loadcells[-1].filtered_value else 0.0
                 return end - start
             except (IndexError, AttributeError) as e:
                 logger.warning(f"Failed to calculate weight delta: {e}")
@@ -1099,7 +1108,7 @@ class TriggerService:
         values = []
         for lc in loadcells:
             if lc.filtered_value:
-                val = self._parse_loadcell_value(lc.filtered_value[0])
+                val = self._avg_loadcell_channels(lc.filtered_value)
                 values.append(val)
 
         if len(values) < window_size * 2:
@@ -1146,10 +1155,8 @@ class TriggerService:
             return 0.0, 0.0, False
 
         try:
-            start_val = loadcells[0].filtered_value[0] if loadcells[0].filtered_value else "0"
-            end_val = loadcells[-1].filtered_value[0] if loadcells[-1].filtered_value else "0"
-            start = self._parse_loadcell_value(start_val)
-            end = self._parse_loadcell_value(end_val)
+            start = self._avg_loadcell_channels(loadcells[0].filtered_value) if loadcells[0].filtered_value else 0.0
+            end = self._avg_loadcell_channels(loadcells[-1].filtered_value) if loadcells[-1].filtered_value else 0.0
             return start, end, True
         except (IndexError, AttributeError):
             return 0.0, 0.0, False
@@ -1163,6 +1170,16 @@ class TriggerService:
             return float(cleaned)
         except (ValueError, AttributeError):
             return 0.0
+
+    def _avg_loadcell_channels(self, values: list) -> float:
+        """filtered_value 배열 전체 채널 평균. 비거나 파싱 실패 시 0.0."""
+        parsed = []
+        for v in values:
+            try:
+                parsed.append(self._parse_loadcell_value(str(v)))
+            except Exception:
+                pass
+        return sum(parsed) / len(parsed) if parsed else 0.0
 
     def _vote_results_to_ensemble(
         self, vote_results: List[VoteResult]

@@ -26,6 +26,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from .door_session import TriggerResult, AggregatedProduct, UnmatchedReturn
 from .session_store import ProductResult
+from model_service.weight.strict_weight_matcher import StrictWeightMatcher
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ class ProductAggregator:
         """
         self._weight_tolerance = weight_tolerance
         self._get_product_weight = get_product_weight
+        self._weight_matcher = StrictWeightMatcher(tolerance=weight_tolerance)
 
     def aggregate(
         self,
@@ -213,13 +215,37 @@ class ProductAggregator:
         if matched_product_id is not None:
             agg = aggregated[matched_product_id]
             if agg.count > 0:
-                agg.count = max(0, agg.count - 1)  # 음수 방지
+                # 무게 기반 개수 추정: delta / unit_weight (최소 1, 재고 초과 방지)
+                if agg.weight > 0:
+                    estimated_count = max(1, round(delta_weight / agg.weight))
+                    estimated_count = min(estimated_count, agg.count)
+                else:
+                    estimated_count = 1
+                agg.count = max(0, agg.count - estimated_count)
                 logger.info(
-                    f"Return processed: {agg.name} "
-                    f"(weight match: {delta_weight:.1f}g ~ {agg.weight:.1f}g, "
-                    f"remaining count={agg.count})"
+                    f"Return processed: {agg.name} x{estimated_count} "
+                    f"(delta={delta_weight:.1f}g, unit={agg.weight:.1f}g, "
+                    f"remaining={agg.count})"
                 )
                 return matched_product_id
+
+        # Step 2: 조합 매칭 폴백 (Phase 1) - 다중 상품 동시 반납
+        combo = self._weight_matcher.find_return_combination(aggregated, delta_weight)
+        if combo is not None:
+            names = []
+            first_id = None
+            for product_id, count in combo.items():
+                if product_id in aggregated:
+                    agg = aggregated[product_id]
+                    agg.count = max(0, agg.count - count)
+                    names.append(f"{agg.name}x{count}")
+                    if first_id is None:
+                        first_id = product_id
+            logger.info(
+                f"Return combo processed: {', '.join(names)} "
+                f"(delta={delta_weight:.1f}g)"
+            )
+            return first_id
 
         logger.warning(
             f"Return weight matching failed: {delta_weight:.1f}g "
