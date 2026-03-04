@@ -160,3 +160,14 @@ docs/Jetson_Nano_Testing_Guide.md
 post_api.txt
 /services/model/tests/
 direction.txt
+docs/SEMINAR_PRESENTATION.md
+CRK_테스트_시나리오_회의결과.pdf
+
+# =============================================================================
+# Claude Code Local Guides (on-demand, not for remote)
+# =============================================================================
+docs/agent-guides/
+docs/plans/
+docs/IMPLEMENTATION_ROADMAP.md
+docs/MODEL_PROCESS_RISK_REVIEW_2026-03-04.md
+uv.lock
