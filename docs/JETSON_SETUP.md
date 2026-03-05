@@ -227,14 +227,41 @@ curl http://localhost:8002/api/health/detailed
 
 ### 5.3 Docker 실행 (v5.4+)
 
+Docker 2-컨테이너 구성: **model** (장기 실행) + **convert** (일회성 TensorRT 변환).
+
 ```bash
 # Edge_Environment 루트에서 실행
-docker compose up -d model
-docker compose logs -f model
 
-# TensorRT 엔진 변환 (일회성)
+# 1. 환경변수 확인/수정 (필요 시)
+nano .env.docker
+# 주요 설정: MODEL__VISION__YOLO_MODEL_PATH, MODEL__NODEJS_URL 등
+
+# 2. TensorRT 엔진 변환 (일회성, .pt → .engine)
 docker compose --profile convert run --rm convert
+
+# 다른 모델 파일 변환
+PT_FILE=new_model.pt docker compose --profile convert run --rm convert
+
+# 이미지 크기 변경
+PT_FILE=siyeon_best.pt IMGSZ=640 docker compose --profile convert run --rm convert
+
+# 3. Model Service 시작
+docker compose up -d model
+
+# 4. 로그 확인
+docker compose logs -f model
 ```
+
+**`.env.docker` 주요 환경변수:**
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `MODEL__VISION__YOLO_MODEL_PATH` | `/data/models/siyeon_best.engine` | TensorRT 엔진 경로 |
+| `MODEL__NODEJS_URL` | `http://host.docker.internal:8888` | Node.js 연동 |
+| `PT_FILE` | `siyeon_best.pt` | 변환할 .pt 파일명 (convert용) |
+| `IMGSZ` | `480` | 입력 이미지 크기 (convert용) |
+
+> 전체 설정은 `.env.docker` 파일 참조.
 
 ---
 

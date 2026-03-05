@@ -52,6 +52,7 @@ uv run model-service
 ```
 Edge_Environment/
 ├── services/model/           # AI 판단 서비스 (8002)
+│   ├── Dockerfile            # Model Service 컨테이너
 │   ├── model_service/        # 소스 코드 (v5.4)
 │   │   ├── main.py           # Entry point
 │   │   ├── api/routes/       # API 라우터
@@ -61,11 +62,16 @@ Edge_Environment/
 │   │   ├── vision/           # YOLO 추론
 │   │   └── core/             # 설정
 │   └── tests/                # 테스트 코드 (19개 파일, 225+ 테스트)
+├── docker/convert/           # TensorRT 변환 컨테이너
+│   └── Dockerfile
 ├── data/sessions/            # Door Session YAML 영속화
 ├── logs/                     # 로그 (judgment, system, weight)
 ├── models/                   # TensorRT 엔진 파일
-├── scripts/                  # 설정 스크립트
+├── scripts/                  # convert_engine.sh 등
 ├── docs/                     # 상세 문서
+├── docker-compose.yml        # 2-컨테이너 오케스트레이션
+├── .env.docker               # Docker 환경변수 템플릿
+├── .dockerignore             # Docker 빌드 제외 파일
 └── pyproject.toml            # Python 프로젝트 설정
 ```
 
