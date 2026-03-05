@@ -183,10 +183,10 @@ def generate_global_session_id() -> str:
     """
     Global Session ID 생성.
 
-    Format: global_{YYMMDD}_{HHMMSS}
+    Format: global_{YYMMDD}_{HHMMSS}_{ffffff}
 
     Returns:
-        Global Session ID (예: global_260203_143000)
+        Global Session ID (예: global_260203_143000_123456)
     """
     now = datetime.now()
-    return f"global_{now.strftime('%y%m%d_%H%M%S')}"
+    return f"global_{now.strftime('%y%m%d_%H%M%S_%f')}"

@@ -144,6 +144,11 @@ def create_lifespan(settings: Settings):
         # 2. YOLO 모델 로드
         yolo = YOLOWrapper(model_path=settings.yolo_model_path)
         yolo_loaded = yolo.load()
+        if not yolo_loaded:
+            raise RuntimeError(
+                f"YOLO 모델 로드 실패: {settings.yolo_model_path}. "
+                "TensorRT 엔진 파일이 존재하는지 확인하세요."
+            )
 
         # 3. ActiveProductStore 초기화 (v4.4)
         # yolo_product_mapping.json에서 yolo_class_name → yolo_class_id 매핑 로드
@@ -286,8 +291,8 @@ def create_app(settings: Settings) -> FastAPI:
     """
     app = FastAPI(
         title="Model Service",
-        description="AI 상품 판단 서비스 - AVI Trigger + Vision + Weight Fusion (v5.3)",
-        version="5.3.0",
+        description="AI 상품 판단 서비스 - AVI Trigger + Vision + Weight Fusion (v5.4)",
+        version="5.4.0",
         lifespan=create_lifespan(settings),
     )
 
@@ -301,7 +306,7 @@ def create_app(settings: Settings) -> FastAPI:
         """루트 엔드포인트."""
         return {
             "service": "model",
-            "version": "5.3.0",
+            "version": "5.4.0",
             "description": "AI 상품 판단 서비스 (AVI Trigger API)",
         }
 

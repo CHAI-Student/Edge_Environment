@@ -18,7 +18,6 @@ from model_service.core.exceptions import (
 from model_service.core.config import (
     Settings,
     config,
-    generate_session_id,
 )
 from model_service.core.logging_config import (
     PerformanceLogger,
@@ -48,7 +47,6 @@ __all__ = [
     # Config
     "Settings",
     "config",
-    "generate_session_id",
     # Logging
     "PerformanceLogger",
     "clear_correlation_id",

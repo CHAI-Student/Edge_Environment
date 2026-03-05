@@ -428,14 +428,14 @@ def generate_door_session_id(zone: int) -> str:
     """
     Door Session ID 생성.
 
-    Format: door_zone_{zone}_{YYMMDD}_{HHMMSS}
+    Format: door_zone_{zone}_{YYMMDD}_{HHMMSS}_{ffffff}
 
     Args:
         zone: Zone 번호
 
     Returns:
-        Door Session ID (예: door_zone_1_260201_143000)
+        Door Session ID (예: door_zone_1_260201_143000_123456)
     """
     from datetime import datetime
     now = datetime.now()
-    return f"door_zone_{zone}_{now.strftime('%y%m%d_%H%M%S')}"
+    return f"door_zone_{zone}_{now.strftime('%y%m%d_%H%M%S_%f')}"

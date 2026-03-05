@@ -297,6 +297,8 @@ class VideoProcessor:
             side_weight=config.side_weight,
             common_class_bonus=config.common_class_bonus,
             product_weights=product_weights,
+            top_only_weight=config.top_only_weight,
+            side_only_weight=config.side_only_weight,
         )
 
         # v4.6: 손 경로 필터링 적용 (Top 카메라 기준)
@@ -432,6 +434,16 @@ class VideoProcessor:
             )
 
             frame_idx = 0
+            # ffmpeg 미존재 시 CV2FrameExtractor가 반환될 수 있음(__aiter__ 미지원)
+            if not hasattr(extractor, '__aiter__'):
+                logger.error(
+                    f"[VIDEO-ASYNC] {camera_type}: async streaming requires ffmpeg "
+                    "but extractor does not support async iteration (ffmpeg not available?). "
+                    "Skipping video extraction."
+                )
+                await frame_queue.put((camera_type, -1, None))
+                return
+
             try:
                 async for frame in extractor:
                     await frame_queue.put((camera_type, frame_idx, frame))
@@ -607,6 +619,8 @@ class VideoProcessor:
             side_weight=config.side_weight,
             common_class_bonus=config.common_class_bonus,
             product_weights=product_weights,
+            top_only_weight=config.top_only_weight,
+            side_only_weight=config.side_only_weight,
         )
 
         # 손 경로 필터링

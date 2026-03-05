@@ -270,6 +270,34 @@ class TestReturnCountEstimation:
         assert agg[26].count >= 0  # 음수 방지
 
 
+    def test_safety_guard_abnormally_large_deducts_only_1(self):
+        """Phase 0b 안전장치: estimated_count > agg.count → 1개만 차감."""
+        from model_service.session.product_aggregator import ProductAggregator
+        from model_service.session.door_session import AggregatedProduct
+        # Wide tolerance (200g) so delta=290g matches unit_weight=100g
+        aggregator = ProductAggregator(weight_tolerance=200.0)
+        agg = {
+            99: AggregatedProduct(
+                product_id=99, product_idx="99", name="TestItem",
+                count=2, unit_price=1000, weight=100.0,
+                total_confidence=1.8, detection_count=2,
+            )
+        }
+        # delta=290g, |100-290|=190 < 200 tolerance → match
+        # estimated_count = round(290/100) = 3 > count=2 → safety guard → deduct 1
+        aggregator._handle_return(agg, 290.0)
+        assert agg[99].count == 1  # 2 - 1 (safety guard, not 2 - 2)
+
+    def test_normal_multi_return_deducts_correctly(self):
+        """정상 범위 내 multi-return: 2개 반납 추정 시 2개 차감."""
+        from model_service.session.product_aggregator import ProductAggregator
+        aggregator = ProductAggregator(weight_tolerance=3.0)
+        agg = self._make_aggregated(count=3)
+        # delta_weight=730g for 365g product → estimated_count=2 <= count=3 → deduct 2
+        aggregator._handle_return(agg, 730.0)
+        assert agg[26].count == 1  # 3 - 2
+
+
 class TestBatchReturn:
     """동시 다중 반품 조합 매칭 테스트 (Phase 1)."""
 

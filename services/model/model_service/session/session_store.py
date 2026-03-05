@@ -51,7 +51,7 @@ class SessionData:
         total_price: 총 금액
         delta_weight: 무게 변화량 (g)
         created_at: 생성 시간 (timestamp)
-        status: 처리 상태 ("processing" | "complete")
+        status: 처리 상태 ("processing" | "complete" | "error")
         processing_stage: 현재 처리 단계
             - "extracting_frames": 프레임 추출 중
             - "detecting_products": 상품 후보 도출 중
@@ -204,6 +204,7 @@ class SessionStore:
         session_id: str,
         processing_stage: str,
         processing_stage_detail: str = "",
+        status: Optional[str] = None,
     ) -> bool:
         """
         세션 처리 단계 업데이트.
@@ -216,6 +217,7 @@ class SessionStore:
                 - "calculating_count": 개수 판단 중
                 - "complete": 완료
             processing_stage_detail: 상세 정보 (예: "Top 카메라 50/120 프레임")
+            status: 세션 상태 (예: "error") - None이면 변경하지 않음
 
         Returns:
             업데이트 성공 여부
@@ -226,6 +228,8 @@ class SessionStore:
 
             self._store[session_id].processing_stage = processing_stage
             self._store[session_id].processing_stage_detail = processing_stage_detail
+            if status is not None:
+                self._store[session_id].status = status
             logger.debug(
                 f"Session stage updated: {session_id} -> {processing_stage} ({processing_stage_detail})"
             )
@@ -401,13 +405,13 @@ def generate_session_id(zone: int) -> str:
     """
     세션 ID 생성.
 
-    Format: zone_{zone}_{YYMMDD}_{HHMMSS}
+    Format: zone_{zone}_{YYMMDD}_{HHMMSS}_{ffffff}
 
     Args:
         zone: Zone 번호
 
     Returns:
-        세션 ID (예: zone_1_260201_143025)
+        세션 ID (예: zone_1_260201_143025_123456)
     """
     now = datetime.now()
-    return f"zone_{zone}_{now.strftime('%y%m%d_%H%M%S')}"
+    return f"zone_{zone}_{now.strftime('%y%m%d_%H%M%S_%f')}"

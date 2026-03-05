@@ -1,7 +1,7 @@
-# Model Service Dockerfile for Jetson Orin Nano 4GB (v5.3)
+# Model Service Dockerfile for Jetson Orin Nano 4GB (v5.4)
 #
 # Jetson Orin Nano (JetPack 6.2) TensorRT 전용
-# uv를 사용한 패키지 설치 (CUDA/TensorRT 시스템 패키지 상속)
+# uv + pyproject.toml 기반 패키지 설치 (CUDA/TensorRT 시스템 패키지 상속)
 #
 # Build (from Edge_Environment directory):
 #   docker build -t model-service:latest -f services/model/Dockerfile .
@@ -35,12 +35,15 @@ ENV PATH="/root/.local/bin:$PATH"
 WORKDIR /app
 
 # ==============================================================================
-# Stage 2: Dependencies with uv
+# Stage 2: Dependencies with uv (pyproject.toml 기반)
 # ==============================================================================
 FROM base AS deps
 
-# pyproject.toml 복사 (캐시 활용)
+# pyproject.toml 복사 (캐시 활용 — 소스 변경 시에도 deps 레이어 재사용)
 COPY pyproject.toml ./
+
+# dummy 패키지 구조 생성 (pyproject.toml의 패키지 경로 충족)
+RUN mkdir -p model_service && echo "" > model_service/__init__.py
 
 # uv로 가상환경 생성 (시스템 패키지 상속 - CUDA/TensorRT 필수!)
 RUN uv venv --system-site-packages --python python3.10 .venv
@@ -49,20 +52,9 @@ RUN uv venv --system-site-packages --python python3.10 .venv
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
-# 의존성 설치 (NumPy < 2.0 강제)
-RUN uv pip install --no-cache \
-    fastapi>=0.109.0 \
-    uvicorn>=0.25.0 \
-    pydantic>=2.5.0 \
-    pydantic-settings>=2.1.0 \
-    pyyaml>=6.0 \
-    python-multipart>=0.0.6 \
-    httpx>=0.25.0 \
-    aiohttp>=3.8.0 \
-    "numpy>=1.24.0,<2.0.0" \
-    opencv-python-headless>=4.8.0 \
-    ultralytics>=8.1.0 \
-    pillow>=10.0.0
+# pyproject.toml 기반 의존성 설치 + Docker용 opencv-headless 추가
+RUN uv pip install --no-cache . \
+    && uv pip install --no-cache opencv-python-headless>=4.8.0
 
 # ==============================================================================
 # Stage 3: Application
@@ -75,15 +67,13 @@ COPY services/model/model_service/ ./model_service/
 # pyproject.toml 다시 복사 (패키지 설치에 필요)
 COPY pyproject.toml ./
 
-# 패키지 설치 (non-editable mode for production)
-RUN uv pip install --no-cache .
+# 패키지 설치 (--no-deps: 의존성은 이미 설치됨)
+RUN uv pip install --no-cache --no-deps .
 
 # 데이터 디렉토리 생성
 RUN mkdir -p /data/models /data/sessions /app/logs
 
-# 헬스체크 (curl은 root로 설치됨)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8002/api/health || exit 1
+# 헬스체크는 docker-compose.yml에서 정의 (단일 소스 원칙)
 
 # 포트 노출
 EXPOSE 8002

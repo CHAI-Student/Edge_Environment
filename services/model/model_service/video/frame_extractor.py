@@ -378,7 +378,11 @@ class StreamingFrameExtractor:
         Yields:
             Frame as numpy array (BGR format, H x W x 3)
         """
-        if not self._probe_video():
+        # _probe_video()는 time.sleep을 포함한 동기 함수이므로
+        # 이벤트 루프 블로킹 방지를 위해 스레드풀에서 실행
+        loop = asyncio.get_running_loop()
+        probe_ok = await loop.run_in_executor(None, self._probe_video)
+        if not probe_ok:
             return
 
         logger.info(f"[FFMPEG-ASYNC] ========== 비동기 프레임 추출 시작 ==========")

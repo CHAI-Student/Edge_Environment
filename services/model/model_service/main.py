@@ -1,7 +1,7 @@
 """
 Model Service - FastAPI Entry Point.
 
-AI 상품 판단 서비스 (v5.3 - Async Streaming Pipeline).
+AI 상품 판단 서비스 (v5.4 - Project Structure Migration).
 Jetson Orin Nano TensorRT 전용.
 
 실행 방법:
@@ -10,7 +10,6 @@ Jetson Orin Nano TensorRT 전용.
 기능:
     - POST /trigger: Camera에서 AVI 녹화 완료 시 YOLO 추론
     - POST /api/judge/multi-zone: Node.js 폴링용 결과 조회
-    - GET /api/products: 상품 목록
 
 Note:
     Camera에서 AVI 파일 녹화 후 /trigger 호출.
@@ -35,7 +34,7 @@ def main():
     setup_logging(settings.log_level.upper())
     logger = get_logger(__name__)
 
-    parser = argparse.ArgumentParser(description="Model Service (v5.3 Async Streaming)")
+    parser = argparse.ArgumentParser(description="Model Service (v5.4)")
     parser.add_argument(
         "--host",
         type=str,
@@ -58,7 +57,7 @@ def main():
         settings.api.port = args.port
 
     # 서버 시작
-    logger.info(f"Starting Model Service v5.3 on {settings.host}:{settings.port}")
+    logger.info(f"Starting Model Service v5.4 on {settings.host}:{settings.port}")
     asyncio.run(serve_api(settings))
 
 

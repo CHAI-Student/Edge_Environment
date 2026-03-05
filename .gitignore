@@ -92,6 +92,7 @@ test_output/
 .env
 .env.*
 !.env.example
+!.env.docker
 *.local
 
 # Credentials / API Keys
@@ -170,4 +171,8 @@ docs/agent-guides/
 docs/plans/
 docs/IMPLEMENTATION_ROADMAP.md
 docs/MODEL_PROCESS_RISK_REVIEW_2026-03-04.md
+docs/REQUIRED_FIXES_REVIEW_2026-03-04.md
+docs/FIXES_APPLIED_2026-03-05.md
+docs/SEMINAR_CLAUDE_CODE.md
 uv.lock
+CRK.pptx

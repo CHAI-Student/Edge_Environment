@@ -1,7 +1,7 @@
 """
 Model Service - AI Smart Vending Machine Product Judgment.
 
-v5.3 - Async Streaming Pipeline (Jetson Orin Nano 4GB TensorRT)
+v5.4 - Project Structure Migration (src/ -> model_service/)
 
 Features:
 - POST /trigger: AVI 트리거 (Camera → Model)
@@ -10,6 +10,7 @@ Features:
 - VotingEnsemble 기반 다중 프레임 집계
 - Weight-based count validation
 - Async streaming video processing (v5.3)
+- Entry point: uv run model-service
 """
 
-__version__ = "5.3.0"
+__version__ = "5.4.0"

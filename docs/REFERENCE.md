@@ -18,8 +18,7 @@ Model Service API 상세 스펙
   "model": "HEALTHY",
   "status": "ok",
   "yolo_loaded": true,
-  "session_store_ready": true,
-  "door_session_store_ready": true
+  "session_store_ready": true
 }
 ```
 
@@ -33,9 +32,8 @@ Model Service API 상세 스펙
   "model": "HEALTHY",
   "status": "ok",
   "yolo_loaded": true,
-  "yolo_model_path": "models/siyeon_best.engine",
+  "yolo_model_path": "models/0204_siyeon.engine",
   "session_store_ready": true,
-  "door_session_store_ready": true,
   "uptime_seconds": 3600.5,
   "memory_usage_mb": 512.3
 }
@@ -170,11 +168,11 @@ Node.js에서 10초 간격 폴링.
 }
 ```
 
-**Response 3: Door Session 완료 (complete)**
+**Response 3a: Door Session 완료 - 상품 있음 (success)**
 ```json
 {
   "success": true,
-  "status": "complete",
+  "status": "success",
   "zone": 1,
   "door_session_id": "door_zone_1_260206_143000",
   "processing_stage": "complete",
@@ -190,6 +188,26 @@ Node.js에서 10초 간격 폴링.
     "durationSeconds": 45.2,
     "createdAt": 1738476600.0,
     "finalizedAt": 1738476645.2
+  }
+}
+```
+
+**Response 3b: Door Session 완료 - 상품 없음 (complete_no_products)**
+```json
+{
+  "success": true,
+  "status": "complete_no_products",
+  "zone": 1,
+  "door_session_id": "door_zone_1_260206_143000",
+  "processing_stage": "complete",
+  "products": [],
+  "productCount": 0,
+  "totalPrice": 0,
+  "doorSessionInfo": {
+    "triggerCount": 1,
+    "durationSeconds": 12.0,
+    "createdAt": 1738476600.0,
+    "finalizedAt": 1738476612.0
   }
 }
 ```
@@ -306,54 +324,7 @@ Door Session 강제 종료.
 
 ---
 
-## 7. Products API
-
-### GET /api/products
-
-상품 목록 조회.
-
-**Response:**
-```json
-{
-  "products": [
-    {
-      "product_id": 26,
-      "product_idx": "26",
-      "name": "치킨마요",
-      "price": 3500,
-      "weight": 365.0,
-      "yolo_class_id": 26
-    }
-  ],
-  "total_count": 30
-}
-```
-
-### POST /api/products/sync
-
-IF11 상품 동기화.
-
-**Request:**
-```json
-{
-  "products": [
-    {"saleItemIdx": 26, "itemName": "치킨마요주먹밥", "salePrice": 3500, "weight": 365}
-  ]
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "synced_count": 1,
-  "message": "Products synced successfully"
-}
-```
-
----
-
-## 응답 스키마 참조
+## 7. 응답 스키마 참조
 
 ### ProductResponse
 

@@ -239,6 +239,8 @@ class VotingEnsemble:
         side_weight: float = 0.5,
         common_class_bonus: float = 0.2,
         product_weights: Optional[Dict[int, float]] = None,
+        top_only_weight: Optional[float] = None,
+        side_only_weight: Optional[float] = None,
     ) -> List[VoteResult]:
         """
         Combine Top and Side camera ensembles with weighted confidence.
@@ -255,6 +257,8 @@ class VotingEnsemble:
             side_weight: Weight for side camera votes (default: 0.5)
             common_class_bonus: Bonus for classes detected in both cameras (default: 0.2)
             product_weights: {class_id: weight_in_grams} for logging (v4.6)
+            top_only_weight: Weight for top-only detection (default: None → uses top_weight)
+            side_only_weight: Weight for side-only detection (default: None → uses side_weight)
 
         Returns:
             Combined and sorted VoteResult list (by weighted_confidence descending)
@@ -353,10 +357,12 @@ class VotingEnsemble:
                 )
             elif result.top_detected:
                 # Top only
-                weighted_conf = top_conf * top_weight
+                effective_weight = top_only_weight if top_only_weight is not None else top_weight
+                weighted_conf = top_conf * effective_weight
             else:
                 # Side only
-                weighted_conf = side_conf * side_weight
+                effective_weight = side_only_weight if side_only_weight is not None else side_weight
+                weighted_conf = side_conf * effective_weight
 
             result.weighted_confidence = min(weighted_conf, 1.0)
 

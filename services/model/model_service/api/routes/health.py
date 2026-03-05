@@ -31,7 +31,7 @@ class DetailedHealthResponse(BaseModel):
     """상세 헬스 체크 응답."""
 
     service: str = "model"
-    version: str = "5.3.0"
+    version: str = "5.4.0"
     status: str = "ok"
     dependencies: dict = {}
     config: dict = {}
@@ -70,7 +70,7 @@ async def health_check():
     yolo_loaded = yolo_instance.is_loaded if yolo_instance else False
 
     return HealthResponse(
-        model="HEALTHY" if model_exists else "UNHEALTHY",
+        model="HEALTHY" if yolo_loaded else "UNHEALTHY",
         status="ok" if is_initialized() else "initializing",
         yolo_loaded=yolo_loaded,
         session_store_ready=deps_status.get("session_store", False),
@@ -96,7 +96,7 @@ async def detailed_health_check():
 
     return DetailedHealthResponse(
         service="model",
-        version="5.3.0",
+        version="5.4.0",
         status="ok" if is_initialized() else "initializing",
         dependencies=serializable_deps,
         config={

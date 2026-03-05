@@ -60,7 +60,7 @@ Edge_Environment/
 │   │   ├── video/            # 비디오 처리
 │   │   ├── vision/           # YOLO 추론
 │   │   └── core/             # 설정
-│   └── tests/                # 테스트 코드 (15개 파일, 130+ 테스트)
+│   └── tests/                # 테스트 코드 (19개 파일, 225+ 테스트)
 ├── data/sessions/            # Door Session YAML 영속화
 ├── logs/                     # 로그 (judgment, system, weight)
 ├── models/                   # TensorRT 엔진 파일
@@ -72,10 +72,14 @@ Edge_Environment/
 ## Docker 실행
 
 ```bash
-cd services/model
-cp .env.docker .env
-docker-compose up -d
-docker-compose logs -f model
+# Model Service 시작
+docker compose up -d model
+
+# 로그 확인
+docker compose logs -f model
+
+# TensorRT 엔진 변환 (일회성, .pt → .engine)
+docker compose --profile convert run --rm convert
 ```
 
 ## API 테스트

@@ -72,10 +72,6 @@ class ProductDecisionEngine:
             partial_threshold: PARTIAL/UNCERTAIN 구분 임계값 (기본값 0.7)
             strict_mode: 엄격 무게 검증 모드 (v5.1, 기본값 True)
         """
-        # if product_db is None:
-        #     ProductDatabase = _get_product_database()
-        #     self.product_db = ProductDatabase()
-        # else:
         self.product_db = product_db
         self.tolerance_percent = tolerance_percent or config.weight.tolerance_percent
         self.confidence_threshold = confidence_threshold
@@ -132,7 +128,10 @@ class ProductDecisionEngine:
 
         # 1. 후보군이 없는 경우 → Loadcell-only 폴백
         if not vision_candidates:
-            logger.warning("No vision candidates provided, trying loadcell-only fallback")
+            logger.warning(
+                f"[ENGINE] No vision candidates provided (delta_weight={delta_weight:.1f}g), "
+                f"trying loadcell-only fallback"
+            )
             return self.judge_by_weight_only(delta_weight, timestamp, active_products=active_products)
 
         # 2. 무게 변화가 없는 경우
@@ -519,8 +518,9 @@ class ProductDecisionEngine:
         # v4.9: active_products가 없으면 no_detection 반환
         if not candidate_products:
             logger.warning(
-                "[LOADCELL-ONLY] v4.9: No active_products available, "
-                "ProductDB fallback disabled → no_detection"
+                f"[LOADCELL-ONLY] v4.9: No active_products available "
+                f"(delta_weight={delta_weight:.1f}g, input_count={len(active_products) if active_products else 0}), "
+                f"ProductDB fallback disabled → no_detection"
             )
             return self._create_no_detection_result(delta_weight, timestamp)
 

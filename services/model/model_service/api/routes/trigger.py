@@ -143,6 +143,51 @@ def _avg_loadcell_channels(values: list) -> float:
     return sum(parsed) / len(parsed) if parsed else 0.0
 
 
+def _filter_peaks(
+    values: List[float],
+    context_window: int = 5,
+    threshold_factor: float = 1.5,
+    min_diff_grams: float = 50.0,
+) -> List[float]:
+    """
+    로드셀 데이터에서 급격한 피크(방해)를 제거.
+
+    각 포인트에 대해 전후 context_window 이웃의 median을 계산하고,
+    median과의 차이가 임계값을 초과하면 피크로 판단하여 제거.
+
+    Args:
+        values: 로드셀 값 리스트
+        context_window: 전후 이웃 포인트 수 (기본 5)
+        threshold_factor: 피크 판단 계수 (기본 1.5)
+        min_diff_grams: 최소 차이 임계값 (기본 50g)
+
+    Returns:
+        피크가 제거된 값 리스트. 데이터 부족하면 원본 반환.
+    """
+    if len(values) < context_window * 2 + 1:
+        return values
+
+    filtered = []
+    for i, val in enumerate(values):
+        # 전후 context_window 이웃 수집 (자기 자신 제외)
+        start = max(0, i - context_window)
+        end = min(len(values), i + context_window + 1)
+        neighbors = [values[j] for j in range(start, end) if j != i]
+
+        if not neighbors:
+            filtered.append(val)
+            continue
+
+        median = float(np.median(neighbors))
+        diff = abs(val - median)
+        threshold = max(abs(median) * (threshold_factor - 1), min_diff_grams)
+
+        if diff <= threshold:
+            filtered.append(val)
+
+    return filtered
+
+
 def _detect_stable_regions(
     loadcells: List[LoadcellData],
     window_size: int = 5,
@@ -177,7 +222,10 @@ def _detect_stable_regions(
     if len(values) < window_size * 2:
         return _simple_delta_values(loadcells)
 
-    values_arr = np.array(values)
+    # Phase 3: 피크 필터링 적용
+    filtered_values = _filter_peaks(values)
+    working_values = filtered_values if len(filtered_values) >= window_size * 2 else values
+    values_arr = np.array(working_values)
 
     # 1. 시작 안정 구간 찾기 (앞에서부터)
     start_stable_idx = 0
@@ -245,10 +293,8 @@ def _calculate_weight_delta(loadcells: List[LoadcellData]) -> float:
     if not is_valid:
         logger.warning("Could not detect stable regions, using simple delta")
         try:
-            start_val = loadcells[0].filtered_value[0] if loadcells[0].filtered_value else "0"
-            end_val = loadcells[-1].filtered_value[0] if loadcells[-1].filtered_value else "0"
-            start = _parse_loadcell_value(start_val)
-            end = _parse_loadcell_value(end_val)
+            start = _avg_loadcell_channels(loadcells[0].filtered_value) if loadcells[0].filtered_value else 0.0
+            end = _avg_loadcell_channels(loadcells[-1].filtered_value) if loadcells[-1].filtered_value else 0.0
             delta = end - start
             logger.debug(f"Simple weight delta: start={start}, end={end}, delta={delta}")
             return delta
@@ -589,6 +635,7 @@ async def trigger_judgment(
             session_id,
             processing_stage="error",
             processing_stage_detail=f"HTTP 오류: {e.status_code}",
+            status="error",
         )
         raise
 
@@ -598,6 +645,7 @@ async def trigger_judgment(
             session_id,
             processing_stage="error",
             processing_stage_detail=f"비디오 파일 없음: {e}",
+            status="error",
         )
         raise HTTPException(
             status_code=400,
@@ -613,6 +661,7 @@ async def trigger_judgment(
             session_id,
             processing_stage="error",
             processing_stage_detail=f"비디오 처리 오류: {e.error_code}",
+            status="error",
         )
         raise HTTPException(
             status_code=500,
@@ -629,6 +678,7 @@ async def trigger_judgment(
             session_id,
             processing_stage="error",
             processing_stage_detail=f"비디오 처리 오류: {e.error_code}",
+            status="error",
         )
         raise HTTPException(
             status_code=500,
@@ -644,6 +694,7 @@ async def trigger_judgment(
             session_id,
             processing_stage="error",
             processing_stage_detail="YOLO 모델 미로드",
+            status="error",
         )
         raise HTTPException(
             status_code=503,  # Service Unavailable
@@ -659,6 +710,7 @@ async def trigger_judgment(
             session_id,
             processing_stage="error",
             processing_stage_detail=f"YOLO GPU 오류: {e.error_code}",
+            status="error",
         )
         raise HTTPException(
             status_code=500,
@@ -674,6 +726,7 @@ async def trigger_judgment(
             session_id,
             processing_stage="error",
             processing_stage_detail=f"YOLO 추론 오류: {e.error_code}",
+            status="error",
         )
         raise HTTPException(
             status_code=500,
@@ -689,6 +742,7 @@ async def trigger_judgment(
             session_id,
             processing_stage="error",
             processing_stage_detail=f"내부 오류: {type(e).__name__}",
+            status="error",
         )
         raise HTTPException(
             status_code=500,

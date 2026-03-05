@@ -215,10 +215,12 @@ class ProductAggregator:
         if matched_product_id is not None:
             agg = aggregated[matched_product_id]
             if agg.count > 0:
-                # 무게 기반 개수 추정: delta / unit_weight (최소 1, 재고 초과 방지)
+                # 무게 기반 개수 추정: delta / unit_weight (최소 1)
+                # Phase 0b 안전장치: 비정상적으로 큰 추정치(> 재고)면 1개만 차감
                 if agg.weight > 0:
                     estimated_count = max(1, round(delta_weight / agg.weight))
-                    estimated_count = min(estimated_count, agg.count)
+                    if estimated_count > agg.count:
+                        estimated_count = 1
                 else:
                     estimated_count = 1
                 agg.count = max(0, agg.count - estimated_count)

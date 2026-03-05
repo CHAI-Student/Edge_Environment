@@ -40,32 +40,25 @@ v4.3 변경사항:
 6. Model이 zones 배열로 zone 1~5 최종 결과 반환
 """
 
-import atexit
 import concurrent.futures
 import json
 import logging
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Optional, TYPE_CHECKING
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from model_service.session import (
     SessionStore,
-    SessionData,
-    ProductResult,
     DoorSessionStore,
     GlobalDoorSession,
-    DoorSession,
-    AggregatedProduct,
 )
 from model_service.session.active_product_store import ActiveProductStore
-from model_service.engine import ProductDecisionEngine, EnsembleResult
 from model_service.api.deps import (
     get_session_store,
-    get_decision_engine,
     get_door_session_store_optional,
     get_active_product_store_optional,
 )
@@ -278,7 +271,7 @@ def _log_product_warnings(products: List[ProductInfo]) -> None:
     for p in products:
         if p.sale_price < 0:
             warnings.append(f"음수 가격: {p.product_idx}, price={p.sale_price}")
-        if p.stock_qty < 0:
+        if p.stock_qty is not None and p.stock_qty < 0:
             warnings.append(f"음수 재고: {p.product_idx}, stock={p.stock_qty}")
 
     if warnings:
@@ -640,6 +633,25 @@ def _handle_door_close(
     # finalize 준비 완료 → finalize 진행
     global_session = store.finalize_global_session()
 
+    # B7: 동시 CLOSE/cleanup 경합 시 None 반환 대응
+    if global_session is None:
+        logger.warning("[MULTI-ZONE CLOSE] finalize_global_session returned None - concurrent close detected")
+        return {
+            "success": False,
+            "status": "error",
+            "message": "세션이 이미 종료되었습니다.",
+            "zones": [],
+            "products": [],
+            "totalPrice": 0,
+            "totalProductCount": 0,
+            "productCount": 0,
+        }
+
+    # B5: 세션 종료 후 ActiveProductStore 정리 (다음 세션 class filtering 오염 방지)
+    if active_product_store is not None:
+        active_product_store.clear()
+        logger.info("[MULTI-ZONE CLOSE] ActiveProductStore cleared after finalize")
+
     # Zone 1~5 최종 결과 구성
     zones = []
     for zone_num in range(1, 6):
@@ -744,7 +756,6 @@ def _handle_global_polling(store: DoorSessionStore) -> dict:
 async def judge_multi_zone(
     body: Any = Body(...),
     session_store: SessionStore = Depends(get_session_store),
-    engine: ProductDecisionEngine = Depends(get_decision_engine),
     door_session_store: DoorSessionStore | None = Depends(get_door_session_store_optional),
     active_product_store: ActiveProductStore | None = Depends(get_active_product_store_optional),
 ):
@@ -953,6 +964,23 @@ async def judge_multi_zone(
                 "processing_stage": "waiting",
                 "processing_stage_detail": "세션 생성 대기 중",
             }
+
+    # 처리 에러 상태 (status="error") - 즉시 실패 응답
+    if session_data.status == "error":
+        logger.warning(
+            f"[MULTI-ZONE RESPONSE] device_id={device_id}, session_id={session_data.session_id}, "
+            f"status=error, detail={session_data.processing_stage_detail}"
+        )
+        return {
+            "success": False,
+            "status": "error",
+            "message": session_data.processing_stage_detail or "처리 오류",
+            "reason": "processing_failed",
+            "device_id": device_id,
+            "session_id": session_data.session_id,
+            "zone": session_data.zone,
+            "processing_stage": session_data.processing_stage,
+        }
 
     # 세션이 아직 처리 중인 경우 (status="processing")
     if session_data.status == "processing":

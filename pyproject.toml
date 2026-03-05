@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-smart-vending"
-version = "5.3.0"
+version = "5.4.0"
 description = "AI Smart Vending Machine - Model Service (Jetson Orin Nano TensorRT)"
 readme = "README.md"
 requires-python = ">=3.10,<3.12"
@@ -78,11 +78,8 @@ include = [
 # UV Configuration (Jetson Orin Nano)
 # =============================================================================
 [tool.uv]
-# Python 3.10 (JetPack 6.2 기본)
-python-version = "3.10"
-
-# 시스템 패키지 상속 (torch, opencv, tensorrt)
-system-site-packages = true
+# Python version: controlled by [project] requires-python = ">=3.10,<3.12"
+# System site packages: use `uv venv --system-site-packages` at venv creation time
 
 # =============================================================================
 # Pytest Configuration

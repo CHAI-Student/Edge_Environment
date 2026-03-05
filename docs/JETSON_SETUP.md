@@ -136,7 +136,10 @@ nano .env
 ```bash
 MODEL__API__HOST=0.0.0.0
 MODEL__API__PORT=8002
-MODEL__VISION__YOLO_MODEL_PATH=models/siyeon_best.engine
+# 실제 엔진 파일명을 지정 (기본값: models/0204_siyeon.engine)
+# siyeon_best.engine을 symlink로 사용하는 경우 아래 주석 해제
+# MODEL__VISION__YOLO_MODEL_PATH=models/siyeon_best.engine
+MODEL__VISION__YOLO_MODEL_PATH=models/0204_siyeon.engine
 MODEL__BUFFER__TTL_SECONDS=300
 MODEL__ASYNC_STREAMING__ENABLED=true
 ```
@@ -172,7 +175,26 @@ ls -la models/siyeon_best.engine
 # 예상 크기: 30-100MB
 ```
 
-### 4.4 변환 확인
+### 4.4 엔진 파일 이름 관리 (symlink)
+
+코드 기본값은 `models/0204_siyeon.engine`입니다.
+`siyeon_best.engine` 이름으로도 접근 가능하도록 symlink를 생성할 수 있습니다:
+
+```bash
+# 방법 1: 날짜 버전 파일을 기본 이름으로 symlink (권장)
+cd models/
+ln -sf 0204_siyeon.engine siyeon_best.engine
+ls -la models/
+# siyeon_best.engine -> 0204_siyeon.engine
+
+# 방법 2: 환경변수로 실제 파일명 직접 지정
+MODEL__VISION__YOLO_MODEL_PATH=models/0204_siyeon.engine
+```
+
+> **참고**: 새 엔진 파일로 교체할 때는 symlink만 업데이트하면 됩니다.
+> `ln -sf 0301_siyeon.engine siyeon_best.engine`
+
+### 4.5 변환 확인
 
 ```bash
 python3 -c "
@@ -203,13 +225,15 @@ curl http://localhost:8002/api/health
 curl http://localhost:8002/api/health/detailed
 ```
 
-### 5.3 Docker 실행 (v4.2+)
+### 5.3 Docker 실행 (v5.4+)
 
 ```bash
-cd services/model
-cp .env.docker .env
-docker-compose up -d
-docker-compose logs -f model
+# Edge_Environment 루트에서 실행
+docker compose up -d model
+docker compose logs -f model
+
+# TensorRT 엔진 변환 (일회성)
+docker compose --profile convert run --rm convert
 ```
 
 ---

@@ -6,7 +6,6 @@ Jetson Orin Nano TensorRT 전용.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
 
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -92,6 +91,14 @@ class VisionModel(BaseModel):
     common_class_bonus: float = Field(
         default=0.2,
         description="Bonus for common classes between cameras",
+    )
+    top_only_weight: float = Field(
+        default=0.6,
+        description="Top camera only weight (단방향 감지 시)",
+    )
+    side_only_weight: float = Field(
+        default=0.5,
+        description="Side camera only weight (단방향 감지 시)",
     )
 
     # FFmpeg 영상 보정 필터 - Top 카메라 (v4.6)
@@ -309,30 +316,17 @@ class Settings(BaseSettings):
     def common_class_bonus(self) -> float:
         return self.vision.common_class_bonus
 
+    @property
+    def top_only_weight(self) -> float:
+        return self.vision.top_only_weight
+
+    @property
+    def side_only_weight(self) -> float:
+        return self.vision.side_only_weight
+
 
 # Global config instance
 config = Settings()
-
-
-def get_kst_now():
-    """
-    한국 표준시(KST, UTC+9) 현재 시각 반환.
-
-    Returns:
-        KST timezone-aware datetime 객체
-    """
-    KST = timezone(timedelta(hours=9))
-    return datetime.now(KST)
-
-
-def generate_session_id() -> str:
-    """
-    세션 ID 생성 (YYMMDD_HHMMSS 형식, KST 기준).
-
-    Returns:
-        세션 ID 문자열
-    """
-    return get_kst_now().strftime("%y%m%d_%H%M%S")
 
 
 if __name__ == "__main__":
