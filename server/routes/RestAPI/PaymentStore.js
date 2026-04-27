@@ -42,11 +42,11 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
 
 
         // 결제 데이터 전달
-        // const external = axios.create({
-        //   baseURL: config.restApi, // https://apichaidev.atcrk.co.kr/api/v1
-        //   timeout: 10000,
-        //   headers: { "Content-Type": "application/json" },
-        // });
+        const external = axios.create({
+          baseURL: config.restApi, // https://apichaidev.atcrk.co.kr/api/v1
+          timeout: 10000,
+          headers: { "Content-Type": "application/json" },
+        });
 
         const timestamp = Date.now();
         const payload = {
@@ -87,7 +87,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         });
 
         const token = config.jwtToken
-        const response = await axios.post("/chai/payment/store", form, {
+        const response = await external.post("/chai/payment/store", form, {
             headers: {
                 ...form.getHeaders(),
                 Authorization: `Bearer ${token}`,
