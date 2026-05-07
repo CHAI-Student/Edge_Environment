@@ -1,29 +1,47 @@
-// src/Process/ProductCollection.js
-const config = require("../../config/key");
-const { callApiToControlDeadbolt } = require('../Mqtt/DeadboltApiService');
-const { DeadboltStatusAPI, LoadcellStatusAPI, CameraStatusAPI } = require('../Mqtt/HealthMqtt');
-const { getClient } = require('../Mqtt/MqttClient');
-const { ProductList } = require('../RestAPI/ProductList')
-const { DeviceInfo } = require('../RestAPI/DeviceInfo')
-const { ProductUpload } = require("../model/ProductUpload");
-const { TrainingStore } = require("../RestAPI/TrainingStore");
-
+// server/routes/Mqtt/DoorCollect.js
+const path = require("path");
 const mongoose = require("mongoose");
+const { v4: uuidv4 } = require("uuid");
+
+const config = require("../../config/key");
+const { callApiToControlDeadbolt } = require("./DeadboltApiService");
+const {
+  DeadboltStatusAPI,
+  LoadcellStatusAPI,
+  CameraStatusAPI,
+} = require("./HealthMqtt");
+const { getClient } = require("./MqttClient");
+const { DeviceInfo } = require("../RestAPI/DeviceInfo");
+const { ProductUpload } = require("../../model/ProductUpload");
+
+const {
+  startProductCapture,
+  stopProductCapture,
+} = require("../../Services/ProductCaptureService");
+const {
+  uploadProductImages,
+  uploadProductVideos,
+} = require("../../Services/ProductMinioService");
+const {
+  syncDivisionProductMetadata,
+  updateProductUploadFolder,
+  makeFolderTimestamp,
+} = require("../../Services/ProductMongoSyncService");
+const { syncAnnotationLabels } = require("../../Services/AnnotationLabelSyncService");
+const { notifyTrainingStoreMany } = require("../../Services/AiTrainingNotifyService");
 
 let mongoConnectPromise = null;
+let activeCollectionSession = null;
+
 async function ensureMongoConnected() {
-  if (mongoose.connection.readyState === 1) return; // connected
+  if (mongoose.connection.readyState === 1) return;
   if (!mongoConnectPromise) {
     mongoConnectPromise = mongoose.connect(config.mongoURI);
   }
   await mongoConnectPromise;
 }
 
-
-const path = require('path');
-const { v4: uuidv4 } = require("uuid");
-
-function makeTimestampFolderName(d = new Date()) {
+function makeIFDate(d = new Date()) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
@@ -33,194 +51,385 @@ function makeTimestampFolderName(d = new Date()) {
   return `${yyyy}${mm}${dd}${HH}${MM}${SS}`;
 }
 
-function fetchCurrentDoorState() {
-    return new Promise((resolve, reject) => {
-        const url = `${config.ioboardApi}/sse?streams=doors`;
-        const evtSource = new EventSource(url);
-        const timeout = setTimeout(() => {
-            evtSource.close();
-            console.warn("[DoorCheck] Timeout");
-            resolve("UNKNOWN");
-        }, 3000);
+function makeAckPayload({
+  ifId,
+  reqStorageType,
+  reqHasLoadCell,
+  doorState,
+  resultCd = "S",
+  resultMsg = "success",
+  extraData = {},
+}) {
+  return {
+    HEADER: {
+      IF_ID: ifId,
+      IF_SYSID: uuidv4(),
+      IF_HOST: "CRKPNTCCHAI",
+      IF_DATE: makeIFDate(),
+    },
+    DATA: {
+      division_idx: config.divisionIdx,
+      device_idx: config.deviceIdx,
+      door_state: doorState,
+      storage_type: reqStorageType,
+      has_loadcell: reqHasLoadCell,
+      result_cd: resultCd,
+      result_msg: resultMsg,
+      ...extraData,
+    },
+  };
+}
 
-        evtSource.addEventListener('door.update', (event) => {
-            if (!event.data) return;
-            try {
-                const data = JSON.parse(event.data);
-                const rawState = data.deadbolt ? data.deadbolt.toUpperCase() : "";
-                const closedStates = ["LOCK", "LOCKED", "CLOSE", "CLOSED"];
-                const finalState = closedStates.includes(rawState) ? "CLOSE" : "OPEN";
+function publishAck(client, topic, payload) {
+  client.publish(topic, JSON.stringify(payload));
+}
 
-                clearTimeout(timeout);
-                evtSource.close();
-                resolve(finalState);
-            } catch (err) {
-                clearTimeout(timeout);
-                evtSource.close();
-                resolve("UNKNOWN");
-            }
-        });
-        evtSource.onerror = (err) => {
-            clearTimeout(timeout);
-            evtSource.close();
-            resolve("UNKNOWN");
-        };
-    });
+function normalizeDeviceInfoResponse(resp) {
+  return resp?.DATA?.device_list || resp?.body?.devices || resp?.devices || resp || [];
 }
 
 function ModelVersionUpdate(version) {
-    // 1. 점(.)을 기준으로 분리하여 배열 생성
-    const parts = version.split('.');
+  if (!version) return "1.0.0";
 
-    // 2. 마지막 요소 추출 및 숫자 변환 후 +1
-    const lastIndex = parts.length - 1;
-    const lastValue = parseInt(parts[lastIndex], 10);
+  const parts = String(version).split(".");
+  const lastIndex = parts.length - 1;
+  const lastValue = parseInt(parts[lastIndex], 10);
 
-    // 3. 숫자가 아닌 경우(에러 방지)를 대비해 체크 후 업데이트
-    if (!isNaN(lastValue)) {
-        parts[lastIndex] = lastValue + 1;
-    }
+  if (Number.isNaN(lastValue)) return `${version}.1`;
 
-    // 4. 다시 점으로 이어붙여서 반환
-    return parts.join('.');
+  parts[lastIndex] = String(lastValue + 1);
+  return parts.join(".");
+}
+
+async function fetchCurrentDoorState() {
+  return new Promise((resolve) => {
+    const url = `${config.ioboardApi}/sse?streams=doors`;
+    const evtSource = new EventSource(url);
+
+    const timeout = setTimeout(() => {
+      evtSource.close();
+      console.warn("[DoorCheck] Timeout");
+      resolve("UNKNOWN");
+    }, 3000);
+
+    evtSource.addEventListener("door.update", (event) => {
+      if (!event.data) return;
+
+      try {
+        const data = JSON.parse(event.data);
+        const rawState = data.deadbolt ? data.deadbolt.toUpperCase() : "";
+        const closedStates = ["LOCK", "LOCKED", "CLOSE", "CLOSED"];
+        const finalState = closedStates.includes(rawState) ? "CLOSE" : "OPEN";
+
+        clearTimeout(timeout);
+        evtSource.close();
+        resolve(finalState);
+      } catch (err) {
+        clearTimeout(timeout);
+        evtSource.close();
+        resolve("UNKNOWN");
+      }
+    });
+
+    evtSource.onerror = () => {
+      clearTimeout(timeout);
+      evtSource.close();
+      resolve("UNKNOWN");
+    };
+  });
 }
 
 async function ProductCollectionHealth() {
-    const CameraStatus = await CameraStatusAPI(); // 예: '09'는 정상이라고 가정
-    const DeadboltHealth = await DeadboltStatusAPI();
-    const LoadcellHealth = await LoadcellStatusAPI();
-    
-    const isHealthOk = (CameraStatus === '09' && DeadboltHealth === '19' && LoadcellHealth === '29');
-    isSuccess = isHealthOk;
-    resultMsg = (isHealthOk) ? "status access" : "status error";
+  const CameraStatus = await CameraStatusAPI();
+  const DeadboltHealth = await DeadboltStatusAPI();
+  const LoadcellHealth = await LoadcellStatusAPI();
 
-    return {CameraStatus, DeadboltHealth, LoadcellHealth, isSuccess, resultMsg}
+  const isHealthOk =
+    CameraStatus === "09" && DeadboltHealth === "19" && LoadcellHealth === "29";
+
+  return {
+    CameraStatus,
+    DeadboltHealth,
+    LoadcellHealth,
+    isSuccess: isHealthOk,
+    resultMsg: isHealthOk ? "status access" : "status error",
+  };
 }
 
-async function ProductRegistration() {
-    const DoorCollect_SUB_TOPIC = `chai/device/${config.deviceIdx}/cmd/door/collect`;
-    const DoorCollect_PUB_TOPIC = `chai/device/${config.deviceIdx}/ack/door/collect`;
+async function handleOpen({
+  client,
+  ackTopic,
+  reqStorageType,
+  reqHasLoadCell,
+}) {
+  const currentDoorState = await fetchCurrentDoorState();
+  if (currentDoorState !== "CLOSE") {
+    throw new Error("현재 문이 열려있는 상태입니다.");
+  }
 
-    const client = getClient();
+  const openResult = await callApiToControlDeadbolt("OPEN");
+  console.log("[DoorCollect] deadbolt open result:", openResult);
 
-    client.on('connect', () => {
-        client.subscribe(DoorCollect_SUB_TOPIC);
-    });
+  const health = await ProductCollectionHealth();
 
-    client.on('message', async (topic, message) => {
-        if (topic !== DoorCollect_SUB_TOPIC) return;
-        try {
-            const payload = JSON.parse(message.toString());
-            const reqData = payload.DATA;
-            const reqDoorState = reqData.door_state;
-            const reqStorageType = reqData.storage_type;
-            const reqHasLoadCell = reqData.has_loadcell;
-            
-            const targetId = topic.split('/')[2];
-            if (targetId !== config.deviceIdx && targetId !== '+') return;
+  const timestamp = makeFolderTimestamp();
+  const localRoot = path.join(process.cwd(), "productImg", timestamp);
 
-            console.log(`[EdgePC] Request Received: ${reqData.door_state}`);
-            
-            // 요청 들어왔으니 수집 문열기 (*** 근데 어차피 다시 닫힐거 대비해서 IF06에서 다시 문여는데 여기서 열 필요가 있나)
-            if (reqDoorState === 'OPEN') {
-                const CurrentDoorState = await fetchCurrentDoorState();
-                if (CurrentDoorState === "CLOSE") {
-                    const folderPath = path.join(process.cwd(), "productImg") // 폴더 경로 지정
-                    // [질문] 지금 해당 경로가 원본 데이터셋 폴더(상위 폴더) 경로이긴 한데
-                    // 이 값이 IF06으로 전달되는 것도 아니고, IF04에서 폴더 경로를 픽앤탁에 보내야 하는 것도 아니고
-                    // 어차피 IF06에서 상위 폴더/하위 폴더 경로까지 정해서 카메라 API로 전달하는데 여기서 꼭 지정해야할 필요가 있나?
-                    const openResult = await callApiToControlDeadbolt("OPEN"); //문 열기 제어(데드볼트 열기)
-                    
-                    const { CameraStatus, DeadboltHealth, LoadcellHealth, isSuccess, resultMsg } = await ProductCollectionHealth();
-                    const timestamp = makeTimestampFolderName();
-                    const responsePayload = {
-                        HEADER: {
-                            IF_ID: "IF_04",
-                            IF_SYSID: uuidv4(),
-                            IF_HOST: "CRKPNTCCHAI",
-                            IF_DATE: timestamp,
-                        },
-                        DATA: {
-                            "division_idx": config.divisionIdx,
-                            "device_idx": config.deviceIdx,
-                            "door_state": await fetchCurrentDoorState(), // 혹시나 닫혔을 수도 있으니 실시간 값으로 반환
-                            "storage_type": reqStorageType,
-                            "has_loadcell": reqHasLoadCell,
-                            "camera_status": (CameraStatus === '09') ? "1" : "0",
-                            "deadbolt_status": (DeadboltHealth === '19') ? "1" : "0",
-                            "loadcell_status": (LoadcellHealth === '29') ? "1" : "0",
-                            "result_cd": isSuccess ? "S" : "F",
-                            "result_msg": resultMsg
-                        }
-                };
-                // ACK 전송
-                client.publish(DoorCollect_PUB_TOPIC, JSON.stringify(responsePayload));
-                }
-                else{throw new Error("현재 문이 열려있는 상태입니다.");}
-            }
+  activeCollectionSession = {
+    timestamp,
+    localRoot,
+    storageType: reqStorageType,
+    hasLoadcell: reqHasLoadCell,
+    startedAt: new Date(),
+  };
 
-            else if (reqDoorState === 'CLOSE') {
-                const ProdictListResp = await ProductList({
-                    division_idx: config.divisionIdx,
-                    device_idx: config.deviceIdx,
-                });
-                const Products = ProdictListResp?.body?.products ?? [];
-                
-                const toUpdateIds = [];
-                for (const p of Products) {
-                    const isNew = String(p.is_new);
-                    const training_status = String(p.training_status);
+  await startProductCapture({
+    localRoot,
+    timestamp,
+    deviceIdx: config.deviceIdx,
+    cameras: ["cam_0", "cam_2"],
+  });
 
-                    if (isNew === "0" && (training_status === "0" || training_status === "1")) {
-                        p.training_status = "2";
-                        if (p.product_idx != null) toUpdateIds.push(String(p.product_idx));
-                        else console.log(`이상한 ProductIdx: ${p.product_idx}`);
-                    }
-                }
+  const ackPayload = makeAckPayload({
+    ifId: "IF_04",
+    reqStorageType,
+    reqHasLoadCell,
+    doorState: await fetchCurrentDoorState(),
+    resultCd: health.isSuccess ? "S" : "F",
+    resultMsg: health.resultMsg,
+    extraData: {
+      camera_status: health.CameraStatus === "09" ? "1" : "0",
+      deadbolt_status: health.DeadboltHealth === "19" ? "1" : "0",
+      loadcell_status: health.LoadcellHealth === "29" ? "1" : "0",
+      collection_timestamp: timestamp,
+      local_root: localRoot,
+    },
+  });
 
-                if (!toUpdateIds.length) {console.log("[ProductCollection] CLOSE: 업데이트 대상 없음");
-                    return;
-                }
-
-                let deviceList = await DeviceInfo();
-                const myDevice = deviceList.find(device => device.device_idx === config.deviceIdx);
-                let CurrentModelVersion = myDevice.model_version;
-                console.log("[ProductCollection] 현재 모델 버전", CurrentModelVersion);
-                // 불러온 모델의 버전 26.0.1이면 그냥 마지막 값에 +1 한 값(26.0.2)으로 업데이트하였음
-                let UpdateModelVersion = ModelVersionUpdate(currentVersion);
-
-                // MongoDB에 training_status 변화 저장/반영 및 모델 버전 업데이트
-                await ensureMongoConnected();
-                const result = await ProductUpload.updateMany(
-                    { productIdx: { $in: toUpdateIds } },
-                    { $set: { training_status: "2",
-                        model_version: UpdateModelVersion
-                    } }
-                );
-                console.log(`[ProductCollection] CLOSE: trainingStatus=2 반영 완료 (matched=${result.matchedCount}, modified=${result.modifiedCount})`);
-
-                // 1:1 매핑 확인
-                deviceList = await DeviceInfo();
-                myDevice = deviceList.find(device => device.device_idx === config.deviceIdx);
-                CurrentModelVersion = myDevice.model_version;
-                
-                // AI 서버 쪽으로 신규 상품이 전달되었음을 API로 전달
-                for (let i = 0; i<deviceList.length; i++){
-                    const ProductTrainingStore = await TrainingStore(
-                        productIdx = deviceList[i].product_idx,
-                        product_eng_name = deviceList[i].product_eng_name,
-                        training_status = deviceList[i].training_status
-                    );
-                    const TrainingStoreRes = ProductTrainingStore.result_cd;
-                    if (TrainingStoreRes === "S") {console.log(`[IF_07] ${i+1}번쨰 상품 성공: ${deviceList[i].product_eng_name}, 학습 상태: ${deviceList[i].training_status}`)}
-                    else {console.log(`[IF_07] ${i+1}번쨰 상품 실패: ${deviceList[i].product_eng_name}, 학습 상태: ${deviceList[i].training_status}`)}
-                }
-            }
-
-        } catch (error) {
-            console.error("[EdgePC] Processing Error:", error);
-        }
-    });
+  publishAck(client, ackTopic, ackPayload);
 }
 
-module.exports = { ProductRegistration, fetchCurrentDoorState, ProductCollectionHealth };
+async function handleClose({
+  client,
+  ackTopic,
+  reqStorageType,
+  reqHasLoadCell,
+}) {
+  const currentDoorState = await fetchCurrentDoorState();
+  if (currentDoorState !== "CLOSE") {
+    throw new Error("문이 아직 닫히지 않았습니다.");
+  }
+
+  await ensureMongoConnected();
+
+  const session =
+    activeCollectionSession || {
+      timestamp: makeFolderTimestamp(),
+      localRoot: path.join(process.cwd(), "productImg", makeFolderTimestamp()),
+      storageType: reqStorageType,
+      hasLoadcell: reqHasLoadCell,
+      startedAt: null,
+    };
+
+  await stopProductCapture({
+    localRoot: session.localRoot,
+    timestamp: session.timestamp,
+    deviceIdx: config.deviceIdx,
+    cameras: ["cam_0", "cam_2"],
+  });
+
+  const syncResult = await syncDivisionProductMetadata({
+    divisionIdx: config.divisionIdx,
+    deviceIdx: config.deviceIdx,
+  });
+
+  const targetProducts = syncResult.newOrPendingProducts.length
+    ? syncResult.newOrPendingProducts
+    : syncResult.products;
+
+  if (!targetProducts.length) {
+    const ackPayload = makeAckPayload({
+      ifId: "IF_06",
+      reqStorageType,
+      reqHasLoadCell,
+      doorState: currentDoorState,
+      resultCd: "F",
+      resultMsg: "업로드/학습 전달 대상 상품이 없습니다.",
+      extraData: {
+        collection_timestamp: session.timestamp,
+        local_root: session.localRoot,
+      },
+    });
+
+    publishAck(client, ackTopic, ackPayload);
+    activeCollectionSession = null;
+    return;
+  }
+
+  // 현재 수집 세션은 하나의 신규 상품 촬영을 기준으로 처리한다.
+  // 여러 신규 상품이 동시에 잡히는 정책이면 여기서 상품별 폴더 분리 정책이 필요하다.
+  const targetProduct = targetProducts[0];
+  const uploadProductIdx = targetProduct.trainProductIdx || targetProduct.productIdx;
+
+  const imageUploadResult = await uploadProductImages({
+    productIdx: uploadProductIdx,
+    timestamp: session.timestamp,
+    localRoot: session.localRoot,
+    cameras: ["cam_0", "cam_2"],
+    deleteAfterUpload: false,
+  });
+
+  const videoUploadResult = await uploadProductVideos({
+    productIdx: uploadProductIdx,
+    timestamp: session.timestamp,
+    localRoot: session.localRoot,
+    cameras: ["cam_0", "cam_2"],
+    deleteAfterUpload: true,
+  });
+
+  const deviceInfoResp = await DeviceInfo();
+  const deviceList = normalizeDeviceInfoResponse(deviceInfoResp);
+  const myDevice = deviceList.find((device) => {
+    const d = device.device_idx ?? device.deviceIdx;
+    return String(d) === String(config.deviceIdx);
+  });
+
+  const currentModelVersion = myDevice?.model_version || myDevice?.modelVersion;
+  const updateModelVersion = ModelVersionUpdate(currentModelVersion);
+
+  await ProductUpload.updateMany(
+    { productIdx: { $in: targetProducts.map((p) => p.productIdx) } },
+    {
+      $set: {
+        trainingStatus: "2",
+        modelVersion: updateModelVersion,
+        updateDate: new Date(),
+      },
+    }
+  );
+
+  await updateProductUploadFolder({
+    productIdx: targetProduct.productIdx,
+    productEngName: targetProduct.productEngName,
+    foldername: imageUploadResult.foldername,
+    folderpath: imageUploadResult.folderpath,
+    filelength:
+      Number(imageUploadResult.filelength || 0) +
+      Number(videoUploadResult.filelength || 0),
+    modelVersion: updateModelVersion,
+    trainingStatus: "2",
+  });
+
+  const annotationResult = await syncAnnotationLabels({
+    productModel: ProductUpload,
+    deleteMissing: false,
+  });
+
+  const notifyProducts = targetProducts.map((p) => ({
+    productIdx: p.productIdx,
+    productEngName: p.productEngName,
+    trainingStatus: "2",
+  }));
+
+  const notifyResult = await notifyTrainingStoreMany(notifyProducts);
+
+  const ackPayload = makeAckPayload({
+    ifId: "IF_06",
+    reqStorageType,
+    reqHasLoadCell,
+    doorState: currentDoorState,
+    resultCd: imageUploadResult.success ? "S" : "F",
+    resultMsg: imageUploadResult.success
+      ? "collection upload and training notification completed"
+      : imageUploadResult.message || "image upload failed",
+    extraData: {
+      collection_timestamp: session.timestamp,
+      foldername: imageUploadResult.foldername,
+      folderpath: imageUploadResult.folderpath,
+      image_filelength: imageUploadResult.filelength,
+      video_filelength: videoUploadResult.filelength,
+      model_version: updateModelVersion,
+      annotation: annotationResult,
+      training_notify: notifyResult.map((x) => ({
+        product_idx: x.productIdx,
+        product_eng_name: x.productEngName,
+        success: x.success,
+      })),
+    },
+  });
+
+  publishAck(client, ackTopic, ackPayload);
+  activeCollectionSession = null;
+}
+
+async function DoorCollect() {
+  const DoorCollect_SUB_TOPIC = `chai/device/${config.deviceIdx}/cmd/door/collect`;
+  const DoorCollect_PUB_TOPIC = `chai/device/${config.deviceIdx}/ack/door/collect`;
+
+  const client = getClient();
+
+  client.on("connect", () => {
+    client.subscribe(DoorCollect_SUB_TOPIC);
+  });
+
+  client.on("message", async (topic, message) => {
+    if (topic !== DoorCollect_SUB_TOPIC) return;
+
+    let reqData = {};
+
+    try {
+      const payload = JSON.parse(message.toString());
+      reqData = payload.DATA || {};
+
+      const reqDoorState = reqData.door_state;
+      const reqStorageType = reqData.storage_type;
+      const reqHasLoadCell = reqData.has_loadcell;
+
+      const targetId = topic.split("/")[2];
+      if (targetId !== config.deviceIdx && targetId !== "+") return;
+
+      console.log(`[DoorCollect] Request Received: ${reqDoorState}`);
+
+      if (reqDoorState === "OPEN") {
+        await handleOpen({
+          client,
+          ackTopic: DoorCollect_PUB_TOPIC,
+          reqStorageType,
+          reqHasLoadCell,
+        });
+        return;
+      }
+
+      if (reqDoorState === "CLOSE") {
+        await handleClose({
+          client,
+          ackTopic: DoorCollect_PUB_TOPIC,
+          reqStorageType,
+          reqHasLoadCell,
+        });
+        return;
+      }
+
+      throw new Error(`Unsupported door_state: ${reqDoorState}`);
+    } catch (error) {
+      console.error("[DoorCollect] Processing Error:", error);
+
+      const errorPayload = makeAckPayload({
+        ifId: "IF_06",
+        reqStorageType: reqData.storage_type,
+        reqHasLoadCell: reqData.has_loadcell,
+        doorState: reqData.door_state || "UNKNOWN",
+        resultCd: "F",
+        resultMsg: error?.message || String(error),
+      });
+
+      publishAck(client, DoorCollect_PUB_TOPIC, errorPayload);
+    }
+  });
+}
+
+module.exports = {
+  DoorCollect,
+  fetchCurrentDoorState,
+  ProductCollectionHealth,
+};
