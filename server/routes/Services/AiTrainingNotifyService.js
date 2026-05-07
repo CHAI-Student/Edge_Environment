@@ -1,5 +1,5 @@
 require("dotenv").config();
-const { TrainingStore } = require("../routes/RestAPI/TrainingStore");
+const { TrainingStore } = require("../../routes/RestAPI/TrainingStore");
 
 async function notifyTrainingStore({
   productIdx,
