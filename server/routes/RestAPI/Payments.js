@@ -325,7 +325,7 @@ async function init() {
             axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {
                 amount: "5",
                 authorization_type: "PRE_AUTH", // 후결제: PURCHASE
-                display_message: "SamsungPay Payment"
+                // display_message: "SamsungPay Payment"
             }).then((response) => {
                 console.log('Samsung Pay Approval Response:', response.data);
                 if (response.data.status == 'Y') {
@@ -570,12 +570,21 @@ async function Payments(token, CardMethod) {
         if (inferenceResult.success == true && inferenceResult.products){
           // 결제 승인 요청
           const finalAmount = inferenceResult.totalPrice;
+          // console.log('inferenceResult', inferenceResult)
+          const products = inferenceResult.products
+          const items = products.map(product => ({
+            name: product.name,
+            quantity: Number(product.count),
+            total_price: Number(product.price) * Number(product.count || 1)
+          }));
           // 삼성 페이
           if (CardMethod === "S") {
             paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {
-                    amount: finalAmount, 
+                    // amount: string(finalAmount),
+                    amount: '5',
                     authorization_type: "PURCHASE",
-                    display_message: "SamsungPay Payment"
+                    items,
+                    // display_message: "SamsungPay Payment"
                 });
             await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/cancel`,{
                 amount: preAmount,
@@ -591,10 +600,11 @@ async function Payments(token, CardMethod) {
             paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/token/approve`, {
                     // amount: String(finalAmount),
                     amount: '5',
+                    items,
                     vankey_hash: String(paymentToken || token)
                 });
           }
-          else {
+          else {  
             console.log("Undefined Card Method Detected.")
             return;
           }

@@ -99,7 +99,23 @@ async function ProductCollectionHealth() {
     return {CameraStatus, DeadboltHealth, LoadcellHealth, CurrentDoorState, isSuccess, resultMsg}
 }
 
-function ensureClientOnce() {
+// function ensureClientOnce() {
+//   if (client) return;
+
+//   client = mqtt.connect(BROKER_URL);
+//   client.on('connect', () => client.subscribe(CMD_TOPIC));
+
+//   client.on('message', (topic, message) => {
+//     if (topic !== CMD_TOPIC) return;
+
+//     chain = chain
+//       .then(() => handleCollectMessage(message))
+//       .catch(err => console.error('[Collect] 처리 실패:', err));
+//   });
+// }
+
+async function AckCollect() {
+  // ensureClientOnce();
   if (client) return;
 
   client = mqtt.connect(BROKER_URL);
@@ -114,10 +130,6 @@ function ensureClientOnce() {
   });
 }
 
-async function AckCollect() {
-  ensureClientOnce();
-}
-
 async function handleCollectMessage(message) {
   const ReqPayload = JSON.parse(message.toString());
   const ReqData = ReqPayload.DATA;
@@ -130,7 +142,7 @@ async function handleCollectMessage(message) {
   if ((config.deviceIdx != device_idx) || (config.divisionIdx != division_idx)) return;
 
   const timestamp = makeTimestampFolderName();
-  const productFolder = path.join(process.cwd(), "productImg", `${product_idx}_${product_eng_name}_${timestamp}`); // 카메라 저장 경로 설정
+  const productFolder = path.join(process.cwd(), "productImg", `${product_idx}_${product_eng_name}_${timestamp}`); // 카메라 저장 경로 설정 --> product_idx 말고 mongodb의 trainProductIdx로 변경
 
   if (collect_state == "START") { // 픽앤탁이 EdgePC로 "수집 시작해~" 라는 내용을 PUB 하면
 
@@ -182,7 +194,7 @@ async function handleCollectMessage(message) {
 
         await CamerastopSampling(); // 카메라 끄고
         await stopLoadcellRecording(); // 로드셀 끄고
-        const openResult = await callApiToControlDeadbolt("CLOSE"); // 데드볼트도 제어 (닫기)
+        // const openResult = await callApiToControlDeadbolt("CLOSE"); // 데드볼트도 제어 (닫기)
 
 
         // 3. MinIO 업로드 & MongoDB 업로드 시작

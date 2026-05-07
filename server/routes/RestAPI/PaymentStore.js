@@ -5,19 +5,30 @@ const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 
+const dummyImg = path.join(__dirname, "../../log/dummy.jpg");
+
 async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt, CardMethod) {
     console.log("[PNT] Preparing IF_08 data transfer...");
 
     try {
-        const camFolderPath = path.join(folderPath, "archival", "cam_0");
-        const files = fs.readdirSync(camFolderPath);
-        const mp4 = files.find(f => f.toLowerCase().endsWith(".mp4"));
-        if (!mp4) {
-            throw new Error("No mp4 file found in cam_0 folder");
+        // 추후 카메라가 촬영한 영상으로 전송
+        // const camFolderPath = path.join(folderPath, "archival", "cam_0");
+        // const files = fs.readdirSync(camFolderPath);
+        // const mp4 = files.find(f => f.toLowerCase().endsWith(".mp4"));
+        // if (!mp4) {
+        //     throw new Error("No mp4 file found in cam_0 folder");
+        // }
+        // const fullPath = path.join(camFolderPath, mp4);
+        // const fileName = path.basename(fullPath);
+        // const stat = fs.statSync(fullPath);
+
+        // 더미 이미지로 전송
+        if (!fs.existsSync(dummyImgPath)) {
+            throw new Error(`[PNT] Dummy image not found: ${dummyImg}`);
         }
-        const fullPath = path.join(camFolderPath, mp4);
-        const fileName = path.basename(fullPath);
-        const stat = fs.statSync(fullPath);
+
+        const fileName = path.basename(dummyImg);
+        const stat = fs.statSync(dummyImg);
         
         // if (fs.existsSync(camFolderPath)) {
         //     const files = fs.readdirSync(camFolderPath);
@@ -42,11 +53,11 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
 
 
         // 결제 데이터 전달
-        // const external = axios.create({
-        //   baseURL: config.restApi, // https://apichaidev.atcrk.co.kr/api/v1
-        //   timeout: 10000,
-        //   headers: { "Content-Type": "application/json" },
-        // });
+        const external = axios.create({
+          baseURL: config.restApi, // https://apichaidev.atcrk.co.kr/api/v1
+          timeout: 10000,
+          headers: { "Content-Type": "application/json" },
+        });
 
         const timestamp = Date.now();
         const payload = {
@@ -74,7 +85,8 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
                 product_idx: inferenceResult.products.map(p => p.productId).join(","),
                 product_count: inferenceResult.products.map(p => p.count).join(","),
                 file_name: fileName,
-                file_ext: 'mp4',
+                // file_ext: 'mp4',
+                file_ext: 'png',
                 file_size: stat.size,
             }
         }
@@ -83,11 +95,12 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         form.append("payload", JSON.stringify(payload));
         form.append("paymentFile", fs.createReadStream(fullPath), {
             filename: fileName,
-            contentType: "video/mp4",
+            // contentType: "video/mp4",
+            contentType: "image/jpeg",
         });
 
         const token = config.jwtToken
-        const response = await axios.post("/chai/payment/store", form, {
+        const response = await external.post("/chai/payment/store", form, {
             headers: {
                 ...form.getHeaders(),
                 Authorization: `Bearer ${token}`,

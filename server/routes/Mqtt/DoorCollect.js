@@ -182,7 +182,7 @@ async function handleOpen({
     hasLoadcell: reqHasLoadCell,
     startedAt: new Date(),
   };
-
+  
   await startProductCapture({
     localRoot,
     timestamp,

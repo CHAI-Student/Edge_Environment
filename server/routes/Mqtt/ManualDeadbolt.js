@@ -43,7 +43,7 @@ async function ManualDeadbolt() {
       return;
     }
 
-    const targetState = msg?.DATA?.door_state; // 'OPEN' or 'CLOSE'
+    const targetState = msg?.DATA?.door_state; // 'OPEN' or 'CLOSE' // 'UNLOCK' or 'LOCKED'
     const ifSysId = msg?.HEADER?.IF_SYSID || uuidv4();
 
     console.log(`[DEADBOLT] MQTT CMD Received. ID=${ifSysId}, Target=${targetState}`);
@@ -59,15 +59,17 @@ async function ManualDeadbolt() {
     let finalState = "";
     let resultCd = "S"; 
     let resultMsg = "";
+    // 다시 검토 필요
 
     try {
       // 1. 분리된 함수 호출 (API 제어 요청)
       const apiResultState = await callApiToControlDeadbolt(targetState);
+      console.log('apiResultState', apiResultState)
 
       // 2. 결과 검증
-      if (apiResultState === "OPEN" || apiResultState === "CLOSE") {
+      if (apiResultState === "UNLOCK" || apiResultState === "LOCKED") {
         finalState = apiResultState;
-        resultMsg = finalState === "OPEN" ? "Door is opened" : "Door is closed";
+        resultMsg = finalState === "UNLOCK" ? "Door is opened" : "Door is closed";
       } else {
         throw new Error(`Unexpected API response: ${apiResultState}`);
       }
@@ -77,7 +79,7 @@ async function ManualDeadbolt() {
       resultCd = "F"; 
       resultMsg = "API Error: " + err.message;
       // 실패 시 요청의 반대 상태(또는 기존 상태 유지)로 가정
-      finalState = targetState === "OPEN" ? "CLOSE" : "OPEN"; 
+      finalState = targetState === "UNLOCK" ? "LOCKED" : "UNLOCK"; 
     }
 
     // ---------------------------------------------------------
