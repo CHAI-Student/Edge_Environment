@@ -21,13 +21,23 @@ function makeIFDate(d = new Date()) {
   return `${yyyy}${mm}${dd}${HH}${MM}${SS}`;
 }
 
+function normalizeHealthStatus(raw, okCode, hasDevice = true) {
+  // 정의서상 status size가 1이고, 로드셀이 없는 경우 9 전달 가능
+  if (!hasDevice) return "9";
+  return raw === okCode ? "1" : "0";
+}
+
 function makeAckPayload({
+  reqDeviceIdx = config.deviceIdx,
+  reqDivisionIdx = config.divisionIdx,
   reqStorageType,
   reqHasLoadCell,
   doorState,
+  cameraStatus = "0",
+  deadboltStatus = "0",
+  loadcellStatus = "0",
   resultCd = "S",
   resultMsg = "success",
-  extraData = {},
 }) {
   return {
     HEADER: {
@@ -37,14 +47,16 @@ function makeAckPayload({
       IF_DATE: makeIFDate(),
     },
     DATA: {
-      division_idx: config.divisionIdx,
-      device_idx: config.deviceIdx,
+      device_idx: reqDeviceIdx,
+      division_idx: reqDivisionIdx,
       door_state: doorState,
       storage_type: reqStorageType ?? null,
       has_loadcell: reqHasLoadCell ?? null,
+      camera_status: cameraStatus,
+      deadbolt_status: deadboltStatus,
+      loadcell_status: loadcellStatus,
       result_cd: resultCd,
       result_msg: resultMsg,
-      ...extraData,
     },
   };
 }
@@ -58,6 +70,8 @@ function publishAck(client, topic, payload) {
   client.publish(topic, JSON.stringify(payload), (err) => {
     if (err) {
       console.error("[DoorCollect] ACK publish failed:", err);
+    } else {
+      console.log(`[DoorCollect] ACK published: ${payload.DATA.door_state}, ${payload.DATA.result_cd}`);
     }
   });
 }
@@ -88,8 +102,15 @@ async function fetchCurrentDoorState() {
       try {
         const data = JSON.parse(event.data);
         const rawState = data.deadbolt ? String(data.deadbolt).toUpperCase() : "";
+
         const closedStates = ["LOCK", "LOCKED", "CLOSE", "CLOSED"];
-        const finalState = closedStates.includes(rawState) ? "CLOSE" : "OPEN";
+        const openStates = ["UNLOCK", "UNLOCKED", "OPEN", "OPENED"];
+
+        let finalState = "UNKNOWN";
+
+        if (closedStates.includes(rawState)) finalState = "CLOSE";
+        else if (openStates.includes(rawState)) finalState = "OPEN";
+        else finalState = closedStates.includes(rawState) ? "CLOSE" : "OPEN";
 
         clearTimeout(timeout);
         evtSource.close();
@@ -109,55 +130,134 @@ async function fetchCurrentDoorState() {
   });
 }
 
-async function ProductCollectionHealth() {
+async function waitForDoorState(targetState, { timeoutMs = 5000, intervalMs = 300 } = {}) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const state = await fetchCurrentDoorState();
+
+    if (state === targetState) {
+      return state;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  return await fetchCurrentDoorState();
+}
+
+async function ProductCollectionHealth(reqHasLoadCell) {
   const CameraStatus = await CameraStatusAPI();
   const DeadboltHealth = await DeadboltStatusAPI();
-  const LoadcellHealth = await LoadcellStatusAPI();
+
+  const hasLoadcell =
+    reqHasLoadCell === true ||
+    reqHasLoadCell === "Y" ||
+    reqHasLoadCell === "1" ||
+    reqHasLoadCell === 1;
+
+  let LoadcellHealth = "29";
+
+  if (hasLoadcell) {
+    LoadcellHealth = await LoadcellStatusAPI();
+  }
+
   const CurrentDoorState = await fetchCurrentDoorState();
 
+  const camera_status = normalizeHealthStatus(CameraStatus, "09", true);
+  const deadbolt_status = normalizeHealthStatus(DeadboltHealth, "19", true);
+  const loadcell_status = normalizeHealthStatus(LoadcellHealth, "29", hasLoadcell);
+
   const isHealthOk =
-    CameraStatus === "09" &&
-    DeadboltHealth === "19" &&
-    LoadcellHealth === "29";
+    camera_status === "1" &&
+    deadbolt_status === "1" &&
+    (hasLoadcell ? loadcell_status === "1" : true);
 
   return {
     CameraStatus,
     DeadboltHealth,
     LoadcellHealth,
     CurrentDoorState,
+    camera_status,
+    deadbolt_status,
+    loadcell_status,
     isSuccess: isHealthOk,
     resultMsg: isHealthOk ? "status access" : "status error",
   };
 }
 
+function validateRequestDevice(reqData) {
+  const reqDeviceIdx = reqData.device_idx;
+  const reqDivisionIdx = reqData.division_idx;
+
+  if (String(reqDeviceIdx) !== String(config.deviceIdx)) {
+    throw new Error(`Invalid device_idx: ${reqDeviceIdx}`);
+  }
+
+  if (String(reqDivisionIdx) !== String(config.divisionIdx)) {
+    throw new Error(`Invalid division_idx: ${reqDivisionIdx}`);
+  }
+}
+
 async function handleOpen({
   client,
   ackTopic,
-  reqStorageType,
-  reqHasLoadCell,
+  reqData,
 }) {
-  const currentDoorState = await fetchCurrentDoorState();
+  const reqDeviceIdx = reqData.device_idx;
+  const reqDivisionIdx = reqData.division_idx;
+  const reqStorageType = reqData.storage_type;
+  const reqHasLoadCell = reqData.has_loadcell;
 
-  if (currentDoorState !== "CLOSE") {
-    throw new Error("현재 문이 열려있는 상태입니다.");
+  validateRequestDevice(reqData);
+
+  const beforeState = await fetchCurrentDoorState();
+
+  if (beforeState === "OPEN") {
+    const health = await ProductCollectionHealth(reqHasLoadCell);
+
+    const ackPayload = makeAckPayload({
+      reqDeviceIdx,
+      reqDivisionIdx,
+      reqStorageType,
+      reqHasLoadCell,
+      doorState: "OPEN",
+      cameraStatus: health.camera_status,
+      deadboltStatus: health.deadbolt_status,
+      loadcellStatus: health.loadcell_status,
+      resultCd: "S",
+      resultMsg: "door already opened",
+    });
+
+    publishAck(client, ackTopic, ackPayload);
+    return;
   }
 
   const openResult = await callApiToControlDeadbolt("OPEN");
   console.log("[DoorCollect] deadbolt open result:", openResult);
 
-  const health = await ProductCollectionHealth();
+  const finalDoorState = await waitForDoorState("OPEN", {
+    timeoutMs: 5000,
+    intervalMs: 300,
+  });
+
+  const health = await ProductCollectionHealth(reqHasLoadCell);
+
+  const isOpenSuccess = finalDoorState === "OPEN";
 
   const ackPayload = makeAckPayload({
+    reqDeviceIdx,
+    reqDivisionIdx,
     reqStorageType,
     reqHasLoadCell,
-    doorState: health.CurrentDoorState,
-    resultCd: health.isSuccess ? "S" : "F",
-    resultMsg: health.resultMsg,
-    extraData: {
-      camera_status: health.CameraStatus === "09" ? "1" : "0",
-      deadbolt_status: health.DeadboltHealth === "19" ? "1" : "0",
-      loadcell_status: health.LoadcellHealth === "29" ? "1" : "0",
-    },
+    doorState: finalDoorState,
+    cameraStatus: health.camera_status,
+    deadboltStatus: health.deadbolt_status,
+    loadcellStatus: health.loadcell_status,
+    resultCd: isOpenSuccess && health.isSuccess ? "S" : "F",
+    resultMsg: isOpenSuccess
+      ? health.resultMsg
+      : `door open command sent, but current state is ${finalDoorState}`,
   });
 
   publishAck(client, ackTopic, ackPayload);
@@ -166,35 +266,48 @@ async function handleOpen({
 async function handleClose({
   client,
   ackTopic,
-  reqStorageType,
-  reqHasLoadCell,
+  reqData,
 }) {
-  const currentDoorState = await fetchCurrentDoorState();
+  const reqDeviceIdx = reqData.device_idx;
+  const reqDivisionIdx = reqData.division_idx;
+  const reqStorageType = reqData.storage_type;
+  const reqHasLoadCell = reqData.has_loadcell;
 
-  if (currentDoorState !== "CLOSE") {
-    throw new Error("문이 아직 닫히지 않았습니다.");
+  validateRequestDevice(reqData);
+
+  const beforeState = await fetchCurrentDoorState();
+
+  if (beforeState !== "CLOSE") {
+    const closeResult = await callApiToControlDeadbolt("CLOSE").catch((err) => {
+      console.warn("[DoorCollect] deadbolt close warning:", err.message);
+      return null;
+    });
+
+    console.log("[DoorCollect] deadbolt close result:", closeResult);
   }
 
-  const closeResult = await callApiToControlDeadbolt("CLOSE").catch((err) => {
-    console.warn("[DoorCollect] deadbolt close warning:", err.message);
-    return null;
+  const finalDoorState = await waitForDoorState("CLOSE", {
+    timeoutMs: 5000,
+    intervalMs: 300,
   });
 
-  console.log("[DoorCollect] deadbolt close result:", closeResult);
+  const health = await ProductCollectionHealth(reqHasLoadCell);
 
-  const health = await ProductCollectionHealth();
+  const isCloseSuccess = finalDoorState === "CLOSE";
 
   const ackPayload = makeAckPayload({
+    reqDeviceIdx,
+    reqDivisionIdx,
     reqStorageType,
     reqHasLoadCell,
-    doorState: health.CurrentDoorState,
-    resultCd: health.isSuccess ? "S" : "F",
-    resultMsg: health.resultMsg,
-    extraData: {
-      camera_status: health.CameraStatus === "09" ? "1" : "0",
-      deadbolt_status: health.DeadboltHealth === "19" ? "1" : "0",
-      loadcell_status: health.LoadcellHealth === "29" ? "1" : "0",
-    },
+    doorState: finalDoorState,
+    cameraStatus: health.camera_status,
+    deadboltStatus: health.deadbolt_status,
+    loadcellStatus: health.loadcell_status,
+    resultCd: isCloseSuccess && health.isSuccess ? "S" : "F",
+    resultMsg: isCloseSuccess
+      ? health.resultMsg
+      : `door close command sent, but current state is ${finalDoorState}`,
   });
 
   publishAck(client, ackTopic, ackPayload);
@@ -212,8 +325,6 @@ async function DoorCollect() {
         console.error("[DoorCollect] MQTT subscribe failed:", err);
 
         const errorPayload = makeAckPayload({
-          reqStorageType: null,
-          reqHasLoadCell: null,
           doorState: "UNKNOWN",
           resultCd: "F",
           resultMsg: `MQTT subscribe failed: ${err.message}`,
@@ -237,11 +348,6 @@ async function DoorCollect() {
       reqData = payload.DATA || {};
 
       const reqDoorState = reqData.door_state;
-      const reqStorageType = reqData.storage_type;
-      const reqHasLoadCell = reqData.has_loadcell;
-
-      const targetId = topic.split("/")[2];
-      if (targetId !== config.deviceIdx && targetId !== "+") return;
 
       console.log(`[DoorCollect] Request Received: ${reqDoorState}`);
 
@@ -249,8 +355,7 @@ async function DoorCollect() {
         await handleOpen({
           client,
           ackTopic: DoorCollect_PUB_TOPIC,
-          reqStorageType,
-          reqHasLoadCell,
+          reqData,
         });
         return;
       }
@@ -259,8 +364,7 @@ async function DoorCollect() {
         await handleClose({
           client,
           ackTopic: DoorCollect_PUB_TOPIC,
-          reqStorageType,
-          reqHasLoadCell,
+          reqData,
         });
         return;
       }
@@ -269,10 +373,21 @@ async function DoorCollect() {
     } catch (error) {
       console.error("[DoorCollect] Processing Error:", error);
 
+      const health = await ProductCollectionHealth(reqData.has_loadcell).catch(() => ({
+        camera_status: "0",
+        deadbolt_status: "0",
+        loadcell_status: "0",
+      }));
+
       const errorPayload = makeAckPayload({
+        reqDeviceIdx: reqData.device_idx || config.deviceIdx,
+        reqDivisionIdx: reqData.division_idx || config.divisionIdx,
         reqStorageType: reqData.storage_type,
         reqHasLoadCell: reqData.has_loadcell,
         doorState: reqData.door_state || "UNKNOWN",
+        cameraStatus: health.camera_status,
+        deadboltStatus: health.deadbolt_status,
+        loadcellStatus: health.loadcell_status,
         resultCd: "F",
         resultMsg: error?.message || String(error),
       });
