@@ -2,7 +2,7 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const Minio = require("minio");
-const config = require("../config/key");
+const config = require("../../config/key");
 
 function safe(s) {
   return String(s || "").replace(/[^a-zA-Z0-9._-]/g, "_");

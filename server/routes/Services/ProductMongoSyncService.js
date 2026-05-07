@@ -1,12 +1,12 @@
 require("dotenv").config();
-const config = require("../config/key");
+const config = require("../../config/key");
 
-const { DivisionUpload } = require("../model/DivisionUpload");
-const { DeviceTypeUpload } = require("../model/DeviceTypeUpload");
-const { ProductUpload } = require("../model/ProductUpload");
+const { DivisionUpload } = require("../../model/DivisionUpload");
+const { DeviceTypeUpload } = require("../../model/DeviceTypeUpload");
+const { ProductUpload } = require("../../model/ProductUpload");
 
-const { ModelBrunchCheck } = require("../routes/RestAPI/ModelBrunchCheck");
-const { ProductList } = require("../routes/RestAPI/ProductList");
+const { ModelBrunchCheck } = require("../../routes/RestAPI/ModelBrunchCheck");
+const { ProductList } = require("../../routes/RestAPI/ProductList");
 
 function makeFolderTimestamp(d = new Date()) {
   const yyyy = d.getFullYear();

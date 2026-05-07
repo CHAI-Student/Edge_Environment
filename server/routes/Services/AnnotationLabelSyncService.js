@@ -1,5 +1,5 @@
 require("dotenv").config();
-const { AnnotationLabel } = require("../model/AnnotationLabel");
+const { AnnotationLabel } = require("../../model/AnnotationLabel");
 
 function randomHexColor() {
   const n = Math.floor(Math.random() * 0xffffff);
