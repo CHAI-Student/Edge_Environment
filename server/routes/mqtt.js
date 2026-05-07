@@ -31,7 +31,7 @@ async function init() {
     await RebootMqtt();
     await ManualDeadbolt();
     await Repayment();
-    await DoorCollect()
+    await DoorCollect();
     console.log("[APP] MQTT init done");
   } catch (e) {
     console.error("[APP] MQTT init failed:", e?.message || e);

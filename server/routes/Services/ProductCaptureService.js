@@ -1,6 +1,6 @@
 require("dotenv").config();
 const axios = require("axios");
-const config = require("../config/key");
+const config = require("../../config/key");
 
 /**
  * 카메라 촬영 API 명세가 아직 확정되지 않은 경우를 대비해 optional hook으로 구성.
