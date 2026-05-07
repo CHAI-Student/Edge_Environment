@@ -2,7 +2,7 @@
 const path = require("path");
 const mongoose = require("mongoose");
 const { v4: uuidv4 } = require("uuid");
-const EventSource = require('eventsource')
+const { EventSource } = require('eventsource');
 const config = require("../../config/key");
 const { callApiToControlDeadbolt } = require("./DeadboltApiService");
 const {
