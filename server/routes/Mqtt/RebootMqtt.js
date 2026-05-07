@@ -19,14 +19,23 @@ function runReboot() {
     console.log("[REBOOT] (dev/mac) would reboot now. (skip)");
     return;
   }
+    // Linux만 허용
+  if (process.platform !== "linux") {
+    console.warn(`[REBOOT] Unsupported platform: ${process.platform}`);
+    return;
+  }
 
   console.log("[REBOOT] rebooting now...");
   // Linux에서 실제 재부팅 (sudo 권한 필요할 수 있음)
-  // exec("sudo -n reboot", (err, stdout, stderr) => {
-  //   if (err) console.error("[REBOOT] reboot command failed:", err.message);
-  //   if (stdout) console.log("[REBOOT] stdout:", stdout);
-  //   if (stderr) console.log("[REBOOT] stderr:", stderr);
-  // });
+  exec("sudo -n systemctl reboot", (err, stdout, stderr) => {
+    if (err) {
+      console.error("[REBOOT] failed:", err.message);
+      return;
+    }
+
+    if (stdout) console.log("[REBOOT] stdout:", stdout);
+    if (stderr) console.log("[REBOOT] stderr:", stderr);
+  });
 }
 
 // 부팅 직후: flag가 있으면 ack 1회 발행하고 flag 삭제
