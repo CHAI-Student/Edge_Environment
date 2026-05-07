@@ -21,395 +21,265 @@ function makeIFDate(d = new Date()) {
   return `${yyyy}${mm}${dd}${HH}${MM}${SS}`;
 }
 
-function normalizeHealthStatus(raw, okCode, hasDevice = true) {
-  // 정의서상 status size가 1이고, 로드셀이 없는 경우 9 전달 가능
-  if (!hasDevice) return "9";
-  return raw === okCode ? "1" : "0";
-}
-
-function makeAckPayload({
-  reqDeviceIdx = config.deviceIdx,
-  reqDivisionIdx = config.divisionIdx,
-  reqStorageType,
-  reqHasLoadCell,
-  doorState,
-  cameraStatus = "0",
-  deadboltStatus = "0",
-  loadcellStatus = "0",
-  resultCd = "S",
-  resultMsg = "success",
-}) {
-  return {
-    HEADER: {
-      IF_ID: "IF_04",
-      IF_SYSID: uuidv4(),
-      IF_HOST: "CRKPNTCCHAI",
-      IF_DATE: makeIFDate(),
-    },
-    DATA: {
-      device_idx: reqDeviceIdx,
-      division_idx: reqDivisionIdx,
-      door_state: doorState,
-      storage_type: reqStorageType ?? null,
-      has_loadcell: reqHasLoadCell ?? null,
-      camera_status: cameraStatus,
-      deadbolt_status: deadboltStatus,
-      loadcell_status: loadcellStatus,
-      result_cd: resultCd,
-      result_msg: resultMsg,
-    },
-  };
-}
-
-function publishAck(client, topic, payload) {
-  const message = JSON.stringify(payload);
-
-  console.log("[DoorCollect] publish topic:", topic);
-  console.log("[DoorCollect] publish payload:", message);
-
-  client.publish(topic, message, { qos: 1 }, (err) => {
-    if (err) {
-      console.error("[DoorCollect] ACK publish failed:", err);
-    } else {
-      console.log(
-        `[DoorCollect] ACK published: topic=${topic}, door_state=${payload.DATA.door_state}, result_cd=${payload.DATA.result_cd}`
-      );
-    }
-  });
-}
-
 async function fetchCurrentDoorState() {
   return new Promise((resolve) => {
     const url = `${config.ioboardApi}/sse?streams=doors`;
 
     let evtSource;
-
     try {
       evtSource = new EventSource(url);
     } catch (err) {
-      console.error("[DoorCheck] EventSource create failed:", err.message);
+      console.error("[DoorCollect] EventSource Error:", err.message);
       resolve("UNKNOWN");
       return;
     }
 
-    const timeout = setTimeout(() => {
+    const timer = setTimeout(() => {
       evtSource.close();
-      console.warn("[DoorCheck] Timeout");
       resolve("UNKNOWN");
     }, 3000);
 
     evtSource.addEventListener("door.update", (event) => {
-      if (!event.data) return;
-
       try {
-        const data = JSON.parse(event.data);
-        const rawState = data.deadbolt ? String(data.deadbolt).toUpperCase() : "";
+        const data = JSON.parse(event.data || "{}");
+        const raw = String(data.deadbolt || "").toUpperCase();
 
-        const closedStates = ["LOCK", "LOCKED", "CLOSE", "CLOSED"];
+        const closeStates = ["LOCK", "LOCKED", "CLOSE", "CLOSED"];
         const openStates = ["UNLOCK", "UNLOCKED", "OPEN", "OPENED"];
 
-        let finalState = "UNKNOWN";
+        let state = "UNKNOWN";
+        if (closeStates.includes(raw)) state = "CLOSE";
+        if (openStates.includes(raw)) state = "OPEN";
 
-        if (closedStates.includes(rawState)) finalState = "CLOSE";
-        else if (openStates.includes(rawState)) finalState = "OPEN";
-        else finalState = closedStates.includes(rawState) ? "CLOSE" : "OPEN";
-
-        clearTimeout(timeout);
+        clearTimeout(timer);
         evtSource.close();
-        resolve(finalState);
-      } catch (err) {
-        clearTimeout(timeout);
+        resolve(state);
+      } catch {
+        clearTimeout(timer);
         evtSource.close();
         resolve("UNKNOWN");
       }
     });
 
     evtSource.onerror = () => {
-      clearTimeout(timeout);
+      clearTimeout(timer);
       evtSource.close();
       resolve("UNKNOWN");
     };
   });
 }
 
-async function waitForDoorState(targetState, { timeoutMs = 5000, intervalMs = 300 } = {}) {
+async function waitForDoorState(targetState, timeoutMs = 5000) {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
     const state = await fetchCurrentDoorState();
 
-    if (state === targetState) {
-      return state;
-    }
+    if (state === targetState) return state;
 
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    await new Promise((resolve) => setTimeout(resolve, 300));
   }
 
   return await fetchCurrentDoorState();
 }
 
-async function ProductCollectionHealth(reqHasLoadCell) {
-  const CameraStatus = await CameraStatusAPI();
-  const DeadboltHealth = await DeadboltStatusAPI();
+async function getHealthStatus(hasLoadcell) {
+  const cameraRaw = await CameraStatusAPI();
+  const deadboltRaw = await DeadboltStatusAPI();
 
-  const hasLoadcell =
-    reqHasLoadCell === true ||
-    reqHasLoadCell === "Y" ||
-    reqHasLoadCell === "1" ||
-    reqHasLoadCell === 1;
+  const useLoadcell =
+    hasLoadcell === "Y" ||
+    hasLoadcell === "1" ||
+    hasLoadcell === true ||
+    hasLoadcell === 1;
 
-  let LoadcellHealth = "29";
+  let loadcellRaw = "29";
 
-  if (hasLoadcell) {
-    LoadcellHealth = await LoadcellStatusAPI();
+  if (useLoadcell) {
+    loadcellRaw = await LoadcellStatusAPI();
   }
 
-  const CurrentDoorState = await fetchCurrentDoorState();
-
-  const camera_status = normalizeHealthStatus(CameraStatus, "09", true);
-  const deadbolt_status = normalizeHealthStatus(DeadboltHealth, "19", true);
-  const loadcell_status = normalizeHealthStatus(LoadcellHealth, "29", hasLoadcell);
-
-  const isHealthOk =
-    camera_status === "1" &&
-    deadbolt_status === "1" &&
-    (hasLoadcell ? loadcell_status === "1" : true);
-
   return {
-    CameraStatus,
-    DeadboltHealth,
-    LoadcellHealth,
-    CurrentDoorState,
-    camera_status,
-    deadbolt_status,
-    loadcell_status,
-    isSuccess: isHealthOk,
-    resultMsg: isHealthOk ? "status access" : "status error",
+    camera_status: cameraRaw === "09" ? "1" : "0",
+    deadbolt_status: deadboltRaw === "19" ? "1" : "0",
+    loadcell_status: useLoadcell ? (loadcellRaw === "29" ? "1" : "0") : "9",
   };
 }
 
-function validateRequestDevice(reqData) {
-  const reqDeviceIdx = reqData.device_idx;
-  const reqDivisionIdx = reqData.division_idx;
-
-  if (String(reqDeviceIdx) !== String(config.deviceIdx)) {
-    throw new Error(`Invalid device_idx: ${reqDeviceIdx}`);
-  }
-
-  if (String(reqDivisionIdx) !== String(config.divisionIdx)) {
-    throw new Error(`Invalid division_idx: ${reqDivisionIdx}`);
-  }
-}
-
-async function handleOpen({
+function publishDoorAck({
   client,
-  ackTopic,
-  reqData,
+  topic,
+  ifSysId,
+  deviceIdx,
+  divisionIdx,
+  doorState,
+  storageType,
+  hasLoadcell,
+  cameraStatus,
+  deadboltStatus,
+  loadcellStatus,
+  resultCd,
+  resultMsg,
 }) {
-  const reqDeviceIdx = reqData.device_idx;
-  const reqDivisionIdx = reqData.division_idx;
-  const reqStorageType = reqData.storage_type;
-  const reqHasLoadCell = reqData.has_loadcell;
-
-  validateRequestDevice(reqData);
-
-  const beforeState = await fetchCurrentDoorState();
-
-  if (beforeState === "OPEN") {
-    const health = await ProductCollectionHealth(reqHasLoadCell);
-
-    const ackPayload = makeAckPayload({
-      reqDeviceIdx,
-      reqDivisionIdx,
-      reqStorageType,
-      reqHasLoadCell,
-      doorState: "OPEN",
-      cameraStatus: health.camera_status,
-      deadboltStatus: health.deadbolt_status,
-      loadcellStatus: health.loadcell_status,
-      resultCd: "S",
-      resultMsg: "door already opened",
-    });
-
-    publishAck(client, ackTopic, ackPayload);
-    return;
-  }
-
-  const openResult = await callApiToControlDeadbolt("OPEN");
-  console.log("[DoorCollect] deadbolt open result:", openResult);
-
-  const finalDoorState = await waitForDoorState("OPEN", {
-    timeoutMs: 5000,
-    intervalMs: 300,
+  const ackPayload = JSON.stringify({
+    HEADER: {
+      IF_ID: "IF_04",
+      IF_SYSID: ifSysId || uuidv4(),
+      IF_HOST: "CRKPNTCCHAI",
+      IF_DATE: makeIFDate(),
+    },
+    DATA: {
+      device_idx: deviceIdx,
+      division_idx: divisionIdx,
+      door_state: doorState,
+      storage_type: storageType,
+      has_loadcell: hasLoadcell,
+      camera_status: cameraStatus,
+      deadbolt_status: deadboltStatus,
+      loadcell_status: loadcellStatus,
+      result_cd: resultCd,
+      result_msg: resultMsg,
+    },
   });
 
-  const health = await ProductCollectionHealth(reqHasLoadCell);
+  console.log("[DoorCollect] PUB Topic:", topic);
+  console.log("[DoorCollect] PUB Payload:", ackPayload);
 
-  const isOpenSuccess = finalDoorState === "OPEN";
-
-  const ackPayload = makeAckPayload({
-    reqDeviceIdx,
-    reqDivisionIdx,
-    reqStorageType,
-    reqHasLoadCell,
-    doorState: finalDoorState,
-    cameraStatus: health.camera_status,
-    deadboltStatus: health.deadbolt_status,
-    loadcellStatus: health.loadcell_status,
-    resultCd: isOpenSuccess && health.isSuccess ? "S" : "F",
-    resultMsg: isOpenSuccess
-      ? health.resultMsg
-      : `door open command sent, but current state is ${finalDoorState}`,
+  client.publish(topic, ackPayload, { qos: 1, retain: false }, (e) => {
+    if (e) {
+      console.error("[DoorCollect] Publish Error:", e.message);
+    } else {
+      console.log(
+        `[DoorCollect] ACK Sent. Result=${resultCd}, State=${doorState}`
+      );
+    }
   });
-
-  publishAck(client, ackTopic, ackPayload);
-}
-
-async function handleClose({
-  client,
-  ackTopic,
-  reqData,
-}) {
-  const reqDeviceIdx = reqData.device_idx;
-  const reqDivisionIdx = reqData.division_idx;
-  const reqStorageType = reqData.storage_type;
-  const reqHasLoadCell = reqData.has_loadcell;
-
-  validateRequestDevice(reqData);
-
-  const beforeState = await fetchCurrentDoorState();
-
-  if (beforeState !== "CLOSE") {
-    const closeResult = await callApiToControlDeadbolt("CLOSE").catch((err) => {
-      console.warn("[DoorCollect] deadbolt close warning:", err.message);
-      return null;
-    });
-
-    console.log("[DoorCollect] deadbolt close result:", closeResult);
-  }
-
-  const finalDoorState = await waitForDoorState("CLOSE", {
-    timeoutMs: 5000,
-    intervalMs: 300,
-  });
-
-  const health = await ProductCollectionHealth(reqHasLoadCell);
-
-  const isCloseSuccess = finalDoorState === "CLOSE";
-
-  const ackPayload = makeAckPayload({
-    reqDeviceIdx,
-    reqDivisionIdx,
-    reqStorageType,
-    reqHasLoadCell,
-    doorState: finalDoorState,
-    cameraStatus: health.camera_status,
-    deadboltStatus: health.deadbolt_status,
-    loadcellStatus: health.loadcell_status,
-    resultCd: isCloseSuccess && health.isSuccess ? "S" : "F",
-    resultMsg: isCloseSuccess
-      ? health.resultMsg
-      : `door close command sent, but current state is ${finalDoorState}`,
-  });
-
-  publishAck(client, ackTopic, ackPayload);
 }
 
 async function DoorCollect() {
-  const DoorCollect_SUB_TOPIC = `chai/device/${config.deviceIdx}/cmd/door/collect`;
-  const DoorCollect_PUB_TOPIC = `chai/device/${config.deviceIdx}/ack/door/collect`;
+  const subTopic = `chai/device/${config.deviceIdx}/cmd/door/collect`;
+  const pubTopic = `chai/device/${config.deviceIdx}/ack/door/collect`;
 
   const client = getClient();
 
   client.on("connect", () => {
-    client.subscribe(DoorCollect_SUB_TOPIC, (err) => {
+    client.subscribe(subTopic, { qos: 1 }, (err) => {
       if (err) {
-        console.error("[DoorCollect] MQTT subscribe failed:", err);
+        console.error("[DoorCollect] Subscribe Error:", err.message);
 
-        const errorPayload = makeAckPayload({
+        publishDoorAck({
+          client,
+          topic: pubTopic,
+          ifSysId: uuidv4(),
+          deviceIdx: config.deviceIdx,
+          divisionIdx: config.divisionIdx,
           doorState: "UNKNOWN",
+          storageType: null,
+          hasLoadcell: null,
+          cameraStatus: "0",
+          deadboltStatus: "0",
+          loadcellStatus: "0",
           resultCd: "F",
-          resultMsg: `MQTT subscribe failed: ${err.message}`,
+          resultMsg: `Subscribe Error: ${err.message}`,
         });
 
-        publishAck(client, DoorCollect_PUB_TOPIC, errorPayload);
         return;
       }
 
-      console.log(`[DoorCollect] subscribed: ${DoorCollect_SUB_TOPIC}`);
+      console.log(`[DoorCollect] Subscribed: ${subTopic}`);
     });
   });
 
   client.on("message", async (topic, message) => {
-    if (topic !== DoorCollect_SUB_TOPIC) return;
+    if (topic !== subTopic) return;
 
     let reqData = {};
+    let ifSysId = uuidv4();
 
     try {
       const payload = JSON.parse(message.toString());
+      ifSysId = payload.HEADER?.IF_SYSID || uuidv4();
       reqData = payload.DATA || {};
-      console.log(`[reqData]: ${reqData}`)
 
-      const reqDoorState = reqData.door_state;
+      const {
+        device_idx: deviceIdx,
+        division_idx: divisionIdx,
+        door_state: reqDoorState,
+        storage_type: storageType,
+        has_loadcell: hasLoadcell,
+      } = reqData;
 
-      console.log(`[DoorCollect] Request Received: ${reqDoorState}`);
+      console.log("[DoorCollect] Request:", reqData);
+      
+      await callApiToControlDeadbolt(reqDoorState);
 
-      if (reqDoorState === "OPEN") {
-        await handleOpen({
-          client,
-          ackTopic: DoorCollect_PUB_TOPIC,
-          reqData,
-        });
-        return;
-      }
+      const finalState = await waitForDoorState(reqDoorState, 5000);
+      const health = await getHealthStatus(hasLoadcell);
 
-      if (reqDoorState === "CLOSE") {
-        await handleClose({
-          client,
-          ackTopic: DoorCollect_PUB_TOPIC,
-          reqData,
-        });
-        return;
-      }
+      const isDoorOk = finalState === reqDoorState;
+      const isHealthOk =
+        health.camera_status === "1" &&
+        health.deadbolt_status === "1" &&
+        (health.loadcell_status === "1" || health.loadcell_status === "9");
 
-      throw new Error(`Unsupported door_state: ${reqDoorState}`);
+      const resultCd = isDoorOk && isHealthOk ? "S" : "F";
+      const resultMsg =
+        resultCd === "S"
+          ? "status access"
+          : `door=${finalState}, camera=${health.camera_status}, deadbolt=${health.deadbolt_status}, loadcell=${health.loadcell_status}`;
+
+      publishDoorAck({
+        client,
+        topic: pubTopic,
+        ifSysId,
+        deviceIdx,
+        divisionIdx,
+        doorState: finalState,
+        storageType,
+        hasLoadcell,
+        cameraStatus: health.camera_status,
+        deadboltStatus: health.deadbolt_status,
+        loadcellStatus: health.loadcell_status,
+        resultCd,
+        resultMsg,
+      });
     } catch (error) {
-      console.error("[DoorCollect] Processing Error:", error);
+      console.error("[DoorCollect] Error:", error.message);
 
-      const health = await ProductCollectionHealth(reqData.has_loadcell).catch(() => ({
+      const health = await getHealthStatus(reqData.has_loadcell).catch(() => ({
         camera_status: "0",
         deadbolt_status: "0",
         loadcell_status: "0",
       }));
 
-      const errorPayload = makeAckPayload({
-        reqDeviceIdx: config.deviceIdx,
-        reqDivisionIdx: config.divisionIdx,
-        reqStorageType: reqData.storage_type,
-        reqHasLoadCell: reqData.has_loadcell,
-        doorState: reqData.door_state || "UNKNOWN",
+      publishDoorAck({
+        client,
+        topic: pubTopic,
+        ifSysId,
+        deviceIdx: config.deviceIdx,
+        divisionIdx: config.divisionIdx,
+        doorState: reqData.door_state,
+        storageType: reqData.storage_type,
+        hasLoadcell: reqData.has_loadcell,
         cameraStatus: health.camera_status,
         deadboltStatus: health.deadbolt_status,
         loadcellStatus: health.loadcell_status,
         resultCd: "F",
         resultMsg: error?.message || String(error),
       });
-
-      publishAck(client, DoorCollect_PUB_TOPIC, errorPayload);
     }
   });
 
   client.on("error", (err) => {
-    console.error("[DoorCollect] MQTT client error:", err);
+    console.error("[DoorCollect] MQTT Error:", err.message);
   });
 
   client.on("close", () => {
-    console.warn("[DoorCollect] MQTT client closed");
+    console.warn("[DoorCollect] MQTT Closed");
   });
 }
 
 module.exports = {
   DoorCollect,
   fetchCurrentDoorState,
-  ProductCollectionHealth,
 };
