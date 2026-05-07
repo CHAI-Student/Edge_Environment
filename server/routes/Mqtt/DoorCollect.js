@@ -62,16 +62,18 @@ function makeAckPayload({
 }
 
 function publishAck(client, topic, payload) {
-  if (!client || !client.connected) {
-    console.error("[DoorCollect] MQTT client is not connected. Cannot publish ACK.");
-    return;
-  }
+  const message = JSON.stringify(payload);
 
-  client.publish(topic, JSON.stringify(payload), (err) => {
+  console.log("[DoorCollect] publish topic:", topic);
+  console.log("[DoorCollect] publish payload:", message);
+
+  client.publish(topic, message, { qos: 1 }, (err) => {
     if (err) {
       console.error("[DoorCollect] ACK publish failed:", err);
     } else {
-      console.log(`[DoorCollect] ACK published: ${payload.DATA.door_state}, ${payload.DATA.result_cd}`);
+      console.log(
+        `[DoorCollect] ACK published: topic=${topic}, door_state=${payload.DATA.door_state}, result_cd=${payload.DATA.result_cd}`
+      );
     }
   });
 }
@@ -346,6 +348,7 @@ async function DoorCollect() {
     try {
       const payload = JSON.parse(message.toString());
       reqData = payload.DATA || {};
+      console.log(`[reqData]: ${reqData}`)
 
       const reqDoorState = reqData.door_state;
 
@@ -380,8 +383,8 @@ async function DoorCollect() {
       }));
 
       const errorPayload = makeAckPayload({
-        reqDeviceIdx: reqData.device_idx || config.deviceIdx,
-        reqDivisionIdx: reqData.division_idx || config.divisionIdx,
+        reqDeviceIdx: config.deviceIdx,
+        reqDivisionIdx: config.divisionIdx,
         reqStorageType: reqData.storage_type,
         reqHasLoadCell: reqData.has_loadcell,
         doorState: reqData.door_state || "UNKNOWN",
