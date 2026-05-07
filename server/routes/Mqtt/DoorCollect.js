@@ -17,18 +17,18 @@ const { ProductUpload } = require("../../model/ProductUpload");
 const {
   startProductCapture,
   stopProductCapture,
-} = require("../../Services/ProductCaptureService");
+} = require("../Services/ProductCaptureService");
 const {
   uploadProductImages,
   uploadProductVideos,
-} = require("../../Services/ProductMinioService");
+} = require("../Services/ProductMinioService");
 const {
   syncDivisionProductMetadata,
   updateProductUploadFolder,
   makeFolderTimestamp,
-} = require("../../Services/ProductMongoSyncService");
-const { syncAnnotationLabels } = require("../../Services/AnnotationLabelSyncService");
-const { notifyTrainingStoreMany } = require("../../Services/AiTrainingNotifyService");
+} = require("../Services/ProductMongoSyncService");
+const { syncAnnotationLabels } = require("../Services/AnnotationLabelSyncService");
+const { notifyTrainingStoreMany } = require("../Services/AiTrainingNotifyService");
 
 let mongoConnectPromise = null;
 let activeCollectionSession = null;
