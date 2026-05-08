@@ -333,7 +333,7 @@ async function init() {
                     preAuthNum = response.data.authorization_number;
                     preAuthDate = response.data.authorization_date;
                     samsungpayToken = response.data.vankey;
-                    preAmount = response.data.amount;
+                    preAmount = '5';
                     CardMethod = 'S'
                     console.log('[Samsungpay-Token] Token received:', samsungpayToken);
                     startProcess(samsungpayToken, CardMethod); 
