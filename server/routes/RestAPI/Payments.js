@@ -559,7 +559,6 @@ async function Payments(token, CardMethod) {
         console.log("[Model] Inference Result:", inferenceResult);
         console.log('card method', CardMethod)
         // stopPolling = true;
-
         if (inferenceResult.success == false || inferenceResult.status == 'error'){
           console.error("[PAYMENT] Model inference failed or error occurred. Process aborted.");
           return;
@@ -627,7 +626,8 @@ async function Payments(token, CardMethod) {
           console.log('inferenceResult not found')
         }
     } catch (error) {
-        console.error("[Model] Inference Request Failed:", error.message);
+        console.error("[MODEL/PAYMENT] Inference Request Failed:", error.message);
+        return;
     } 
     // finally {
     //     isProcessing = false;
