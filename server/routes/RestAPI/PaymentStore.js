@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 
-const dummyImg = path.join(__dirname, "../../log/dummy.jpg");
+const dummyImg = path.join(__dirname, "../../log/dummyTestImg.png");
 
 async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt, CardMethod) {
     console.log("[PNT] Preparing IF_08 data transfer...");
