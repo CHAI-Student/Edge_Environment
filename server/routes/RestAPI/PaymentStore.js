@@ -93,10 +93,10 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         // 3) FormData 구성 (payload + paymentFile)
         const form = new FormData();
         form.append("payload", JSON.stringify(payload));
-        form.append("paymentFile", fs.createReadStream(fullPath), {
+        form.append("paymentFile", fs.createReadStream(dummyImg), {
             filename: fileName,
             // contentType: "video/mp4",
-            contentType: "image/jpeg",
+            contentType: "image/png",
         });
 
         const token = config.jwtToken
