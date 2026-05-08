@@ -325,6 +325,7 @@ async function init() {
             axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {
                 amount: "5",
                 authorization_type: "PRE_AUTH", // 후결제: PURCHASE
+                items: null,
                 // display_message: "SamsungPay Payment"
             }).then((response) => {
                 console.log('Samsung Pay Approval Response:', response.data);
