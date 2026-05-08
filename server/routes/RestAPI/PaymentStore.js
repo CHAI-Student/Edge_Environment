@@ -23,7 +23,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         // const stat = fs.statSync(fullPath);
 
         // 더미 이미지로 전송
-        if (!fs.existsSync(dummyImgPath)) {
+        if (!fs.existsSync(dummyImg)) {
             throw new Error(`[PNT] Dummy image not found: ${dummyImg}`);
         }
 
