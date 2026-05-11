@@ -221,7 +221,7 @@ async function DoorCollect() {
       if (err) {
         console.error("[DoorCollect] Subscribe Error:", err.message);
 
-        await publishDoorAck({
+        publishDoorAck({
           client,
           topic: pubTopic,
           ifSysId: uuidv4(),
