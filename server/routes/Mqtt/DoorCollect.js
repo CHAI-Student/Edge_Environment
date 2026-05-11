@@ -106,6 +106,56 @@ async function getHealthStatus(hasLoadcell) {
   };
 }
 
+// function publishDoorAck({
+//   client,
+//   topic,
+//   ifSysId,
+//   deviceIdx,
+//   divisionIdx,
+//   doorState,
+//   storageType,
+//   hasLoadcell,
+//   cameraStatus,
+//   deadboltStatus,
+//   loadcellStatus,
+//   resultCd,
+//   resultMsg,
+// }) {
+//   const ackPayload = JSON.stringify({
+//     HEADER: {
+//       IF_ID: "IF_04",
+//       IF_SYSID: ifSysId || uuidv4(),
+//       IF_HOST: "CRKPNTCCHAI",
+//       IF_DATE: makeIFDate(),
+//     },
+//     DATA: {
+//       device_idx: deviceIdx,
+//       division_idx: divisionIdx,
+//       door_state: doorState,
+//       storage_type: storageType,
+//       has_loadcell: hasLoadcell,
+//       camera_status: cameraStatus,
+//       deadbolt_status: deadboltStatus,
+//       loadcell_status: loadcellStatus,
+//       result_cd: resultCd,
+//       result_msg: resultMsg,
+//     },
+//   });
+
+//   console.log("[DoorCollect] PUB Topic:", topic);
+//   console.log("[DoorCollect] PUB Payload:", ackPayload);
+
+//   client.publish(topic, ackPayload, { qos: 1, retain: false }, (e) => {
+//     if (e) {
+//       console.error("[DoorCollect] Publish Error:", e.message);
+//     } else {
+//       console.log(
+//         `[DoorCollect] ACK Sent. Result=${resultCd}, State=${doorState}`
+//       );
+//     }
+//   });
+// }
+
 function publishDoorAck({
   client,
   topic,
@@ -144,15 +194,19 @@ function publishDoorAck({
 
   console.log("[DoorCollect] PUB Topic:", topic);
   console.log("[DoorCollect] PUB Payload:", ackPayload);
+  console.log("[DoorCollect] MQTT connected:", client.connected);
 
-  client.publish(topic, ackPayload, { qos: 1, retain: false }, (e) => {
-    if (e) {
-      console.error("[DoorCollect] Publish Error:", e.message);
-    } else {
-      console.log(
-        `[DoorCollect] ACK Sent. Result=${resultCd}, State=${doorState}`
-      );
-    }
+  return new Promise((resolve, reject) => {
+    client.publish(topic, ackPayload, { qos: 1, retain: false }, (e) => {
+      if (e) {
+        console.error("[DoorCollect] Publish Error:", e.message);
+        reject(e);
+        return;
+      }
+
+      console.log(`[DoorCollect] ACK Sent. Result=${resultCd}, State=${doorState}`);
+      resolve();
+    });
   });
 }
 
@@ -167,7 +221,7 @@ async function DoorCollect() {
       if (err) {
         console.error("[DoorCollect] Subscribe Error:", err.message);
 
-        publishDoorAck({
+        await publishDoorAck({
           client,
           topic: pubTopic,
           ifSysId: uuidv4(),
@@ -228,7 +282,7 @@ async function DoorCollect() {
           ? "status access"
           : `door=${finalState}, camera=${health.camera_status}, deadbolt=${health.deadbolt_status}, loadcell=${health.loadcell_status}`;
 
-      publishDoorAck({
+      await publishDoorAck({
         client,
         topic: pubTopic,
         ifSysId,
@@ -252,7 +306,7 @@ async function DoorCollect() {
         loadcell_status: "0",
       }));
 
-      publishDoorAck({
+      await publishDoorAck({
         client,
         topic: pubTopic,
         ifSysId,

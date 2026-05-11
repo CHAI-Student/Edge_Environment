@@ -51,18 +51,18 @@ async function fileExists(p) {
   try { await fs.stat(p); return true; } catch { return false; }
 }
 
-function startServer() {
-  console.log("[TEST] starting server:", SERVER_ENTRY);
-  const p = spawn(process.execPath, [SERVER_ENTRY], {
-    env: { ...process.env, NODE_ENV: "development" },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+// function startServer() {
+//   console.log("[TEST] starting server:", SERVER_ENTRY);
+//   const p = spawn(process.execPath, [SERVER_ENTRY], {
+//     env: { ...process.env, NODE_ENV: "development" },
+//     stdio: ["ignore", "pipe", "pipe"],
+//   });
 
-  p.stdout.on("data", (d) => process.stdout.write(`[srv] ${d}`));
-  p.stderr.on("data", (d) => process.stderr.write(`[srv-err] ${d}`));
+//   p.stdout.on("data", (d) => process.stdout.write(`[srv] ${d}`));
+//   p.stderr.on("data", (d) => process.stderr.write(`[srv-err] ${d}`));
 
-  return p;
-}
+//   return p;
+// }
 
 async function stopServer(proc) {
   if (!proc) return;
@@ -186,4 +186,7 @@ async function waitForAck(mqttClient, timeoutMs = 10000) {
 
   console.log("\n[TEST] E2E reboot flow PASS");
   process.exit(0);
+})().catch((e) => {
+  console.error("[TEST] failed:", e);
+  process.exit(1);
 });
