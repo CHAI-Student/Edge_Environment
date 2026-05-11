@@ -157,12 +157,64 @@ async function getHealthStatus(hasLoadcell) {
 //   });
 // }
 
+// function publishDoorAck({
+//   client,
+//   topic,
+//   ifSysId,
+//   deviceIdx,
+//   divisionIdx,
+//   doorState,
+//   storageType,
+//   hasLoadcell,
+//   cameraStatus,
+//   deadboltStatus,
+//   loadcellStatus,
+//   resultCd,
+//   resultMsg,
+// }) {
+//   const ackPayload = JSON.stringify({
+//     HEADER: {
+//       IF_ID: "IF_04",
+//       IF_SYSID: ifSysId || uuidv4(),
+//       IF_HOST: "CRKPNTCCHAI",
+//       IF_DATE: makeIFDate(),
+//     },
+//     DATA: {
+//       device_idx: deviceIdx,
+//       division_idx: divisionIdx,
+//       door_state: doorState,
+//       storage_type: storageType,
+//       has_loadcell: hasLoadcell,
+//       camera_status: cameraStatus,
+//       deadbolt_status: deadboltStatus,
+//       loadcell_status: loadcellStatus,
+//       result_cd: resultCd,
+//       result_msg: resultMsg,
+//     },
+//   });
+
+//   console.log("[DoorCollect] SUB Topic:", topic);
+//   console.log("[DoorCollect] SUB Payload:", ackPayload);
+//   console.log("[DoorCollect] MQTT connected:", client.connected);
+  
+
+//   return new Promise((resolve, reject) => {
+//     client.publish(topic, ackPayload, { qos: 1, retain: false }, (e) => {
+//       if (e) {
+//         console.error("[DoorCollect] Publish Error:", e.message);
+//         reject(e);
+//         return;
+//       }
+
+//       console.log(`[DoorCollect] ACK Sent. Result=${resultCd}, State=${doorState}`);
+//       resolve();
+//     });
+//   });
+// }
+
 function publishDoorAck({
   client,
   topic,
-  ifSysId,
-  deviceIdx,
-  divisionIdx,
   doorState,
   storageType,
   hasLoadcell,
@@ -172,16 +224,18 @@ function publishDoorAck({
   resultCd,
   resultMsg,
 }) {
-  const ackPayload = JSON.stringify({
+  const timestamp = makeIFDate();
+
+  const responsePayload = {
     HEADER: {
       IF_ID: "IF_04",
-      IF_SYSID: ifSysId || uuidv4(),
+      IF_SYSID: uuidv4(),
       IF_HOST: "CRKPNTCCHAI",
-      IF_DATE: makeIFDate(),
+      IF_DATE: timestamp,
     },
     DATA: {
-      device_idx: deviceIdx,
-      division_idx: divisionIdx,
+      division_idx: config.divisionIdx,
+      device_idx: config.deviceIdx,
       door_state: doorState,
       storage_type: storageType,
       has_loadcell: hasLoadcell,
@@ -191,24 +245,18 @@ function publishDoorAck({
       result_cd: resultCd,
       result_msg: resultMsg,
     },
-  });
+  };
 
-  console.log("[DoorCollect] SUB Topic:", topic);
-  console.log("[DoorCollect] SUB Payload:", ackPayload);
-  console.log("[DoorCollect] MQTT connected:", client.connected);
-  
+  console.log("[DoorCollect] PUB Topic:", topic);
+  console.log("[DoorCollect] PUB Payload:", responsePayload);
 
-  return new Promise((resolve, reject) => {
-    client.publish(topic, ackPayload, { qos: 1, retain: false }, (e) => {
-      if (e) {
-        console.error("[DoorCollect] Publish Error:", e.message);
-        reject(e);
-        return;
-      }
+  client.publish(topic, JSON.stringify(responsePayload), { qos: 1, retain: false }, (e) => {
+    if (e) {
+      console.error("[DoorCollect] Publish Error:", e.message);
+      return;
+    }
 
-      console.log(`[DoorCollect] ACK Sent. Result=${resultCd}, State=${doorState}`);
-      resolve();
-    });
+    console.log(`[DoorCollect] ACK Sent. Result=${resultCd}, State=${doorState}`);
   });
 }
 
@@ -316,11 +364,13 @@ async function DoorCollect() {
         (health.loadcell_status === "1" || health.loadcell_status === "9");
 
       const resultCd = isDoorOk && isHealthOk ? "S" : "F";
-      const resultMsg =
-        resultCd === "S"
-          ? "status access"
-          : `door=${finalState}, camera=${health.camera_status}, deadbolt=${health.deadbolt_status}, loadcell=${health.loadcell_status}`;
+      // const resultMsg =
+      //   resultCd === "S"
+      //     ? "status access"
+      //     : `door=${finalState}, camera=${health.camera_status}, deadbolt=${health.deadbolt_status}, loadcell=${health.loadcell_status}`;
 
+      const resultMsg = resultCd === "S" ? "status access" : "status error";
+      
       await publishDoorAck({
         client,
         topic: pubTopic,
