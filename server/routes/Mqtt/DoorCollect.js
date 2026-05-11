@@ -215,6 +215,7 @@ async function getHealthStatus(hasLoadcell) {
 function publishDoorAck({
   client,
   topic,
+  ifSysId,
   doorState,
   storageType,
   hasLoadcell,
@@ -339,6 +340,7 @@ async function DoorCollect() {
 
     try {
       const payload = JSON.parse(message.toString());
+      console.log('[Request] payload.DATA', payload.DATA)
       ifSysId = payload.HEADER?.IF_SYSID || uuidv4();
       reqData = payload.DATA || {};
 
@@ -370,7 +372,7 @@ async function DoorCollect() {
       //     : `door=${finalState}, camera=${health.camera_status}, deadbolt=${health.deadbolt_status}, loadcell=${health.loadcell_status}`;
 
       const resultMsg = resultCd === "S" ? "status access" : "status error";
-      
+
       await publishDoorAck({
         client,
         topic: pubTopic,
