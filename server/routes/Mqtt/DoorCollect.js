@@ -195,6 +195,7 @@ function publishDoorAck({
   console.log("[DoorCollect] PUB Topic:", topic);
   console.log("[DoorCollect] PUB Payload:", ackPayload);
   console.log("[DoorCollect] MQTT connected:", client.connected);
+  
 
   return new Promise((resolve, reject) => {
     client.publish(topic, ackPayload, { qos: 1, retain: false }, (e) => {
@@ -216,8 +217,37 @@ async function DoorCollect() {
 
   const client = getClient();
 
-  client.on("connect", () => {
-    client.subscribe(subTopic, { qos: 1 }, (err) => {
+  // client.on("connect", () => {
+  //   client.subscribe(subTopic, { qos: 1 }, (err) => {
+  //     if (err) {
+  //       console.error("[DoorCollect] Subscribe Error:", err.message);
+
+  //       publishDoorAck({
+  //         client,
+  //         topic: pubTopic,
+  //         ifSysId: uuidv4(),
+  //         deviceIdx: config.deviceIdx,
+  //         divisionIdx: config.divisionIdx,
+  //         doorState: "UNKNOWN",
+  //         storageType: null,
+  //         hasLoadcell: null,
+  //         cameraStatus: "0",
+  //         deadboltStatus: "0",
+  //         loadcellStatus: "0",
+  //         resultCd: "F",
+  //         resultMsg: `Subscribe Error: ${err.message}`,
+  //       });
+
+  //       return;
+  //     }
+
+  //     console.log(`[DoorCollect] Subscribed: ${subTopic}`);
+  //   });
+  // });
+  const onReady = () => {
+    console.log("[DoorCollect] MQTT Ready. connected=", client.connected);
+
+    client.subscribe(subTopic, { qos: 1 }, (err, granted) => {
       if (err) {
         console.error("[DoorCollect] Subscribe Error:", err.message);
 
@@ -240,9 +270,16 @@ async function DoorCollect() {
         return;
       }
 
+      console.log("[DoorCollect] Subscribe granted:", granted);
       console.log(`[DoorCollect] Subscribed: ${subTopic}`);
     });
-  });
+  };
+
+  if (client.connected) {
+    onReady();
+  } else {
+    client.once("connect", onReady);
+  }
 
   client.on("message", async (topic, message) => {
     if (topic !== subTopic) return;
