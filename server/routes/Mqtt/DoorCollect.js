@@ -102,7 +102,8 @@ async function getHealthStatus(hasLoadcell) {
   return {
     camera_status: cameraRaw === "09" ? "1" : "0",
     deadbolt_status: deadboltRaw === "19" ? "1" : "0",
-    loadcell_status: useLoadcell ? (loadcellRaw === "29" ? "1" : "0") : "9",
+    // loadcell_status: useLoadcell ? (loadcellRaw === "29" ? "1" : "0") : "9",
+    loadcell_status: loadcellRaw === "29" ? "1" : "0",
   };
 }
 
@@ -192,8 +193,8 @@ function publishDoorAck({
     },
   });
 
-  console.log("[DoorCollect] PUB Topic:", topic);
-  console.log("[DoorCollect] PUB Payload:", ackPayload);
+  console.log("[DoorCollect] SUB Topic:", topic);
+  console.log("[DoorCollect] SUB Payload:", ackPayload);
   console.log("[DoorCollect] MQTT connected:", client.connected);
   
 
@@ -266,12 +267,13 @@ async function DoorCollect() {
           resultCd: "F",
           resultMsg: `Subscribe Error: ${err.message}`,
         });
-
         return;
       }
 
       console.log("[DoorCollect] Subscribe granted:", granted);
-      console.log(`[DoorCollect] Subscribed: ${subTopic}`);
+      console.log("[DoorCollect] SUB Topic:", topic);
+      console.log("[DoorCollect] SUB Payload:", ackPayload);
+      console.log(`[DoorCollect] PUB: ${subTopic}`);
     });
   };
 
@@ -323,8 +325,8 @@ async function DoorCollect() {
         client,
         topic: pubTopic,
         ifSysId,
-        deviceIdx,
-        divisionIdx,
+        deviceIdx: config.deviceIdx,
+        divisionIdx: config.divisionIdx,
         doorState: finalState,
         storageType,
         hasLoadcell,

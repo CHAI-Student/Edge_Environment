@@ -1,5 +1,5 @@
 const FormData = require('form-data');
-const config = require("../../config/key");
+const config = require("../../config/dev");
 const { v4: uuidv4 } = require("uuid");
 const fs = require("fs");
 const path = require("path");
@@ -56,7 +56,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         const external = axios.create({
           baseURL: config.restApi, // https://apichaidev.atcrk.co.kr/api/v1
           timeout: 10000,
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "multipart/form-data" },
         });
 
         const timestamp = Date.now();
@@ -96,7 +96,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         form.append("paymentFile", fs.createReadStream(dummyImg), {
             filename: fileName,
             // contentType: "video/mp4",
-            contentType: "image/png",
+            contentType: "multipart/form-data",
         });
 
         const token = config.jwtToken
