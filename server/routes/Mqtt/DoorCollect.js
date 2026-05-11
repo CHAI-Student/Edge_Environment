@@ -294,43 +294,43 @@ async function DoorCollect() {
   //     console.log(`[DoorCollect] Subscribed: ${subTopic}`);
   //   });
   // });
-  const onReady = () => {
-    console.log("[DoorCollect] MQTT Ready. connected=", client.connected);
+  // const onReady = () => {
+  //   console.log("[DoorCollect] MQTT Ready. connected=", client.connected);
 
-    client.subscribe(subTopic, { qos: 1 }, (err, granted) => {
-      if (err) {
-        console.error("[DoorCollect] Subscribe Error:", err.message);
+  //   client.subscribe(subTopic, { qos: 1 }, (err, granted) => {
+  //     if (err) {
+  //       console.error("[DoorCollect] Subscribe Error:", err.message);
 
-        publishDoorAck({
-          client,
-          topic: pubTopic,
-          ifSysId: uuidv4(),
-          deviceIdx: config.deviceIdx,
-          divisionIdx: config.divisionIdx,
-          doorState: "UNKNOWN",
-          storageType: null,
-          hasLoadcell: null,
-          cameraStatus: "0",
-          deadboltStatus: "0",
-          loadcellStatus: "0",
-          resultCd: "F",
-          resultMsg: `Subscribe Error: ${err.message}`,
-        });
-        return;
-      }
+  //       publishDoorAck({
+  //         client,
+  //         topic: pubTopic,
+  //         ifSysId: uuidv4(),
+  //         deviceIdx: config.deviceIdx,
+  //         divisionIdx: config.divisionIdx,
+  //         doorState: "UNKNOWN",
+  //         storageType: null,
+  //         hasLoadcell: null,
+  //         cameraStatus: "0",
+  //         deadboltStatus: "0",
+  //         loadcellStatus: "0",
+  //         resultCd: "F",
+  //         resultMsg: `Subscribe Error: ${err.message}`,
+  //       });
+  //       return;
+  //     }
 
-      console.log("[DoorCollect] Subscribe granted:", granted);
-      console.log("[DoorCollect] SUB Topic:", topic);
-      console.log("[DoorCollect] SUB Payload:", ackPayload);
-      console.log(`[DoorCollect] PUB: ${subTopic}`);
-    });
-  };
+  //     console.log("[DoorCollect] Subscribe granted:", granted);
+  //     console.log("[DoorCollect] SUB Topic:", topic);
+  //     console.log("[DoorCollect] SUB Payload:", ackPayload);
+  //     console.log(`[DoorCollect] PUB: ${subTopic}`);
+  //   });
+  // };
 
-  if (client.connected) {
-    onReady();
-  } else {
-    client.once("connect", onReady);
-  }
+  // if (client.connected) {
+  //   onReady();
+  // } else {
+  //   client.once("connect", onReady);
+  // }
 
   client.on("message", async (topic, message) => {
     if (topic !== subTopic) return;
@@ -340,7 +340,7 @@ async function DoorCollect() {
 
     try {
       const payload = JSON.parse(message.toString());
-      console.log('[Request] payload.DATA', payload.DATA)
+      console.log('[Request] payload.DATA', payload.HEADER)
       ifSysId = payload.HEADER?.IF_SYSID || uuidv4();
       reqData = payload.DATA || {};
 
