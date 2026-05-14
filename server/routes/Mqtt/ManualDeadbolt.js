@@ -79,7 +79,7 @@ async function ManualDeadbolt() {
       resultCd = "F"; 
       resultMsg = "API Error: " + err.message;
       // 실패 시 요청의 반대 상태(또는 기존 상태 유지)로 가정
-      finalState = targetState === "UNLOCK" ? "LOCKED" : "UNLOCK"; 
+      finalState = targetState === "UNLOCK" ? "CLOSE" : "OPEN"; 
     }
 
     // ---------------------------------------------------------
