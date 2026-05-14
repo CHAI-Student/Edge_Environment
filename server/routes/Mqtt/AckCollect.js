@@ -22,11 +22,11 @@ const { ProductUpload } = require("../../model/ProductUpload");
 const { syncAnnotationLabels } = require("../Services/AnnotationLabelSyncService");
 const aiNotifyService = require("../Services/AiTrainingNotifyService");
 
-const BROKER_URL = `${config.mqttURL}`;
-const DEVICE_IDX = `${config.deviceIdx}`;
+// const BROKER_URL = `${config.mqttURL}`;
+// const DEVICE_IDX = `${config.deviceIdx}`;
 
-const CMD_TOPIC = `chai/device/${DEVICE_IDX}/cmd/collect`;
-const ACK_TOPIC = `chai/device/${DEVICE_IDX}/ack/collect`;
+const SUB_TOPIC = `chai/device/${DEVICE_IDX}/cmd/collect`;
+const PUB_TOPIC = `chai/device/${DEVICE_IDX}/ack/collect`;
 
 let client = null;
 let chain = Promise.resolve();
@@ -86,7 +86,7 @@ function publishAck(payload) {
     return;
   }
 
-  client.publish(ACK_TOPIC, JSON.stringify(payload), (err) => {
+  client.publish(SUB_TOPIC, JSON.stringify(payload), (err) => {
     if (err) {
       console.error("[AckCollect] ACK publish failed:", err);
     }
@@ -966,25 +966,14 @@ async function handleCollectMessage(message) {
 // }
 
 async function AckCollect() {
-  if (client) return;
 
-  console.log("[AckCollect] BROKER_URL:", BROKER_URL);
-  console.log("[AckCollect] CMD_TOPIC:", CMD_TOPIC);
-  console.log("[AckCollect] ACK_TOPIC:", ACK_TOPIC);
-
-  client = mqtt.connect(BROKER_URL);
+  const client = getClient();
+  // console.log("[AckCollect] BROKER_URL:", BROKER_URL);
+  // console.log("[AckCollect] CMD_TOPIC:", CMD_TOPIC);
+  // console.log("[AckCollect] ACK_TOPIC:", ACK_TOPIC);
 
   client.on("connect", () => {
-    console.log("[AckCollect] MQTT connected");
-
-    client.subscribe(CMD_TOPIC, { qos: 1 }, (err, granted) => {
-      if (err) {
-        console.error("[AckCollect] subscribe failed:", err.message);
-        return;
-      }
-
-      console.log("[AckCollect] subscribed:", granted);
-    });
+    client.subscribe(SUB_TOPIC);
   });
 
   client.on("message", (topic, message) => {
