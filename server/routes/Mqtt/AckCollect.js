@@ -22,11 +22,8 @@ const { ProductUpload } = require("../../model/ProductUpload");
 const { syncAnnotationLabels } = require("../Services/AnnotationLabelSyncService");
 const aiNotifyService = require("../Services/AiTrainingNotifyService");
 
-// const BROKER_URL = `${config.mqttURL}`;
-// const DEVICE_IDX = `${config.deviceIdx}`;
-
-const SUB_TOPIC = `chai/device/${DEVICE_IDX}/cmd/collect`;
-const PUB_TOPIC = `chai/device/${DEVICE_IDX}/ack/collect`;
+const SUB_TOPIC = `chai/device/${config.deviceIdx}/cmd/collect`;
+const PUB_TOPIC = `chai/device/${config.deviceIdx}/ack/collect`;
 
 let client = null;
 let chain = Promise.resolve();
