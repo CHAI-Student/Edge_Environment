@@ -96,7 +96,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         form.append("paymentFile", fs.createReadStream(dummyImg), {
             filename: fileName,
             // contentType: "video/mp4",
-            contentType: "multipart/form-data",
+            contentType: "image/png",
         });
 
         const token = config.jwtToken

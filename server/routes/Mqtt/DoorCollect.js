@@ -267,6 +267,16 @@ async function DoorCollect() {
 
   const client = getClient();
 
+  client.subscribe(subTopic, { qos: 1 }, (err, granted) => {
+    if (err) {
+      console.error("[DoorCollect] Subscribe Error:", err.message);
+      return;
+    }
+
+    console.log("[DoorCollect] Subscribe granted:", granted);
+    console.log(`[DoorCollect] Subscribed: ${subTopic}`);
+  });
+
   // client.on("connect", () => {
   //   client.subscribe(subTopic, { qos: 1 }, (err) => {
   //     if (err) {

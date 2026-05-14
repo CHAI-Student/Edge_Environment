@@ -8,6 +8,7 @@ module.exports = {
     minioBucket: 'chaiimage',
     // MQTT 브로커 접속
     mqttURL: 'mqtt://chaidev.atcrk.co.kr:1883',
+    // 브로커 계정 정보는 고유해야함
     mqttID: 'pnt',
     mqttPW: 'chai',
     // 매장 고유번호
