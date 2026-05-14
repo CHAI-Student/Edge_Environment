@@ -458,10 +458,85 @@ async function notifyAiTrainingStore(product) {
   );
 }
 
+// async function handleStartCollect(reqData) {
+//   const {
+//     device_idx,
+//     division_idx,
+//     product_idx,
+//     collect_state,
+//     product_eng_name,
+//     product_name,
+//     category_idx,
+//     is_new,
+//     has_loadcell,
+//   } = reqData;
+
+//   if (String(config.deviceIdx) !== String(device_idx)) return;
+//   if (String(config.divisionIdx) !== String(division_idx)) return;
+
+//   const healthBefore = await ProductCollectionHealth();
+
+//   const currentDoorState = healthBefore.CurrentDoorState;
+
+//   if (currentDoorState === "CLOSE") {
+//     await callApiToControlDeadbolt("OPEN");
+//   }
+
+//   const timestamp = makeTimestampFolderName();
+//   const productFolder = path.join(
+//     process.cwd(),
+//     "productImg",
+//     `${safe(product_idx)}_${safe(product_eng_name)}_${timestamp}`
+//   );
+
+//   const sessionKey = makeSessionKey(product_idx);
+
+//   collectSessions.set(sessionKey, {
+//     timestamp,
+//     productFolder,
+//     productIdx: product_idx,
+//     productEngName: product_eng_name,
+//     productName: product_name,
+//     categoryIdx: category_idx,
+//     isNew: is_new,
+//     hasLoadcell: has_loadcell,
+//     startedAt: new Date(),
+//   });
+
+//   await cameraStartSampling(productFolder, [0, 2]);
+
+//   const useLoadcell =
+//     has_loadcell === true ||
+//     has_loadcell === "1" ||
+//     has_loadcell === 1 ||
+//     has_loadcell === "Y";
+
+//   if (useLoadcell) {
+//     await startLoadcellRecording();
+//   }
+
+//   const health = await ProductCollectionHealth();
+
+//   publishAck(
+//     makeAckPayload({
+//       collectState: collect_state,
+//       productIdx: product_idx,
+//       productEngName: product_eng_name,
+//       categoryIdx: category_idx,
+//       isNew: is_new,
+//       resultCd: health.isSuccess ? "S" : "F",
+//       resultMsg: health.resultMsg,
+//       health,
+//       extraData: {
+//         collection_timestamp: timestamp,
+//         local_path: productFolder,
+//       },
+//     })
+//   );
+// }
+
 async function handleStartCollect(reqData) {
   const {
-    device_idx,
-    division_idx,
     product_idx,
     collect_state,
     product_eng_name,
@@ -471,27 +546,23 @@ async function handleStartCollect(reqData) {
     has_loadcell,
   } = reqData;
 
-  if (String(config.deviceIdx) !== String(device_idx)) return;
-  if (String(config.divisionIdx) !== String(division_idx)) return;
+  console.log("[AckCollect] START collect:", product_idx);
 
   const healthBefore = await ProductCollectionHealth();
 
-  const currentDoorState = healthBefore.CurrentDoorState;
-
-  if (currentDoorState === "CLOSE") {
+  if (healthBefore.CurrentDoorState === "CLOSE") {
     await callApiToControlDeadbolt("OPEN");
   }
 
   const timestamp = makeTimestampFolderName();
+
   const productFolder = path.join(
     process.cwd(),
     "productImg",
     `${safe(product_idx)}_${safe(product_eng_name)}_${timestamp}`
   );
 
-  const sessionKey = makeSessionKey(product_idx);
-
-  collectSessions.set(sessionKey, {
+  collectSessions.set(String(product_idx), {
     timestamp,
     productFolder,
     productIdx: product_idx,
@@ -500,7 +571,6 @@ async function handleStartCollect(reqData) {
     categoryIdx: category_idx,
     isNew: is_new,
     hasLoadcell: has_loadcell,
-    startedAt: new Date(),
   });
 
   await cameraStartSampling(productFolder, [0, 2]);
@@ -549,10 +619,114 @@ async function waitUntilDoorClosed({ timeoutMs = 60000, intervalMs = 500 } = {})
   return false;
 }
 
+// async function handleEndCollect(reqData) {
+//   const {
+//     device_idx,
+//     division_idx,
+//     product_idx,
+//     collect_state,
+//     product_eng_name,
+//     product_name,
+//     category_idx,
+//     is_new,
+//     has_loadcell,
+//   } = reqData;
+
+//   if (String(config.deviceIdx) !== String(device_idx)) return;
+//   if (String(config.divisionIdx) !== String(division_idx)) return;
+
+//   const sessionKey = makeSessionKey(product_idx);
+//   const session = collectSessions.get(sessionKey);
+
+//   if (!session) {
+//     throw new Error(`No active collect session found for product_idx=${product_idx}`);
+//   }
+
+//   const closed = await waitUntilDoorClosed();
+
+//   if (!closed) {
+//     throw new Error("Door close timeout. Product collection cannot be finalized.");
+//   }
+
+//   await cameraStopSampling();
+
+//   const useLoadcell =
+//     session.hasLoadcell === true ||
+//     session.hasLoadcell === "1" ||
+//     session.hasLoadcell === 1 ||
+//     session.hasLoadcell === "Y" ||
+//     has_loadcell === true ||
+//     has_loadcell === "1" ||
+//     has_loadcell === 1 ||
+//     has_loadcell === "Y";
+
+//   if (useLoadcell) {
+//     await stopLoadcellRecording();
+//   }
+
+//   const uploadResult = await uploadFolderToMinio({
+//     localPath: session.productFolder,
+//     productIdx: product_idx,
+//     productEngName: product_eng_name || session.productEngName,
+//     timestamp: session.timestamp,
+//     deleteAfterUpload: true,
+//   });
+
+//   if (!uploadResult.success) {
+//     throw new Error(uploadResult.message || "MinIO upload failed");
+//   }
+
+//   const productDoc = await syncProductMetadata({
+//     productIdx: product_idx,
+//     productEngName: product_eng_name || session.productEngName,
+//     productName: product_name || session.productName,
+//     categoryIdx: category_idx || session.categoryIdx,
+//     isNew: is_new ?? session.isNew,
+//     foldername: uploadResult.foldername,
+//     folderpath: uploadResult.folderpath,
+//     filelength: uploadResult.filelength,
+//   });
+
+//   const annotationResult = await syncAnnotationLabels({
+//     productModel: ProductUpload,
+//     deleteMissing: false,
+//   });
+
+//   const notifyResult = await notifyAiTrainingStore({
+//     productIdx: product_idx,
+//     productEngName: product_eng_name || session.productEngName,
+//     trainingStatus: "2",
+//   });
+
+//   const health = await ProductCollectionHealth();
+
+//   publishAck(
+//     makeAckPayload({
+//       collectState: collect_state,
+//       productIdx: product_idx,
+//       productEngName: product_eng_name || session.productEngName,
+//       categoryIdx: category_idx || session.categoryIdx,
+//       isNew: is_new ?? session.isNew,
+//       resultCd: "S",
+//       resultMsg: "collection completed",
+//       health,
+//       extraData: {
+//         collection_timestamp: session.timestamp,
+//         foldername: uploadResult.foldername,
+//         folderpath: uploadResult.folderpath,
+//         filelength: uploadResult.filelength,
+//         train_product_idx: productDoc?.trainProductIdx,
+//         annotation: annotationResult,
+//         training_notify: notifyResult,
+//       },
+//     })
+//   );
+
+//   collectSessions.delete(sessionKey);
+// }
+
 async function handleEndCollect(reqData) {
   const {
-    device_idx,
-    division_idx,
     product_idx,
     collect_state,
     product_eng_name,
@@ -562,11 +736,9 @@ async function handleEndCollect(reqData) {
     has_loadcell,
   } = reqData;
 
-  if (String(config.deviceIdx) !== String(device_idx)) return;
-  if (String(config.divisionIdx) !== String(division_idx)) return;
+  console.log("[AckCollect] END collect:", product_idx);
 
-  const sessionKey = makeSessionKey(product_idx);
-  const session = collectSessions.get(sessionKey);
+  const session = collectSessions.get(String(product_idx));
 
   if (!session) {
     throw new Error(`No active collect session found for product_idx=${product_idx}`);
@@ -617,17 +789,6 @@ async function handleEndCollect(reqData) {
     filelength: uploadResult.filelength,
   });
 
-  const annotationResult = await syncAnnotationLabels({
-    productModel: ProductUpload,
-    deleteMissing: false,
-  });
-
-  const notifyResult = await notifyAiTrainingStore({
-    productIdx: product_idx,
-    productEngName: product_eng_name || session.productEngName,
-    trainingStatus: "2",
-  });
-
   const health = await ProductCollectionHealth();
 
   publishAck(
@@ -646,40 +807,59 @@ async function handleEndCollect(reqData) {
         folderpath: uploadResult.folderpath,
         filelength: uploadResult.filelength,
         train_product_idx: productDoc?.trainProductIdx,
-        annotation: annotationResult,
-        training_notify: notifyResult,
       },
     })
   );
 
-  collectSessions.delete(sessionKey);
+  collectSessions.delete(String(product_idx));
 }
 
 async function handleCollectMessage(message) {
-  let reqPayload = {};
   let reqData = {};
 
   try {
-    reqPayload = JSON.parse(message.toString());
+    const reqPayload = JSON.parse(message.toString());
     reqData = reqPayload.DATA || {};
 
-    const collectState = reqData.collect_state;
+    const {
+      device_idx,
+      division_idx,
+      product_idx,
+      collect_state,
+      product_eng_name,
+    } = reqData;
 
-    console.log(`[AckCollect] Request Received: ${collectState}`);
+    console.log("[AckCollect] Request DATA:", reqData);
 
-    if (collectState === "START") {
+    if (String(config.deviceIdx) !== String(device_idx)) {
+      console.warn("[AckCollect] device_idx mismatch:", {
+        configDeviceIdx: config.deviceIdx,
+        requestDeviceIdx: device_idx,
+      });
+      return;
+    }
+
+    if (String(config.divisionIdx) !== String(division_idx)) {
+      console.warn("[AckCollect] division_idx mismatch:", {
+        configDivisionIdx: config.divisionIdx,
+        requestDivisionIdx: division_idx,
+      });
+      return;
+    }
+
+    if (collect_state === "START") {
       await handleStartCollect(reqData);
       return;
     }
 
-    if (collectState === "END") {
+    if (collect_state === "END") {
       await handleEndCollect(reqData);
       return;
     }
 
-    throw new Error(`Unsupported collect_state: ${collectState}`);
+    throw new Error(`Unsupported collect_state: ${collect_state}`);
   } catch (error) {
-    console.error("[AckCollect] Processing Error:", error);
+    console.error("[AckCollect] Processing Error:", error.message);
 
     const health = await ProductCollectionHealth().catch(() => ({}));
 
@@ -691,39 +871,125 @@ async function handleCollectMessage(message) {
         categoryIdx: reqData.category_idx,
         isNew: reqData.is_new,
         resultCd: "F",
-        resultMsg: error?.message || String(error),
+        resultMsg: error.message,
         health,
       })
     );
   }
 }
 
+// async function handleCollectMessage(message) {
+//   let reqPayload = {};
+//   let reqData = {};
+
+//   try {
+//     reqPayload = JSON.parse(message.toString());
+//     reqData = reqPayload.DATA || {};
+
+//     const collectState = reqData.collect_state;
+
+//     console.log(`[AckCollect] Request Received: ${collectState}`);
+
+//     if (collectState === "START") {
+//       await handleStartCollect(reqData);
+//       return;
+//     }
+
+//     if (collectState === "END") {
+//       await handleEndCollect(reqData);
+//       return;
+//     }
+
+//     throw new Error(`Unsupported collect_state: ${collectState}`);
+//   } catch (error) {
+//     console.error("[AckCollect] Processing Error:", error);
+
+//     const health = await ProductCollectionHealth().catch(() => ({}));
+
+//     publishAck(
+//       makeAckPayload({
+//         collectState: reqData.collect_state || "UNKNOWN",
+//         productIdx: reqData.product_idx,
+//         productEngName: reqData.product_eng_name,
+//         categoryIdx: reqData.category_idx,
+//         isNew: reqData.is_new,
+//         resultCd: "F",
+//         resultMsg: error?.message || String(error),
+//         health,
+//       })
+//     );
+//   }
+// }
+
+// async function AckCollect() {
+//   if (client) return;
+
+//   client = mqtt.connect(BROKER_URL);
+
+//   client.on("connect", () => {
+//     client.subscribe(CMD_TOPIC, (err) => {
+//       if (err) {
+//         console.error("[AckCollect] MQTT subscribe failed:", err);
+
+//         publishAck(
+//           makeAckPayload({
+//             collectState: "SUBSCRIBE",
+//             resultCd: "F",
+//             resultMsg: `MQTT subscribe failed: ${err.message}`,
+//           })
+//         );
+
+//         return;
+//       }
+
+//       console.log(`[AckCollect] subscribed: ${CMD_TOPIC}`);
+//     });
+//   });
+
+//   client.on("message", (topic, message) => {
+//     if (topic !== CMD_TOPIC) return;
+
+//     chain = chain
+//       .then(() => handleCollectMessage(message))
+//       .catch((err) => {
+//         console.error("[AckCollect] chain error:", err);
+//       });
+//   });
+
+//   client.on("error", (err) => {
+//     console.error("[AckCollect] MQTT client error:", err);
+//   });
+
+//   client.on("close", () => {
+//     console.warn("[AckCollect] MQTT client closed");
+//   });
+// }
+
 async function AckCollect() {
   if (client) return;
+
+  console.log("[AckCollect] BROKER_URL:", BROKER_URL);
+  console.log("[AckCollect] CMD_TOPIC:", CMD_TOPIC);
+  console.log("[AckCollect] ACK_TOPIC:", ACK_TOPIC);
 
   client = mqtt.connect(BROKER_URL);
 
   client.on("connect", () => {
-    client.subscribe(CMD_TOPIC, (err) => {
+    console.log("[AckCollect] MQTT connected");
+
+    client.subscribe(CMD_TOPIC, { qos: 1 }, (err, granted) => {
       if (err) {
-        console.error("[AckCollect] MQTT subscribe failed:", err);
-
-        publishAck(
-          makeAckPayload({
-            collectState: "SUBSCRIBE",
-            resultCd: "F",
-            resultMsg: `MQTT subscribe failed: ${err.message}`,
-          })
-        );
-
+        console.error("[AckCollect] subscribe failed:", err.message);
         return;
       }
 
-      console.log(`[AckCollect] subscribed: ${CMD_TOPIC}`);
+      console.log("[AckCollect] subscribed:", granted);
     });
   });
 
   client.on("message", (topic, message) => {
+    console.log("[AckCollect] message received topic:", topic);
+
     if (topic !== CMD_TOPIC) return;
 
     chain = chain
@@ -734,11 +1000,11 @@ async function AckCollect() {
   });
 
   client.on("error", (err) => {
-    console.error("[AckCollect] MQTT client error:", err);
+    console.error("[AckCollect] MQTT error:", err.message);
   });
 
   client.on("close", () => {
-    console.warn("[AckCollect] MQTT client closed");
+    console.warn("[AckCollect] MQTT closed");
   });
 }
 

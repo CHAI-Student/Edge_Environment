@@ -7,6 +7,7 @@ const { publish } = require("./Mqtt/MqttClient");
 const { ManualDeadbolt } = require('./Mqtt/ManualDeadbolt');
 const { Repayment } = require('./Mqtt/Repayment');
 const { DoorCollect } = require("./Mqtt/DoorCollect");
+const { AckCollect } = require("./routes/Mqtt/AckCollect");
 
 const router = express.Router();
 router.use(express.json({ limit: "1mb" }));
@@ -32,6 +33,7 @@ async function init() {
     await ManualDeadbolt();
     await Repayment();
     await DoorCollect();
+    await AckCollect();
     console.log("[APP] MQTT init done");
   } catch (e) {
     console.error("[APP] MQTT init failed:", e?.message || e);
