@@ -7,7 +7,7 @@ const { publish } = require("./Mqtt/MqttClient");
 const { ManualDeadbolt } = require('./Mqtt/ManualDeadbolt');
 const { Repayment } = require('./Mqtt/Repayment');
 const { DoorCollect } = require("./Mqtt/DoorCollect");
-const { AckCollect } = require("./routes/Mqtt/AckCollect");
+const { AckCollect } = require("./Mqtt/AckCollect");
 
 const router = express.Router();
 router.use(express.json({ limit: "1mb" }));
