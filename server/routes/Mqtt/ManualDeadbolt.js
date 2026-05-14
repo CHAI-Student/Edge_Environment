@@ -68,8 +68,9 @@ async function ManualDeadbolt() {
 
       // 2. 결과 검증
       if (apiResultState === "UNLOCK" || apiResultState === "LOCKED") {
-        finalState = apiResultState;
-        resultMsg = finalState === "UNLOCK" ? "Door is opened" : "Door is closed";
+        // finalState = apiResultState;
+        finalState = apiResultState === "UNLOCK" ? "CLOSE" : "OPEN";
+        resultMsg = finalState === "OPEN" ? "Door is opened" : "Door is closed";
       } else {
         throw new Error(`Unexpected API response: ${apiResultState}`);
       }

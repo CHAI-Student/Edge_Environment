@@ -573,7 +573,7 @@ async function Payments(token, CardMethod) {
           // console.log('inferenceResult', inferenceResult)
           const products = inferenceResult.products
           const items = products.map(product => ({
-            name: product.name,
+            name: product.name.slice(0, 5),
             quantity: Number(product.count),
             total_price: Number(product.price) * Number(product.count || 1)
           }));
