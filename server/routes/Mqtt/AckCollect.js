@@ -439,6 +439,7 @@ async function syncProductMetadata({
   filelength,
   storageType,
   productLoadcellWeight,
+  trainProductIdx
 }) {
   await ensureMongoConnected();
 
@@ -457,8 +458,7 @@ async function syncProductMetadata({
   //   setOnInsert.eventPromotion = [];
   // }
   if (!existing) {
-    setOnInsert.trainProductIdx =
-      trainProductIdx;
+    setOnInsert.trainProductIdx = trainProductIdx;
   }
 
   await ProductUpload.updateOne(
@@ -755,24 +755,15 @@ async function handleStartCollect(reqData) {
 
   if (!productDoc) {
 
-    trainProductIdx =
-      await getNextTrainProductIdx();
+    trainProductIdx = await getNextTrainProductIdx();
 
-    console.log(
-      `[AckCollect] 신규 상품 trainProductIdx 생성: ${trainProductIdx}`
-    );
+    console.log(`[AckCollect] new trainProductIdx: ${trainProductIdx}`);
 
   } else {
+    trainProductIdx = productDoc.trainProductIdx;
 
-    trainProductIdx =
-      productDoc.trainProductIdx;
-
-    console.log(
-      `[AckCollect] 기존 상품 trainProductIdx 사용: ${trainProductIdx}`
-    );
+    console.log(`[AckCollect] original trainProductIdx: ${trainProductIdx}`);
   }
-
-  const trainProductIdx = productDoc.trainProductIdx;
 
   const timestamp = makeTimestampFolderName();
 
@@ -804,7 +795,6 @@ async function handleStartCollect(reqData) {
     productFolder,
     productIdx: product_idx,
     productEngName: product_eng_name,
-    productName: product_name,
     categoryIdx: category_idx,
     isNew: is_new,
     hasLoadcell: hasLoadcell,
@@ -827,8 +817,8 @@ async function handleStartCollect(reqData) {
 
   publishAck(
     makeAckPayload({
-      deviceIdx: reqDeviceIdx,
-      divisionIdx: reqDivisionIdx,
+      deviceIdx: device_idx,
+      divisionIdx: division_idx,
       collectState: collect_state,
       productIdx: product_idx,
       productEngName: product_eng_name,
@@ -985,7 +975,8 @@ async function handleEndCollect(reqData) {
   const option = getLatestCollectOption();
 
   // 학습 대상 storage type
-  const storageType = option.storageType; 
+  const hasLoadcell = option.hasLoadcell;
+  const storageType = option.storageType;
 
   const session = collectSessions.get(String(product_idx));
 
@@ -1002,10 +993,10 @@ async function handleEndCollect(reqData) {
   await cameraStopSampling();
 
   const useLoadcell =
-    session.hasLoadcell === true ||
-    session.hasLoadcell === "1" ||
-    session.hasLoadcell === 1 ||
-    session.hasLoadcell === "Y";
+    hasLoadcell === true ||
+    hasLoadcell === "1" ||
+    hasLoadcell === 1 ||
+    hasLoadcell === "Y";
 
   if (useLoadcell) {
     await stopLoadcellRecording();
