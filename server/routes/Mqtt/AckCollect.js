@@ -77,16 +77,36 @@ function makeSessionKey(productIdx) {
   return String(productIdx);
 }
 
+// function publishAck(payload) {
+//   if (!client || !client.connected) {
+//     console.error("[AckCollect] MQTT client is not connected. Cannot publish ACK.");
+//     return;
+//   }
+  
+//   client.publish(PUB_TOPIC, JSON.stringify(payload), (err) => {
+//     if (err) {
+//       console.error("[AckCollect] ACK publish failed:", err);
+//     } else console.log("[REPAY] subscribed:", granted);
+//   });
+// }
+
 function publishAck(payload) {
-  if (!client || !client.connected) {
+  if (!client) {
+    console.error("[AckCollect] MQTT client is null");
+    return;
+  }
+  if (!client.connected) {
     console.error("[AckCollect] MQTT client is not connected. Cannot publish ACK.");
     return;
   }
   // 수집 시작 - 수집 종료에 대해서 pub 해줘야함
-  client.publish(PUB_TOPIC, JSON.stringify(payload), (err) => {
+  client.publish(PUB_TOPIC, JSON.stringify(payload), { qos: 1 }, (err) => {
     if (err) {
       console.error("[AckCollect] ACK publish failed:", err);
-    } else console.log("[REPAY] subscribed:", granted);
+      return;
+    }
+
+    console.log("[AckCollect] ACK published:", PUB_TOPIC);
   });
 }
 
@@ -195,6 +215,8 @@ async function ProductCollectionHealth() {
 }
 
 async function cameraStartSampling(savePath, cameraIndices = [0, 2]) {
+  // 폴더 먼저 생성
+  fs.mkdirSync(savePath, { recursive: true });
   const url = `${config.cameraApi}/sampling/start`;
 
   const body = {
