@@ -17,7 +17,7 @@ function createMqttClient() {
     clientId,
     username: config.mqttID,
     password: config.mqttPW,
-    clean: true,
+    clean: false,
     keepalive: 30,
     connectTimeout: 10000,
 

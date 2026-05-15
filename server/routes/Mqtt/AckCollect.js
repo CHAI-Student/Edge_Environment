@@ -969,8 +969,17 @@ async function AckCollect() {
   // console.log("[AckCollect] CMD_TOPIC:", CMD_TOPIC);
   // console.log("[AckCollect] ACK_TOPIC:", ACK_TOPIC);
 
-  client.on("connect", () => {
-    client.subscribe(SUB_TOPIC);
+  // client.on("connect", () => {
+  //   client.subscribe(SUB_TOPIC);
+  // });
+  client.subscribe(subTopic, { qos: 1 }, (err) => {
+    if (err) {
+      console.error("[ACK-COLLECT] Subscribe Error:", err.message);
+      return;
+    }
+
+    // console.log("[ACK-COLLECT] Subscribe granted:", granted);
+    console.log(`[ACK-COLLECT] Subscribed: ${subTopic}`);
   });
 
   client.on("message", (topic, message) => {

@@ -79,7 +79,7 @@ function connectMqtt() {
     username: MQTT_USER,
     password: MQTT_PASS,
     clientId: `test-${DEVICE_IDX}-${Date.now().toString(16)}`,
-    clean: true,
+    clean: false,
     keepalive: 30,
     reconnectPeriod: 0,
   });
