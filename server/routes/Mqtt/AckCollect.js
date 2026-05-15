@@ -978,14 +978,14 @@ async function AckCollect() {
       return;
     }
 
-    // console.log("[ACK-COLLECT] Subscribe granted:", granted);
-    console.log(`[ACK-COLLECT] Subscribed: ${granted}`);
+    console.log("[ACK-COLLECT] Subscribed:", granted);
+    // console.log(`[ACK-COLLECT] Subscribed: ${granted}`);
   });
 
   client.on("message", (topic, message) => {
     console.log("[AckCollect] message received topic:", topic);
 
-    if (topic !== CMD_TOPIC) return;
+    if (topic !== SUB_TOPIC) return;
 
     chain = chain
       .then(() => handleCollectMessage(message))
