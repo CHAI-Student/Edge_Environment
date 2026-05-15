@@ -56,7 +56,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         const external = axios.create({
           baseURL: config.restApi, // https://apichaidev.atcrk.co.kr/api/v1
           timeout: 10000,
-          headers: { "Content-Type": "multipart/form-data" },
+        //   headers: { "Content-Type": "multipart/form-data" },
         });
 
         const timestamp = Date.now();
@@ -92,7 +92,9 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         }
         // 3) FormData 구성 (payload + paymentFile)
         const form = new FormData();
-        form.append("payload", JSON.stringify(payload));
+        form.append("payload", JSON.stringify(payload), {
+           contentType: "application/json"  // 추가
+        });
         form.append("paymentFile", fs.createReadStream(dummyImg), {
             filename: fileName,
             // contentType: "video/mp4",
