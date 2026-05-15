@@ -82,11 +82,11 @@ function publishAck(payload) {
     console.error("[AckCollect] MQTT client is not connected. Cannot publish ACK.");
     return;
   }
-
-  client.publish(SUB_TOPIC, JSON.stringify(payload), (err) => {
+  // 수집 시작 - 수집 종료에 대해서 pub 해줘야함
+  client.publish(PUB_TOPIC, JSON.stringify(payload), (err) => {
     if (err) {
       console.error("[AckCollect] ACK publish failed:", err);
-    }
+    } else console.log("[REPAY] subscribed:", granted);
   });
 }
 
@@ -856,6 +856,7 @@ async function handleCollectMessage(message) {
 
     throw new Error(`Unsupported collect_state: ${collect_state}`);
   } catch (error) {
+    // local folder not found가 뜸
     console.error("[AckCollect] Processing Error:", error.message);
 
     const health = await ProductCollectionHealth().catch(() => ({}));
