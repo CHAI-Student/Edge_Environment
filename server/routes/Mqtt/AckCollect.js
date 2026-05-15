@@ -223,10 +223,22 @@ async function fetchCurrentDoorState() {
 }
 
 async function ProductCollectionHealth() {
-  const CameraStatus = await CameraStatusAPI();
-  const DeadboltHealth = await DeadboltStatusAPI();
-  const LoadcellHealth = await LoadcellStatusAPI();
-  const CurrentDoorState = await fetchCurrentDoorState();
+  // const CameraStatus = await CameraStatusAPI();
+  // const DeadboltHealth = await DeadboltStatusAPI();
+  // const LoadcellHealth = await LoadcellStatusAPI();
+  // const CurrentDoorState = await fetchCurrentDoorState();
+
+  const [
+    CameraStatus,
+    DeadboltHealth,
+    LoadcellHealth,
+    CurrentDoorState,
+  ] = await Promise.all([
+    CameraStatusAPI(),
+    DeadboltStatusAPI(),
+    LoadcellStatusAPI(),
+    fetchCurrentDoorState(),
+  ]);
 
   const isHealthOk =
     CameraStatus === "09" &&
@@ -350,8 +362,6 @@ function putMinioObject(bucket, objectKey, filePath) {
 async function uploadFolderToMinio({
   foldername,
   localPath,
-  productEngName,
-  timestamp,
   deleteAfterUpload = true,
 }) {
   const BUCKET = config.minioBucket;
@@ -431,7 +441,6 @@ async function getNextTrainProductIdx() {
 async function syncProductMetadata({
   productIdx,
   productEngName,
-  productName,
   categoryIdx,
   isNew,
   foldername,
@@ -439,7 +448,7 @@ async function syncProductMetadata({
   filelength,
   storageType,
   productLoadcellWeight,
-  trainProductIdx
+  trainProductIdx,
 }) {
   await ensureMongoConnected();
 
@@ -459,6 +468,8 @@ async function syncProductMetadata({
   // }
   if (!existing) {
     setOnInsert.trainProductIdx = trainProductIdx;
+    setOnInsert.createDate = now;
+    setOnInsert.eventPromotion = [];
   }
 
   await ProductUpload.updateOne(
@@ -466,7 +477,6 @@ async function syncProductMetadata({
     {
       $set: {
         productIdx,
-        productName: productName,
         productEngName,
         categoryIdx: categoryIdx ?? "null",
         isNew,
@@ -489,6 +499,109 @@ async function syncProductMetadata({
 
   return updated;
 }
+
+// async function syncDivisionAndDeviceTypeMapping({
+//   divisionIdx,
+//   deviceIdx,
+//   storageType,
+// }) {
+
+//   await ensureMongoConnected();
+
+//   const normalizedStorageType = normalizeStorageType(storageType);
+
+//   const now = new Date();
+
+//   /**
+//    * DivisionUpload
+//    */
+//   const divisionDoc = await DivisionUpload.findOne({
+//       divisionIdx,
+//     }).lean();
+
+//   const deviceIdxArr = Array.from(
+//     new Set([
+//       ...(divisionDoc?.deviceIdx || []),
+//       deviceIdx,
+//     ].filter(Boolean))
+//   );
+
+//   await DivisionUpload.updateOne(
+//     { divisionIdx },
+//     {
+//       $set: {
+//         divisionIdx,
+//         deviceIdx: deviceIdxArr,
+//       },
+//     },
+//     { upsert: true }
+//   );
+
+//   /**
+//    * storageType별 ProductUpload 조회
+//    */
+//   const productDocs =
+//     await ProductUpload.find(
+//       {
+//         storageType: normalizedStorageType,
+//       },
+//       { _id: 1 }
+//     ).lean();
+
+//   const productMappings =
+//     productDocs.map((x) => ({
+//       product: x._id,
+//       training_status: "2",
+//     }));
+
+//   /**
+//    * DeviceTypeUpload
+//    */
+//   const brunchName = `${divisionIdx}_${brunchSuffixFromStorageType(normalizedStorageType)}`;
+
+//   const deviceTypeDoc =
+//     await DeviceTypeUpload.findOne({
+//       divisionIdx,
+//       storageType: normalizedStorageType,
+//     }).lean();
+
+//   const deviceTypeDeviceIdxArr =
+//     Array.from(
+//       new Set([
+//         ...(deviceTypeDoc?.deviceIdx || []),
+//         deviceIdx,
+//       ].filter(Boolean))
+//     );
+
+//   await DeviceTypeUpload.updateOne(
+//     {
+//       divisionIdx,
+//       storageType: normalizedStorageType,
+//     },
+//     {
+//       $set: {
+//         storageType: normalizedStorageType,
+//         divisionIdx,
+//         brunchName,
+//         deviceIdx: deviceTypeDeviceIdxArr,
+//         products: productMappings,
+//         trainingStatus: "2",
+//         trainingDate: now,
+//         retrainingDate: null,
+//       },
+//     },
+//     { upsert: true }
+//   );
+
+//   console.log(`[DeviceTypeUpload] synced division=${divisionIdx} storageType=${normalizedStorageType}`);
+
+//   return {
+//     divisionIdx,
+//     storageType: normalizedStorageType,
+//     brunchName,
+//     productCount: productMappings.length,
+//   };
+// }
 
 async function notifyAiTrainingStore(product) {
   if (typeof aiNotifyService.notifyTrainingStore === "function") {
@@ -519,8 +632,6 @@ async function notifyAiTrainingStore(product) {
 function normalizeStorageType(storageType) {
   if (storageType === "C") return "COLD";
   if (storageType === "F") return "FROZEN";
-  if (storageType === "COLD") return "COLD";
-  if (storageType === "FROZEN") return "FROZEN";
   return "UNKNOWN";
 }
 
@@ -537,18 +648,22 @@ async function syncDivisionAndDeviceTypeMapping({
 }) {
 
   await ensureMongoConnected();
-
-  const normalizedStorageType =
-    normalizeStorageType(storageType);
-
+  const normalizedStorageType = normalizeStorageType(storageType);
   const now = new Date();
 
   /**
    * ProductUpload 전체 조회
    * trainingStatus=2 인 상품들만 매핑
    */
+  // const productDocs = await ProductUpload.find(
+  //   { trainingStatus: "2" },
+  //   { _id: 1 }
+  // ).lean();
   const productDocs = await ProductUpload.find(
-    { trainingStatus: "2" },
+    {
+      trainingStatus: "2",
+      storageType: normalizedStorageType,
+    },
     { _id: 1 }
   ).lean();
 
@@ -589,8 +704,7 @@ async function syncDivisionAndDeviceTypeMapping({
   const brunchName =
     `${divisionIdx}_${brunchSuffixFromStorageType(normalizedStorageType)}`;
 
-  const deviceTypeDoc =
-    await DeviceTypeUpload.findOne({
+  const deviceTypeDoc = await DeviceTypeUpload.findOne({
       divisionIdx,
       storageType: normalizedStorageType,
     }).lean();
@@ -798,15 +912,15 @@ async function handleStartCollect(reqData) {
     categoryIdx: category_idx,
     isNew: is_new,
     hasLoadcell: hasLoadcell,
+    storageType,
+    deviceIdx: device_idx,
+    divisionIdx: division_idx,
+    productLoadcellWeight: product_loadcell_weight,
   });
 
   await cameraStartSampling(productFolder, [0, 2]);
 
-  const useLoadcell =
-    hasLoadcell === true ||
-    hasLoadcell === "1" ||
-    hasLoadcell === 1 ||
-    hasLoadcell === "Y";
+  const useLoadcell = hasLoadcell === "Y";
 
   if (useLoadcell) {
     await startLoadcellRecording();
@@ -975,14 +1089,15 @@ async function handleEndCollect(reqData) {
   const option = getLatestCollectOption();
 
   // 학습 대상 storage type
-  const hasLoadcell = option.hasLoadcell;
-  const storageType = option.storageType;
+  // const hasLoadcell = option.hasLoadcell;
+  // const storageType = option.storageType;
 
   const session = collectSessions.get(String(product_idx));
 
   if (!session) {
     throw new Error(`No active collect session found for product_idx=${product_idx}`);
   }
+  const storageType = session.storageType;
 
   const closed = await waitUntilDoorClosed();
 
@@ -992,11 +1107,7 @@ async function handleEndCollect(reqData) {
 
   await cameraStopSampling();
 
-  const useLoadcell =
-    hasLoadcell === true ||
-    hasLoadcell === "1" ||
-    hasLoadcell === 1 ||
-    hasLoadcell === "Y";
+  const useLoadcell = session.has_loadcell === "Y";
 
   if (useLoadcell) {
     await stopLoadcellRecording();
@@ -1040,21 +1151,32 @@ async function handleEndCollect(reqData) {
   /**
    * DivisionUpload / DeviceTypeUpload 매핑
    */
-  const mappingResult =
-    await syncDivisionAndDeviceTypeMapping({
+  const mappingResult = await syncDivisionAndDeviceTypeMapping({
       divisionIdx: division_idx,
       deviceIdx: device_idx,
       storageType,
-    });
+  });
 
   /**
    * AnnotationLabel 동기화
    */
-  const annotationResult =
-    await syncAnnotationLabels({
-      productModel: ProductUpload,
-      deleteMissing: false,
-    });
+  // const annotationResult =
+  //   await syncAnnotationLabels({
+  //     productModel: ProductUpload,
+  //     deleteMissing: false,
+  //   });
+
+  let annotationResult = null;
+
+  try {
+    annotationResult = await syncAnnotationLabels({
+        productModel: ProductUpload,
+        deleteMissing: false,
+      });
+    console.log("[AnnotationLabel] synced");
+  } catch (err) {
+    console.error("[AnnotationLabel] sync failed:", err);
+  }
 
   /**
    * AI 서버 notify
@@ -1167,6 +1289,8 @@ async function handleCollectMessage(message) {
 
     publishAck(
       makeAckPayload({
+        deviceIdx: reqData.device_idx,
+        divisionIdx: reqData.division_idx,
         collectState: reqData.collect_state,
         productIdx: reqData.product_idx,
         productEngName: reqData.product_eng_name,

@@ -409,6 +409,11 @@ async function DoorCollect() {
         resultCd,
         resultMsg,
       });
+
+      latestCollectOption = {
+        hasLoadcell,
+        storageType,
+      };
     } catch (error) {
       console.error("[DoorCollect] Error:", error.message);
 
@@ -433,16 +438,6 @@ async function DoorCollect() {
         resultCd: "F",
         resultMsg: error?.message || String(error),
       });
-
-      // const reqDeviceIdx = reqData.device_idx
-      // const reqDivisionIdx = reqData.division_idx
-
-      latestCollectOption = {
-        hasLoadcell,
-        storageType,
-        // reqDeviceIdx,
-        // reqDivisionIdx
-      };
 
       console.log("[DoorCollect] latestCollectOption:", latestCollectOption);
     }
