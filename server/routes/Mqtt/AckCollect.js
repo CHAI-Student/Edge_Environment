@@ -1014,12 +1014,6 @@ async function handleEndCollect(reqData) {
     throw new Error(uploadResult.message || "MinIO upload failed");
   }
 
-  // DoorCollect(IF04)에서 전달된 옵션 정보 가져오기
-  const option = getLatestCollectOption();
-
-  // 실제 학습 대상 storage type
-  const storageType = option.storageType;
-
   const productDoc = await syncProductMetadata({
     productIdx: product_idx,
     productEngName: product_eng_name,
