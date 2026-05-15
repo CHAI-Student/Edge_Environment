@@ -357,12 +357,12 @@ async function DoorCollect() {
     if (topic !== subTopic) return;
 
     let reqData = {};
-    let ifSysId = uuidv4();
+    let ifSysId = ''
 
     try {
       const payload = JSON.parse(message.toString());
       console.log('[Request] payload.DATA', payload.HEADER)
-      ifSysId = payload.HEADER?.IF_SYSID || uuidv4();
+      ifSysId = payload.HEADER.IF_SYSID
       reqData = payload.DATA || {};
 
       const {
@@ -397,7 +397,7 @@ async function DoorCollect() {
       await publishDoorAck({
         client,
         topic: pubTopic,
-        ifSysId: reqData.ifSysId,
+        ifSysId: ifSysId,
         deviceIdx: config.deviceIdx,
         divisionIdx: config.divisionIdx,
         doorState: finalState,
@@ -426,7 +426,7 @@ async function DoorCollect() {
       await publishDoorAck({
         client,
         topic: pubTopic,
-        ifSysId: reqData.ifSysId,
+        ifSysId: ifSysId,
         deviceIdx: config.deviceIdx,
         divisionIdx: config.divisionIdx,
         doorState: reqData.door_state,

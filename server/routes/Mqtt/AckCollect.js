@@ -138,6 +138,7 @@ function publishAck(payload) {
 // }
 
 function makeAckPayload({
+  reqSysid,
   deviceIdx,
   divisionIdx,
   collectState,
@@ -154,7 +155,7 @@ function makeAckPayload({
   return {
     HEADER: {
       IF_ID: "IF_06",
-      IF_SYSID: uuidv4(),
+      IF_SYSID: reqSysid,
       IF_HOST: "CRKPNTCHAI",
       IF_DATE: makeIFDate(),
     },
@@ -828,7 +829,7 @@ async function syncDivisionAndDeviceTypeMapping({
 //   );
 // }
 
-async function handleStartCollect(reqData) {
+async function handleStartCollect(reqData, reqSysid) {
   const {
     device_idx,
     division_idx,
@@ -922,15 +923,14 @@ async function handleStartCollect(reqData) {
 
   const useLoadcell = hasLoadcell === "Y";
 
-  if (useLoadcell) {
-    await startLoadcellRecording();
-  }
+  if (useLoadcell) { await startLoadcellRecording(); }
   // const loadcellWeight = await startLoadcellRecording();
 
   const health = await ProductCollectionHealth();
 
   publishAck(
     makeAckPayload({
+      reqSysid: reqSysid,
       deviceIdx: device_idx,
       divisionIdx: division_idx,
       collectState: collect_state,
@@ -1069,7 +1069,7 @@ async function waitUntilDoorClosed({ timeoutMs = 60000, intervalMs = 500 } = {})
 //   collectSessions.delete(sessionKey);
 // }
 
-async function handleEndCollect(reqData) {
+async function handleEndCollect(reqData, reqSysid) {
   const {
       device_idx,
       division_idx,
@@ -1192,6 +1192,7 @@ async function handleEndCollect(reqData) {
 
   publishAck(
     makeAckPayload({
+      reqSysid: reqSysid,
       deviceIdx: reqData.device_idx,
       divisionIdx: reqData.division_idx,
       collectState: collect_state,
@@ -1237,10 +1238,12 @@ async function handleEndCollect(reqData) {
 
 async function handleCollectMessage(message) {
   let reqData = {};
+  let reqSysid = ''
 
   try {
     const reqPayload = JSON.parse(message.toString());
-    reqData = reqPayload.DATA || {};
+    reqData = reqPayload.DATA;
+    reqSysid = reqPayload.HEADER.IF_SYSID
 
     const {
       device_idx,
@@ -1248,6 +1251,7 @@ async function handleCollectMessage(message) {
       product_idx,
       collect_state,
       product_eng_name,
+      categoryIdx,
       is_new,
       product_loadcell_weight,
     } = reqData;
@@ -1271,12 +1275,12 @@ async function handleCollectMessage(message) {
     }
 
     if (collect_state === "START") {
-      await handleStartCollect(reqData);
+      await handleStartCollect(reqData, reqSysid);
       return;
     }
 
     if (collect_state === "END") {
-      await handleEndCollect(reqData);
+      await handleEndCollect(reqData, reqSysid);
       return;
     }
 
@@ -1289,6 +1293,7 @@ async function handleCollectMessage(message) {
 
     publishAck(
       makeAckPayload({
+        reqSysid: reqSysid,
         deviceIdx: reqData.device_idx,
         divisionIdx: reqData.division_idx,
         collectState: reqData.collect_state,
