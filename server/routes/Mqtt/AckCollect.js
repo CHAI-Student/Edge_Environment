@@ -9,7 +9,7 @@ const Minio = require("minio");
 const mongoose = require("mongoose");
 const { v4: uuidv4 } = require("uuid");
 const { EventSource } = require("eventsource");
-
+const { getClient } = require("./MqttClient");
 const config = require("../../config/key");
 const {
   DeadboltStatusAPI,
