@@ -17,7 +17,11 @@ const {
   CameraStatusAPI,
 } = require("./HealthMqtt");
 const { callApiToControlDeadbolt } = require("./DeadboltApiService");
+
 const { ProductUpload } = require("../../model/ProductUpload");
+const { DivisionUpload } = require("../../model/DivisionUpload");
+const { DeviceTypeUpload } = require("../../model/DeviceTypeUpload");
+
 const { getLatestCollectOption } = require("./DoorCollect");
 const { syncAnnotationLabels } = require("../Services/AnnotationLabelSyncService");
 const aiNotifyService = require("../Services/AiTrainingNotifyService");
@@ -344,8 +348,8 @@ function putMinioObject(bucket, objectKey, filePath) {
 }
 
 async function uploadFolderToMinio({
+  foldername,
   localPath,
-  productIdx,
   productEngName,
   timestamp,
   deleteAfterUpload = true,
@@ -361,8 +365,9 @@ async function uploadFolderToMinio({
     };
   }
 
-  const foldername = `${safe(productIdx)}_${safe(productEngName)}_${safe(timestamp)}`;
-  const basePrefix = `productImg/${foldername}`;
+  // const foldername = `${safe(productIdx)}_${safe(productEngName)}_${safe(timestamp)}`;
+  // const basePrefix = `productImg/${foldername}`;
+  const basePrefix = `productImg/${safe(foldername)}`;
   const folderpath = `s3://${BUCKET}/${basePrefix}/`;
 
   const filesToUpload = getAllFiles(localPath);
@@ -371,7 +376,8 @@ async function uploadFolderToMinio({
     return {
       success: false,
       message: `No files found in folder: ${localPath}`,
-      foldername,
+      // foldername,
+      basePrefix,
       folderpath,
       filelength: 0,
       objects: [],
@@ -431,11 +437,13 @@ async function syncProductMetadata({
   foldername,
   folderpath,
   filelength,
+  storageType,
+  productLoadcellWeight,
 }) {
   await ensureMongoConnected();
 
   const existing = await ProductUpload.findOne(
-    { productIdx },
+    { productIdx, productEngName },
     { trainProductIdx: 1 }
   ).lean();
 
@@ -450,15 +458,17 @@ async function syncProductMetadata({
   }
 
   await ProductUpload.updateOne(
-    { productIdx },
+    { productIdx, productEngName },
     {
       $set: {
         productIdx,
-        productName: productName ?? productEngName,
+        productName: productName,
         productEngName,
         categoryIdx: categoryIdx ?? "null",
         isNew,
         trainingStatus: "2",
+        storageType,
+        productLoadcellWeight,
         foldername,
         folderpath,
         filelength: Number(filelength || 0),
@@ -469,7 +479,7 @@ async function syncProductMetadata({
     { upsert: true }
   );
 
-  const updated = await ProductUpload.findOne({ productIdx }).lean();
+  const updated = await ProductUpload.findOne({ productIdx, productEngName }).lean();
 
   console.log(`[MongoDB] Product metadata synced: ${productIdx}`);
 
@@ -500,6 +510,127 @@ async function notifyAiTrainingStore(product) {
   throw new Error(
     "AiTrainingNotifyService must export notifyTrainingStore or notifyTrainingStoreMany"
   );
+}
+
+function normalizeStorageType(storageType) {
+  if (storageType === "C") return "COLD";
+  if (storageType === "F") return "FROZEN";
+  if (storageType === "COLD") return "COLD";
+  if (storageType === "FROZEN") return "FROZEN";
+  return "UNKNOWN";
+}
+
+function brunchSuffixFromStorageType(storageType) {
+  if (storageType === "COLD") return "C";
+  if (storageType === "FROZEN") return "F";
+  return "U";
+}
+
+async function syncDivisionAndDeviceTypeMapping({
+  divisionIdx,
+  deviceIdx,
+  storageType,
+}) {
+
+  await ensureMongoConnected();
+
+  const normalizedStorageType =
+    normalizeStorageType(storageType);
+
+  const now = new Date();
+
+  /**
+   * ProductUpload 전체 조회
+   * trainingStatus=2 인 상품들만 매핑
+   */
+  const productDocs = await ProductUpload.find(
+    { trainingStatus: "2" },
+    { _id: 1 }
+  ).lean();
+
+  const productMappings = productDocs.map((x) => ({
+    product: x._id,
+    training_status: "2",
+  }));
+
+  /**
+   * DivisionUpload 갱신
+   */
+  const divisionDoc = await DivisionUpload.findOne({
+    divisionIdx,
+  }).lean();
+
+  const deviceIdxArr = Array.from(
+    new Set([
+      ...(divisionDoc?.deviceIdx || []),
+      deviceIdx,
+    ].filter(Boolean))
+  );
+
+  await DivisionUpload.updateOne(
+    { divisionIdx },
+    {
+      $set: {
+        divisionIdx,
+        deviceIdx: deviceIdxArr,
+        products: productMappings,
+      },
+    },
+    { upsert: true }
+  );
+
+  /**
+   * DeviceTypeUpload 갱신
+   */
+  const brunchName =
+    `${divisionIdx}_${brunchSuffixFromStorageType(normalizedStorageType)}`;
+
+  const deviceTypeDoc =
+    await DeviceTypeUpload.findOne({
+      divisionIdx,
+      storageType: normalizedStorageType,
+    }).lean();
+
+  const deviceTypeDeviceIdxArr = Array.from(
+    new Set([
+      ...(deviceTypeDoc?.deviceIdx || []),
+      deviceIdx,
+    ].filter(Boolean))
+  );
+
+  await DeviceTypeUpload.updateOne(
+    {
+      divisionIdx,
+      storageType: normalizedStorageType,
+    },
+    {
+      $set: {
+        divisionIdx,
+        storageType: normalizedStorageType,
+        brunchName,
+        deviceIdx: deviceTypeDeviceIdxArr,
+        products: productMappings,
+        trainingStatus: "2",
+        trainingDate: now,
+        retrainingDate: null,
+      },
+
+      $setOnInsert: {
+        modelVersion: null,
+      },
+    },
+    { upsert: true }
+  );
+
+  console.log(
+    "[MongoDB] Division/DeviceType mapping synced"
+  );
+
+  return {
+    divisionProductCount: productMappings.length,
+    deviceTypeProductCount: productMappings.length,
+    brunchName,
+  };
 }
 
 // async function handleStartCollect(reqData) {
@@ -607,16 +738,51 @@ async function handleStartCollect(reqData) {
     await callApiToControlDeadbolt("OPEN");
   }
 
+  const productDoc = await ProductUpload.findOne(
+    {
+      productIdx: product_idx,
+      productEngName: product_eng_name,
+    },
+    {
+      trainProductIdx: 1,
+    }
+  ).lean();
+
+  if (!productDoc) {
+    throw new Error(
+      `ProductUpload not found: ${product_idx}/${product_eng_name}`
+    );
+  }
+
+  const trainProductIdx = productDoc.trainProductIdx;
+
   const timestamp = makeTimestampFolderName();
 
-  const productFolder = path.join(
+  const foldername =
+    `${trainProductIdx}_${product_eng_name}_${timestamp}`;
+
+  const BASE_PRODUCT_PATH = path.resolve(
     process.cwd(),
-    "productImg",
-    `${safe(product_idx)}_${safe(product_eng_name)}_${timestamp}`
+    "productImg"
   );
+
+  const productFolder = path.join(
+    BASE_PRODUCT_PATH,
+    foldername
+  );
+
+  // const timestamp = makeTimestampFolderName();
+
+  // const productFolder = path.join(
+  //   process.cwd(),
+  //   "productImg",
+  //   `${safe(product_idx)}_${safe(product_eng_name)}_${timestamp}`
+  // );
 
   collectSessions.set(String(product_idx), {
     timestamp,
+    foldername,
+    trainProductIdx,
     productFolder,
     productIdx: product_idx,
     productEngName: product_eng_name,
@@ -787,6 +953,7 @@ async function handleEndCollect(reqData) {
       division_idx,
       product_idx,
       collect_state,
+      product_name,
       product_eng_name,
       category_idx,
       is_new,
@@ -795,6 +962,12 @@ async function handleEndCollect(reqData) {
   } = reqData;
 
   console.log("[AckCollect] END collect:", product_idx);
+
+  // DoorCollect(IF04) 기준 설정값 조회
+  const option = getLatestCollectOption();
+
+  // 학습 대상 storage type
+  const storageType = option.storageType; 
 
   const session = collectSessions.get(String(product_idx));
 
@@ -822,10 +995,17 @@ async function handleEndCollect(reqData) {
 
   // const loadcellWeight = await stopLoadcellRecording();
 
+  // const uploadResult = await uploadFolderToMinio({
+  //   localPath: session.productFolder,
+  //   productIdx: product_idx,
+  //   productEngName: product_eng_name,
+  //   timestamp: session.timestamp,
+  //   deleteAfterUpload: true,
+  // });
+
   const uploadResult = await uploadFolderToMinio({
+    foldername: session.foldername,
     localPath: session.productFolder,
-    productIdx: product_idx,
-    productEngName: product_eng_name || session.productEngName,
     timestamp: session.timestamp,
     deleteAfterUpload: true,
   });
@@ -834,16 +1014,53 @@ async function handleEndCollect(reqData) {
     throw new Error(uploadResult.message || "MinIO upload failed");
   }
 
+  // DoorCollect(IF04)에서 전달된 옵션 정보 가져오기
+  const option = getLatestCollectOption();
+
+  // 실제 학습 대상 storage type
+  const storageType = option.storageType;
+
   const productDoc = await syncProductMetadata({
     productIdx: product_idx,
-    productEngName: product_eng_name || session.productEngName,
-    productName: product_name || session.productName,
-    categoryIdx: category_idx || session.categoryIdx,
-    isNew: is_new ?? session.isNew,
+    productEngName: product_eng_name,
+    productName: product_name,
+    categoryIdx: category_idx,
+    isNew: is_new,
     foldername: uploadResult.foldername,
     folderpath: uploadResult.folderpath,
     filelength: uploadResult.filelength,
+    storageType: storageType,
+    productLoadcellWeight: product_loadcell_weight,
   });
+
+  /**
+   * DivisionUpload / DeviceTypeUpload 매핑
+   */
+  const mappingResult =
+    await syncDivisionAndDeviceTypeMapping({
+      divisionIdx: division_idx,
+      deviceIdx: device_idx,
+      storageType,
+    });
+
+  /**
+   * AnnotationLabel 동기화
+   */
+  const annotationResult =
+    await syncAnnotationLabels({
+      productModel: ProductUpload,
+      deleteMissing: false,
+    });
+
+  /**
+   * AI 서버 notify
+   */
+  const notifyResult =
+    await notifyAiTrainingStore({
+      productIdx: product_idx,
+      productEngName: product_eng_name,
+      trainingStatus: "2",
+    });
 
   const health = await ProductCollectionHealth();
 
