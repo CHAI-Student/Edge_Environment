@@ -64,7 +64,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
             HEADER: {
                 IF_ID: "IF_08",
                 IF_SYSID: uuidv4(),
-                IF_HOST: "CHAI",
+                IF_HOST: "CRKPNTCHAI",
                 IF_DATE: timestamp,
             },
             DATA:{

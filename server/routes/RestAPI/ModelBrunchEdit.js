@@ -24,7 +24,7 @@ async function ModelBrunchEdit({
     HEADER: {
       IF_ID: "IF_14",
       IF_SYSID: uuidv4(),
-      IF_HOST: "CHAI",
+      IF_HOST: "CRKPNTCHAI",
       IF_DATE: Date.now(),
     },
     DATA: {

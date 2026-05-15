@@ -91,7 +91,7 @@ async function ManualDeadbolt() {
       HEADER: {
         IF_ID: "IF_03",
         IF_SYSID: ifSysId,
-        IF_HOST: "CHAI",
+        IF_HOST: "CRKPNTCHAI",
         IF_DATE: timestamp,
       },
       DATA: {

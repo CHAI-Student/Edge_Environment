@@ -21,7 +21,7 @@ async function DeviceInfo() {
             HEADER: {
                 IF_ID   : "IF_13",
                 IF_SYSID: uuidv4(),
-                IF_HOST : "EDGEPC",
+                IF_HOST : "CRKPNTCHAI",
                 IF_DATE : formattedDate
             },
             DATA: {

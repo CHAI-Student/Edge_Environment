@@ -18,7 +18,7 @@ const {
 } = require("./HealthMqtt");
 const { callApiToControlDeadbolt } = require("./DeadboltApiService");
 const { ProductUpload } = require("../../model/ProductUpload");
-
+const { getLatestCollectOption } = require("./DoorCollect");
 const { syncAnnotationLabels } = require("../Services/AnnotationLabelSyncService");
 const aiNotifyService = require("../Services/AiTrainingNotifyService");
 
@@ -77,19 +77,6 @@ function makeSessionKey(productIdx) {
   return String(productIdx);
 }
 
-// function publishAck(payload) {
-//   if (!client || !client.connected) {
-//     console.error("[AckCollect] MQTT client is not connected. Cannot publish ACK.");
-//     return;
-//   }
-  
-//   client.publish(PUB_TOPIC, JSON.stringify(payload), (err) => {
-//     if (err) {
-//       console.error("[AckCollect] ACK publish failed:", err);
-//     } else console.log("[REPAY] subscribed:", granted);
-//   });
-// }
-
 function publishAck(payload) {
   if (!client) {
     console.error("[AckCollect] MQTT client is null");
@@ -110,12 +97,51 @@ function publishAck(payload) {
   });
 }
 
+// function makeAckPayload({
+//   collectState,
+//   productIdx,
+//   productEngName,
+//   categoryIdx,
+//   isNew,
+//   resultCd = "S",
+//   resultMsg = "success",
+//   health = {},
+//   extraData = {},
+// }) {
+//   return {
+//     HEADER: {
+//       IF_ID: "IF_06",
+//       IF_SYSID: uuidv4(),
+//       IF_HOST: "EDGEPC01",
+//       IF_DATE: makeIFDate(),
+//     },
+//     DATA: {
+//       device_idx: config.deviceIdx,
+//       division_idx: config.divisionIdx,
+//       product_idx: productIdx,
+//       collect_state: collectState,
+//       product_eng_name: productEngName,
+//       category_idx: categoryIdx,
+//       is_new: isNew,
+//       camera_status: health.CameraStatus === "09" ? "1" : "0",
+//       deadbolt_status: health.DeadboltHealth === "19" ? "1" : "0",
+//       loadcell_status: health.LoadcellHealth === "29" ? "1" : "0",
+//       result_cd: resultCd,
+//       result_msg: resultMsg,
+//       ...extraData,
+//     },
+//   };
+// }
+
 function makeAckPayload({
+  deviceIdx,
+  divisionIdx,
   collectState,
   productIdx,
   productEngName,
   categoryIdx,
   isNew,
+  productLoadcellWeight,
   resultCd = "S",
   resultMsg = "success",
   health = {},
@@ -125,22 +151,21 @@ function makeAckPayload({
     HEADER: {
       IF_ID: "IF_06",
       IF_SYSID: uuidv4(),
-      IF_HOST: "EDGEPC01",
+      IF_HOST: "CRKPNTCHAI",
       IF_DATE: makeIFDate(),
     },
+
     DATA: {
-      device_idx: config.deviceIdx,
-      division_idx: config.divisionIdx,
+      device_idx: deviceIdx,
+      division_idx: divisionIdx,
       product_idx: productIdx,
       collect_state: collectState,
       product_eng_name: productEngName,
       category_idx: categoryIdx,
       is_new: isNew,
-      camera_status: health.CameraStatus === "09" ? "1" : "0",
-      deadbolt_status: health.DeadboltHealth === "19" ? "1" : "0",
-      loadcell_status: health.LoadcellHealth === "29" ? "1" : "0",
-      result_cd: resultCd,
-      result_msg: resultMsg,
+      product_loadcell_weight: productLoadcellWeight,
+      result_cd: String(resultCd ?? "F"),
+      result_msg: String(resultMsg ?? "New product collect is failed"),
       ...extraData,
     },
   };
@@ -565,6 +590,15 @@ async function handleStartCollect(reqData) {
     has_loadcell,
   } = reqData;
 
+  const option = getLatestCollectOption();
+  const hasLoadcell = option.hasLoadcell;
+  const storageType = option.storageType;
+  const reqDeviceIdx = option.reqDeviceIdx;
+  const reqDivisionIdx = option.reqDivisionIdx;
+
+  console.log("[AckCollect] hasLoadcell:", hasLoadcell);
+  console.log("[AckCollect] storageType:", storageType);
+
   console.log("[AckCollect] START collect:", product_idx);
 
   const healthBefore = await ProductCollectionHealth();
@@ -589,25 +623,28 @@ async function handleStartCollect(reqData) {
     productName: product_name,
     categoryIdx: category_idx,
     isNew: is_new,
-    hasLoadcell: has_loadcell,
+    hasLoadcell: hasLoadcell,
   });
 
   await cameraStartSampling(productFolder, [0, 2]);
 
   const useLoadcell =
-    has_loadcell === true ||
-    has_loadcell === "1" ||
-    has_loadcell === 1 ||
-    has_loadcell === "Y";
+    hasLoadcell === true ||
+    hasLoadcell === "1" ||
+    hasLoadcell === 1 ||
+    hasLoadcell === "Y";
 
   if (useLoadcell) {
     await startLoadcellRecording();
   }
+  // const loadcellWeight = await startLoadcellRecording();
 
   const health = await ProductCollectionHealth();
 
   publishAck(
     makeAckPayload({
+      deviceIdx: reqDeviceIdx,
+      divisionIdx: reqDivisionIdx,
       collectState: collect_state,
       productIdx: product_idx,
       productEngName: product_eng_name,
@@ -746,13 +783,15 @@ async function waitUntilDoorClosed({ timeoutMs = 60000, intervalMs = 500 } = {})
 
 async function handleEndCollect(reqData) {
   const {
-    product_idx,
-    collect_state,
-    product_eng_name,
-    product_name,
-    category_idx,
-    is_new,
-    has_loadcell,
+      device_idx,
+      division_idx,
+      product_idx,
+      collect_state,
+      product_eng_name,
+      category_idx,
+      is_new,
+      product_loadcell_weight,
+      has_loadcell,
   } = reqData;
 
   console.log("[AckCollect] END collect:", product_idx);
@@ -775,15 +814,13 @@ async function handleEndCollect(reqData) {
     session.hasLoadcell === true ||
     session.hasLoadcell === "1" ||
     session.hasLoadcell === 1 ||
-    session.hasLoadcell === "Y" ||
-    has_loadcell === true ||
-    has_loadcell === "1" ||
-    has_loadcell === 1 ||
-    has_loadcell === "Y";
+    session.hasLoadcell === "Y";
 
   if (useLoadcell) {
     await stopLoadcellRecording();
   }
+
+  // const loadcellWeight = await stopLoadcellRecording();
 
   const uploadResult = await uploadFolderToMinio({
     localPath: session.productFolder,
@@ -812,13 +849,15 @@ async function handleEndCollect(reqData) {
 
   publishAck(
     makeAckPayload({
+      deviceIdx: reqData.device_idx,
+      divisionIdx: reqData.division_idx,
       collectState: collect_state,
       productIdx: product_idx,
-      productEngName: product_eng_name || session.productEngName,
-      categoryIdx: category_idx || session.categoryIdx,
-      isNew: is_new ?? session.isNew,
-      resultCd: "S",
-      resultMsg: "collection completed",
+      productEngName: product_eng_name,
+      categoryIdx: category_idx,
+      isNew: is_new,
+      resultCd: health.isSuccess ? "S" : "F",
+      resultMsg: health.resultMsg,
       health,
       extraData: {
         collection_timestamp: session.timestamp,
@@ -829,6 +868,26 @@ async function handleEndCollect(reqData) {
       },
     })
   );
+
+  // publishAck(
+  //   makeAckPayload({
+  //     collectState: collect_state,
+  //     productIdx: product_idx,
+  //     productEngName: product_eng_name || session.productEngName,
+  //     categoryIdx: category_idx || session.categoryIdx,
+  //     isNew: is_new ?? session.isNew,
+  //     resultCd: "S",
+  //     resultMsg: "collection completed",
+  //     health,
+  //     extraData: {
+  //       collection_timestamp: session.timestamp,
+  //       foldername: uploadResult.foldername,
+  //       folderpath: uploadResult.folderpath,
+  //       filelength: uploadResult.filelength,
+  //       train_product_idx: productDoc?.trainProductIdx,
+  //     },
+  //   })
+  // );
 
   collectSessions.delete(String(product_idx));
 }
@@ -846,6 +905,8 @@ async function handleCollectMessage(message) {
       product_idx,
       collect_state,
       product_eng_name,
+      is_new,
+      product_loadcell_weight,
     } = reqData;
 
     console.log("[AckCollect] Request DATA:", reqData);
@@ -885,7 +946,7 @@ async function handleCollectMessage(message) {
 
     publishAck(
       makeAckPayload({
-        collectState: reqData.collect_state || "UNKNOWN",
+        collectState: reqData.collect_state,
         productIdx: reqData.product_idx,
         productEngName: reqData.product_eng_name,
         categoryIdx: reqData.category_idx,
@@ -987,7 +1048,7 @@ async function handleCollectMessage(message) {
 
 async function AckCollect() {
 
-  const client = getClient();
+  client = getClient();
   // console.log("[AckCollect] BROKER_URL:", BROKER_URL);
   // console.log("[AckCollect] CMD_TOPIC:", CMD_TOPIC);
   // console.log("[AckCollect] ACK_TOPIC:", ACK_TOPIC);

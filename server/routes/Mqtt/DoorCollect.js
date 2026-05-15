@@ -11,6 +11,17 @@ const {
 } = require("./HealthMqtt");
 const { getClient } = require("./MqttClient");
 
+let latestCollectOption = {
+  hasLoadcell: null,
+  storageType: null,
+  reqDeviceIdx: null,
+  reqDivisionIdx: null,
+};
+
+function getLatestCollectOption() {
+  return latestCollectOption;
+}
+
 function makeIFDate(d = new Date()) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -231,7 +242,7 @@ function publishDoorAck({
     HEADER: {
       IF_ID: "IF_04",
       IF_SYSID: uuidv4(),
-      IF_HOST: "CRKPNTCCHAI",
+      IF_HOST: "CRKPNTCHAI",
       IF_DATE: timestamp,
     },
     DATA: {
@@ -422,6 +433,18 @@ async function DoorCollect() {
         resultCd: "F",
         resultMsg: error?.message || String(error),
       });
+
+      const reqDeviceIdx = reqData.device_idx
+      const reqDivisionIdx = reqData.division_idx
+
+      latestCollectOption = {
+        hasLoadcell,
+        storageType,
+        reqDeviceIdx,
+        reqDivisionIdx
+      };
+
+      console.log("[DoorCollect] latestCollectOption:", latestCollectOption);
     }
   });
 
@@ -437,4 +460,5 @@ async function DoorCollect() {
 module.exports = {
   DoorCollect,
   fetchCurrentDoorState,
+  getLatestCollectOption,
 };

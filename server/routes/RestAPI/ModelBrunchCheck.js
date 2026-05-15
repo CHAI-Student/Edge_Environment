@@ -23,7 +23,7 @@ async function ModelBrunchCheck({
     HEADER: {
       IF_ID: "IF_13",
       IF_SYSID: uuidv4(),
-      IF_HOST: "CHAI",
+      IF_HOST: "CRKPNTCHAI",
       IF_DATE: Date.now(),
     },
     DATA: {

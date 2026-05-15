@@ -160,7 +160,7 @@ function Repayment() {
           HEADER: {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
-            IF_HOST: "CHAI",
+            IF_HOST: "CRKPNTCHAI",
             IF_DATE: timestamp,
           },
           DATA: {
@@ -213,7 +213,7 @@ function Repayment() {
           HEADER: {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
-            IF_HOST: "CHAI",
+            IF_HOST: "CRKPNTCHAI",
             IF_DATE: timestamp,
           },
           DATA: {
@@ -247,7 +247,7 @@ function Repayment() {
           HEADER: {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
-            IF_HOST: "CHAI",
+            IF_HOST: "CRKPNTCHAI",
             IF_DATE: timestamp,
           },
           DATA: {
@@ -282,7 +282,7 @@ function Repayment() {
           HEADER: {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
-            IF_HOST: "CHAI",
+            IF_HOST: "CRKPNTCHAI",
             IF_DATE: timestamp,
           },
           DATA: {
@@ -318,7 +318,7 @@ function Repayment() {
           HEADER: {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
-            IF_HOST: "CHAI",
+            IF_HOST: "CRKPNTCHAI",
             IF_DATE: timestamp,
           },
           DATA: {
@@ -353,7 +353,7 @@ function Repayment() {
           HEADER: {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
-            IF_HOST: "CHAI",
+            IF_HOST: "CRKPNTCHAI",
             IF_DATE: timestamp,
           },
           DATA: {
@@ -417,7 +417,7 @@ function Repayment() {
           HEADER: {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
-            IF_HOST: "CHAI",
+            IF_HOST: "CRKPNTCHAI",
             IF_DATE: timestamp,
           },
           //여기 마무리
@@ -454,7 +454,7 @@ function Repayment() {
           HEADER: {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
-            IF_HOST: "CHAI",
+            IF_HOST: "CRKPNTCHAI",
             IF_DATE: timestamp,
           },
           DATA: {

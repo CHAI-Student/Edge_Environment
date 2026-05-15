@@ -59,7 +59,7 @@ function makeRebootAckPayload({ifSysId, deviceIdx, divisionIdx, resultCd, result
     HEADER: {
       IF_ID: "IF_01",
       IF_SYSID: ifSysId || uuidv4(),
-      IF_HOST: "DEVICE",
+      IF_HOST: "CRKPNTCHAI",
       IF_DATE: makeIFDate(),
     },
     DATA: {
