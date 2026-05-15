@@ -203,7 +203,7 @@ async function RebootMqtt() {
       if (err) {
         console.error("[MQTT] reboot subscribe error:", err.message);
       } else {
-        console.log("[MQTT] subscribed:", granted);
+        console.log("[MQTT-REBOOT] subscribed:", granted);
       }
     });
   };

@@ -19,9 +19,9 @@ function Repayment() {
   const client = getClient();
 
   const Subscribe = () => {
-    client.subscribe(repaymentSub, { qos: 1 }, (err) => {
+    client.subscribe(repaymentSub, { qos: 1 }, (err, granted) => {
       if (err) console.error("[REPAY] subscribe error:", err.message);
-      else console.log("[REPAY] subscribed:", repaymentSub);
+      else console.log("[REPAY] subscribed:", granted);
     });
   };
 

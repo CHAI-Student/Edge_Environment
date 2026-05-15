@@ -972,14 +972,14 @@ async function AckCollect() {
   // client.on("connect", () => {
   //   client.subscribe(SUB_TOPIC);
   // });
-  client.subscribe(subTopic, { qos: 1 }, (err) => {
+  client.subscribe(SUB_TOPIC, { qos: 1 }, (err, granted) => {
     if (err) {
       console.error("[ACK-COLLECT] Subscribe Error:", err.message);
       return;
     }
 
     // console.log("[ACK-COLLECT] Subscribe granted:", granted);
-    console.log(`[ACK-COLLECT] Subscribed: ${subTopic}`);
+    console.log(`[ACK-COLLECT] Subscribed: ${granted}`);
   });
 
   client.on("message", (topic, message) => {

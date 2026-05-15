@@ -274,7 +274,7 @@ async function DoorCollect() {
     }
 
     console.log("[DoorCollect] Subscribe granted:", granted);
-    console.log(`[DoorCollect] Subscribed: ${subTopic}`);
+    // console.log(`[DoorCollect] Subscribed: ${subTopic}`);
   });
 
   // client.on("connect", () => {
