@@ -397,12 +397,12 @@ async function DoorCollect() {
       await publishDoorAck({
         client,
         topic: pubTopic,
-        ifSysId,
+        ifSysId: reqData.ifSysId,
         deviceIdx: config.deviceIdx,
         divisionIdx: config.divisionIdx,
         doorState: finalState,
-        storageType,
-        hasLoadcell,
+        storageType: reqData.storage_type,
+        hasLoadcell: reqData.has_loadcell,
         cameraStatus: health.camera_status,
         deadboltStatus: health.deadbolt_status,
         loadcellStatus: health.loadcell_status,
@@ -421,7 +421,7 @@ async function DoorCollect() {
       await publishDoorAck({
         client,
         topic: pubTopic,
-        ifSysId,
+        ifSysId: reqData.ifSysId,
         deviceIdx: config.deviceIdx,
         divisionIdx: config.divisionIdx,
         doorState: reqData.door_state,
@@ -434,14 +434,14 @@ async function DoorCollect() {
         resultMsg: error?.message || String(error),
       });
 
-      const reqDeviceIdx = reqData.device_idx
-      const reqDivisionIdx = reqData.division_idx
+      // const reqDeviceIdx = reqData.device_idx
+      // const reqDivisionIdx = reqData.division_idx
 
       latestCollectOption = {
         hasLoadcell,
         storageType,
-        reqDeviceIdx,
-        reqDivisionIdx
+        // reqDeviceIdx,
+        // reqDivisionIdx
       };
 
       console.log("[DoorCollect] latestCollectOption:", latestCollectOption);

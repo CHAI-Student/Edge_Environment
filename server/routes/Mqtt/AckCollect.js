@@ -451,10 +451,14 @@ async function syncProductMetadata({
 
   const setOnInsert = {};
 
+  // if (!existing) {
+  //   setOnInsert.trainProductIdx = await getNextTrainProductIdx();
+  //   setOnInsert.createDate = now;
+  //   setOnInsert.eventPromotion = [];
+  // }
   if (!existing) {
-    setOnInsert.trainProductIdx = await getNextTrainProductIdx();
-    setOnInsert.createDate = now;
-    setOnInsert.eventPromotion = [];
+    setOnInsert.trainProductIdx =
+      trainProductIdx;
   }
 
   await ProductUpload.updateOne(
@@ -712,25 +716,24 @@ async function syncDivisionAndDeviceTypeMapping({
 
 async function handleStartCollect(reqData) {
   const {
+    device_idx,
+    division_idx,
     product_idx,
     collect_state,
     product_eng_name,
-    product_name,
     category_idx,
     is_new,
-    has_loadcell,
+    product_loadcell_weight,
   } = reqData;
 
   const option = getLatestCollectOption();
   const hasLoadcell = option.hasLoadcell;
   const storageType = option.storageType;
-  const reqDeviceIdx = option.reqDeviceIdx;
-  const reqDivisionIdx = option.reqDivisionIdx;
 
   console.log("[AckCollect] hasLoadcell:", hasLoadcell);
   console.log("[AckCollect] storageType:", storageType);
 
-  console.log("[AckCollect] START collect:", product_idx);
+  console.log("[AckCollect] START collect:", reqData.product_idx);
 
   const healthBefore = await ProductCollectionHealth();
 
@@ -748,9 +751,24 @@ async function handleStartCollect(reqData) {
     }
   ).lean();
 
+  let trainProductIdx;
+
   if (!productDoc) {
-    throw new Error(
-      `ProductUpload not found: ${product_idx}/${product_eng_name}`
+
+    trainProductIdx =
+      await getNextTrainProductIdx();
+
+    console.log(
+      `[AckCollect] 신규 상품 trainProductIdx 생성: ${trainProductIdx}`
+    );
+
+  } else {
+
+    trainProductIdx =
+      productDoc.trainProductIdx;
+
+    console.log(
+      `[AckCollect] 기존 상품 trainProductIdx 사용: ${trainProductIdx}`
     );
   }
 
@@ -1025,6 +1043,7 @@ async function handleEndCollect(reqData) {
     filelength: uploadResult.filelength,
     storageType: storageType,
     productLoadcellWeight: product_loadcell_weight,
+    trainProductIdx: session.trainProductIdx,
   });
 
   /**
