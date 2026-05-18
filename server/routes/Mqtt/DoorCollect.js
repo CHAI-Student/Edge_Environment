@@ -369,8 +369,8 @@ async function DoorCollect() {
       console.log("[DoorCollect] Request:", reqData);
 
       latestCollectOption = {
-        hasLoadcell = hasLoadcell,
-        storageType = storageType,
+        hasLoadcell,
+        storageType,
       };
       
       await callApiToControlDeadbolt(reqDoorState);
