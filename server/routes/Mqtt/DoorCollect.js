@@ -14,8 +14,6 @@ const { getClient } = require("./MqttClient");
 let latestCollectOption = {
   hasLoadcell: null,
   storageType: null,
-  reqDeviceIdx: null,
-  reqDivisionIdx: null,
 };
 
 function getLatestCollectOption() {
@@ -98,12 +96,7 @@ async function getHealthStatus(hasLoadcell) {
   const cameraRaw = await CameraStatusAPI();
   const deadboltRaw = await DeadboltStatusAPI();
 
-  const useLoadcell =
-    hasLoadcell === "Y" ||
-    hasLoadcell === "1" ||
-    hasLoadcell === true ||
-    hasLoadcell === 1;
-
+  const useLoadcell = hasLoadcell === "Y"
   let loadcellRaw = "29";
 
   if (useLoadcell) {
@@ -411,8 +404,8 @@ async function DoorCollect() {
       });
 
       latestCollectOption = {
-        hasLoadcell,
-        storageType,
+        hasLoadcell = reqData.has_loadcell,
+        storageType = reqData.storage_type,
       };
     } catch (error) {
       console.error("[DoorCollect] Error:", error.message);

@@ -922,8 +922,11 @@ async function handleStartCollect(reqData, reqSysid) {
   await cameraStartSampling(productFolder, [0, 2]);
 
   const useLoadcell = hasLoadcell === "Y";
+  console.log('Loadcell is', useLoadcell)
 
-  if (useLoadcell) { await startLoadcellRecording(); }
+  if (useLoadcell) { 
+    await startLoadcellRecording();
+  }
   // const loadcellWeight = await startLoadcellRecording();
 
   const health = await ProductCollectionHealth();
@@ -1093,6 +1096,7 @@ async function handleEndCollect(reqData, reqSysid) {
   // const storageType = option.storageType;
 
   const session = collectSessions.get(String(product_idx));
+  console.log('SESSION: ', session)
 
   if (!session) {
     throw new Error(`No active collect session found for product_idx=${product_idx}`);
