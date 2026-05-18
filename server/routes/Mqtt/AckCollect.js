@@ -1195,6 +1195,33 @@ async function handleEndCollect(reqData, reqSysid) {
       trainingStatus: "2",
     });
 
+  console.log('[AckCollect] sending to PNT:', notifyResult)
+
+  const aiServerApi = `${config.aiServerApi}/v1/events/product/created`
+  const now = new Date();
+  const formattedDate = now.toISOString().replace(/[-:T]/g, "").slice(0, 14);
+  const sysidDate = now.toISOString().replace(/[-:T]/g, "").slice(0, 8);
+  const sysidTime = now.toISOString().replace(/[-:T]/g, "").slice(8, 14);
+  const aiStorageType = storageType == 'C' ? 'True' : 'False';
+
+  const payload = {
+      HEADER: {
+          IF_ID   : "IF_EDGE_01",
+          IF_SYSID: `EDGEPC-${sysidDate}-${sysidTime}`,
+          IF_HOST : "EDGEPC",
+          IF_DATE : formattedDate
+      },
+      DATA: {
+          division_idx: session.division_idx,
+          // True: 냉장(Cold) / False: 냉동(Frozen)
+          is_cold: aiStorageType
+      },
+  };
+  
+  const response = await axios.post(aiServerApi, payload);
+  // return response.data.DATA;
+  console.log('[EDGE->AI] request api:', response.data.DATA)
+
   const health = await ProductCollectionHealth();
 
   publishAck(

@@ -40,8 +40,10 @@ module.exports = {
     // 임베딩 모델 버전
     get modelVersion() {
         return process.env.MODEL_VERSION;
-    }
+    },
     // modelVersion: "v1.0.0",
     // storageType: "C",
     // hasLoadcell: "Y",
+    aiServerApi: 'http://139.150.8.82:2140',
+    
 }
