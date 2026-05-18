@@ -294,7 +294,7 @@ async function cameraStopSampling() {
 }
 
 async function startLoadcellRecording() {
-  const response = await axios.post(`${config.ioboardApi}/start`);
+  const response = await axios.post(`${config.ioboardApi}/recording/start`);
 
   if (response.status === 200) {
     console.log("[Loadcell] Recording started");
@@ -305,7 +305,7 @@ async function startLoadcellRecording() {
 }
 
 async function stopLoadcellRecording() {
-  const response = await axios.post(`${config.ioboardApi}/stop`);
+  const response = await axios.post(`${config.ioboardApi}/recording/stop`);
 
   if (response.status === 200) {
     console.log("[Loadcell] Recording stopped");
@@ -844,6 +844,7 @@ async function handleStartCollect(reqData, reqSysid) {
   const option = getLatestCollectOption();
   const hasLoadcell = option.hasLoadcell;
   const storageType = option.storageType;
+  const normalizedStorageType = normalizeStorageType(storageType);
 
   console.log("[AckCollect] hasLoadcell:", hasLoadcell);
   console.log("[AckCollect] storageType:", storageType);
@@ -913,7 +914,7 @@ async function handleStartCollect(reqData, reqSysid) {
     categoryIdx: category_idx,
     isNew: is_new,
     hasLoadcell: hasLoadcell,
-    storageType,
+    storageType: normalizedStorageType,
     deviceIdx: device_idx,
     divisionIdx: division_idx,
     productLoadcellWeight: product_loadcell_weight,
@@ -1112,8 +1113,10 @@ async function handleEndCollect(reqData, reqSysid) {
   await cameraStopSampling();
 
   const useLoadcell = session.has_loadcell === "Y";
+  console.log('session.has_loadcell', session.has_loadcell)
 
   if (useLoadcell) {
+    console.log('useLoadcell', useLoadcell)
     await stopLoadcellRecording();
   }
 

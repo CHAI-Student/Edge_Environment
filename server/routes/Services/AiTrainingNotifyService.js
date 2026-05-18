@@ -11,7 +11,7 @@ async function notifyTrainingStore({
   const res = await TrainingStore({
     productIdx,
     product_eng_name: productEngName,
-    training_status: String(trainingStatus),
+    training_status: trainingStatus,
   });
 
   return {

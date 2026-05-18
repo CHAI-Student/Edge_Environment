@@ -28,6 +28,8 @@ async function TrainingStore(productIdx, product_eng_name, training_status) {
                 product_idx: productIdx,
                 product_eng_name: product_eng_name,
                 training_status: training_status,
+                result_cd: 'S',
+                result_msg: `${product_eng_name} training data update is successful`
             },
         };
         
