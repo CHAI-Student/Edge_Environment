@@ -930,7 +930,9 @@ async function handleStartCollect(reqData, reqSysid) {
   if (useLoadcell) { 
     await startLoadcellRecording();
   }
-  // const loadcellWeight = await startLoadcellRecording();
+
+  const testLoadcellWeight = await startLoadcellRecording();
+  console.log('testLoadcellWeight', testLoadcellWeight)
 
   const health = await ProductCollectionHealth();
 
