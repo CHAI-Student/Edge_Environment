@@ -325,14 +325,21 @@ async function fetchRecordedLoadcellData() {
 
 // 3) 시계열에서 최종 무게 산출 (정책에 따라 골라야 함, 아래는 한 가지 예)
 function computeProductWeight(logs) {
-  if (!logs.length) return 0;
+  if (!Array.isArray(logs) || logs.length === 0) return 0;
 
-  // 가장 마지막 스냅샷의 10채널 합산 (예시 정책)
-  const last = logs[logs.length - 1];
-  const cells = last?.loadcells || [];
+  // 초기 3개 스냅샷의 3번째 채널(0-indexed = 2) 값 추출
+  const initialLogs = logs.slice(0, 3);
+  const CHANNEL_INDEX = 2;
 
-  const total = cells.reduce((sum, v) => sum + (parseInt(v, 10) || 0), 0);
-  return total;
+  const values = initialLogs
+    .map(snap => parseInt(snap?.loadcells?.[CHANNEL_INDEX], 10))
+    .filter(v => !Number.isNaN(v));
+
+  if (values.length === 0) return 0;
+
+  // 평균값 반환 (노이즈 완화)
+  const avg = values.reduce((a, b) => a + b, 0) / values.length;
+  return Math.round(avg);
 }
 
 function getAllFiles(dirPath, arrayOfFiles = []) {
@@ -1184,7 +1191,7 @@ async function handleEndCollect(reqData, reqSysid) {
   const productDoc = await syncProductMetadata({
     productIdx: product_idx,
     productEngName: product_eng_name,
-    productName: product_name,
+    // productName: product_name,
     categoryIdx: category_idx,
     isNew: is_new,
     foldername: uploadResult.foldername,
