@@ -951,15 +951,6 @@ async function handleStartCollect(reqData, reqSysid) {
   //   await startLoadcellRecording();
   // }
 
-  let updateLoadcellWeight = '';
-
-  if (useLoadcell) {
-    await stopLoadcellRecording();                  // 객체를 변수에 담지 않음
-    const logs = await fetchRecordedLoadcellData(); // 실제 데이터는 여기서
-    const weight = computeProductWeight(logs);
-    updateLoadcellWeight = String(weight);          // 반드시 String 캐스팅
-  }
-
   const testLoadcellWeight = await startLoadcellRecording();
   console.log('testLoadcellWeight', testLoadcellWeight)
 
@@ -1145,7 +1136,7 @@ async function handleEndCollect(reqData, reqSysid) {
     throw new Error("Door close timeout. Product collection cannot be finalized.");
   }
 
-  await cameraStopSampling();
+  // await cameraStopSampling();
 
   const useLoadcell = session.hasLoadcell === "Y";
   console.log('session.has_loadcell', session.hasLoadcell)
@@ -1153,7 +1144,18 @@ async function handleEndCollect(reqData, reqSysid) {
 
   if (useLoadcell) {
     console.log('useLoadcell', useLoadcell)
-    updateLoadcellWeight = await stopLoadcellRecording();
+
+    await stopLoadcellRecording();   // 끝났다는 신호만
+
+    try {
+      const logs = await fetchRecordedLoadcellData();
+      const weight = computeProductWeight(logs);
+      updateLoadcellWeight = String(weight);
+      console.log(`[Loadcell] computed weight: ${updateLoadcellWeight} (snapshots=${logs.length})`);
+    } catch (err) {
+      console.error('[Loadcell] weight calculation failed:', err.message);
+      updateLoadcellWeight = '';
+    }
   }
 
   console.log('Loadcell Weight: ', updateLoadcellWeight)
@@ -1189,7 +1191,8 @@ async function handleEndCollect(reqData, reqSysid) {
     folderpath: uploadResult.folderpath,
     filelength: uploadResult.filelength,
     storageType: normalizedStorageType,
-    productLoadcellWeight: product_loadcell_weight == null ? updateLoadcellWeight : product_loadcell_weight,
+    // productLoadcellWeight: product_loadcell_weight == null ? updateLoadcellWeight : product_loadcell_weight,
+    productLoadcellWeight: String(product_loadcell_weight == null ? updateLoadcellWeight : product_loadcell_weight),
     trainProductIdx: session.trainProductIdx,
   });
 
