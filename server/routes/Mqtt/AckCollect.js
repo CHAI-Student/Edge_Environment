@@ -328,6 +328,7 @@ function computeProductWeight(logs) {
   if (!Array.isArray(logs) || logs.length === 0) return 0;
 
   // 초기 3개 스냅샷의 3번째 채널(0-indexed = 2) 값 추출
+  console.log('[]')
   const initialLogs = logs.slice(0, 3);
   const CHANNEL_INDEX = 2;
 

@@ -354,8 +354,19 @@ async function init() {
           rfidToken = payload.data;
           CardMethod = 'R' // R = RFID
           console.log('[RFID-Token] Token received:', rfidToken);
-          // startProcess(rfidToken, CardMethod);
-      }
+          axios.get(`${config.restApi}/employee-uid/validate/${rfidToken}/${config.divisionIdx}`)
+              .then((response) => {
+                console.log('[PAYMENT] RFID Response:', response.data);
+                if (response.data.result == '0') {
+                  console.log('[RFID-Token] Token received:', response.data.message);
+                  startProcess(rfidToken, CardMethod); 
+                } else {
+                  console.log('[RFID-Token] Token received:', response.data.message);
+                }
+              }).catch((error) => {
+                console.error('RFID Approval Error:', error);
+              });
+        }
     });
 }
 
@@ -604,6 +615,14 @@ async function Payments(token, CardMethod) {
                     vankey_hash: String(paymentToken || token)
                 });
           }
+          // RFID 사원증
+          else if (CardMethod === "R"){
+            paymentResponse = {
+                    // amount: String(finalAmount),
+                    amount: '5',
+                    items
+            };
+          }
           else {  
             console.log("Undefined Card Method Detected.")
             return;
@@ -614,16 +633,24 @@ async function Payments(token, CardMethod) {
               // 형식: "payment_at": "2026-02-21T00:46:59.000",
               const paymentAt = new Date().toISOString().replace("Z", "");
               console.log("[PAYMENT] Success:", paymentResponse.data, token);
-              // console.log("[PAYMENY] Inference:", inferenceResult)
-              // console.log("[PAYMENT] ProductData:", productData)
               await sendToPNT(
                 paymentResponse.data,
                 inferenceResult,
                 folderPath,
                 paymentAt,
-                CardMethod,
-                productData
+                CardMethod
               )
+          } else if (paymentResponse && CardMethod === "R") {
+            // RFID 결제 정보 전송
+            const paymentAt = new Date().toISOString().replace("Z", "");
+            console.log("[PAYMENT] Success:", paymentResponse);
+            await sendToPNT(
+              paymentResponse,
+              inferenceResult,
+              folderPath,
+              paymentAt,
+              CardMethod
+            )
           } else {
               console.error("[PAYMENT] Failed:", paymentResponse.data);
           }
