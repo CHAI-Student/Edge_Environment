@@ -1136,7 +1136,7 @@ async function handleEndCollect(reqData, reqSysid) {
     throw new Error("Door close timeout. Product collection cannot be finalized.");
   }
 
-  // await cameraStopSampling();
+  await cameraStopSampling();
 
   const useLoadcell = session.hasLoadcell === "Y";
   console.log('session.has_loadcell', session.hasLoadcell)
