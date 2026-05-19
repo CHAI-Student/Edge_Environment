@@ -614,12 +614,14 @@ async function Payments(token, CardMethod) {
               // 형식: "payment_at": "2026-02-21T00:46:59.000",
               const paymentAt = new Date().toISOString().replace("Z", "");
               console.log("[PAYMENT] Success:", paymentResponse.data, token);
+              console.log("[PAYMENY")
               await sendToPNT(
                 paymentResponse.data,
                 inferenceResult,
                 folderPath,
                 paymentAt,
-                CardMethod
+                CardMethod,
+                productData
               )
           } else {
               console.error("[PAYMENT] Failed:", paymentResponse.data);

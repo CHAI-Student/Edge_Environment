@@ -7,7 +7,13 @@ const axios = require("axios");
 
 const dummyImg = path.join(__dirname, "../../log/dummyTestImg.png");
 
-async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt, CardMethod) {
+function formatIfDate(d = new Date()) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`
+         + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt, CardMethod, productData) {
     console.log("[PNT] Preparing IF_08 data transfer...");
     // console.log('paymentResponse', paymentResponse)
     try {
@@ -29,6 +35,9 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
 
         const fileName = path.basename(dummyImg);
         const stat = fs.statSync(dummyImg);
+        const productMap = new Map(
+            productData.map(p => [String(p.product_idx), p])
+        );
         
         // if (fs.existsSync(camFolderPath)) {
         //     const files = fs.readdirSync(camFolderPath);
@@ -64,8 +73,9 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
             HEADER: {
                 IF_ID: "IF_08",
                 IF_SYSID: uuidv4(),
-                IF_HOST: "CRKPNTCHAI",
-                IF_DATE: timestamp,
+                IF_HOST: "CRKPNTCHAI", // 엑셀에는 EDGE라고 적혀있음
+                // IF_DATE: timestamp,
+                IF_DATE: formatIfDate(),
             },
             DATA:{
                 device_idx: config.deviceIdx,
@@ -74,20 +84,42 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
                 payment_at: paymentAt,
                 approve_at: paymentResponse.authorization_date,
                 approve_type: CardMethod === 'R' ? '2' : (CardMethod === 'S' ? '1' : '0'), // 0=일반카드, 1=삼성페이, 2=RFID
-                approve_result: 'SUCCESS',
+                approve_result: (paymentResponse === "Y")? 0 : 1,
                 approve_price: inferenceResult.totalPrice,
                 approve_no: paymentResponse.authorization_number,
                 approve_card_issuer: paymentResponse.card_info.ISSUER_NAME,
                 approve_card_num: paymentResponse.card_info.SERIAL_NUMBER,
                 approve_card_json: JSON.stringify(paymentResponse),
                 provider: "chai",
-                state: inferenceResult.status === 'success' ? '0' : '1',
-                product_idx: inferenceResult.products.map(p => p.productId).join(","),
-                product_count: inferenceResult.products.map(p => p.count).join(","),
-                file_name: fileName,
-                // file_ext: 'mp4',
-                file_ext: 'png',
-                file_size: stat.size,
+                state: inferenceResult.status === 'Y' ? '0' : '1',
+                product_list: inferenceResult.products.map(p => {
+                    const master = productMap.get(String(p.productId));
+
+                    if (!master) {
+                        console.warn(
+                            `[PNT] Product master not found in IF_11: productId=${p.productId}. ` +
+                            `Falling back to unitPrice for sale_price, 0 for supply_price.`
+                        );
+                    }
+
+                    return {
+                        product_idx: String(p.productId),
+                        product_count: Number(p.count),
+                        supply_price: Number(master?.supply_price ?? 0),
+                        sale_price: Number(master?.sale_price ?? p.unitPrice ?? 0),
+                    };
+                }),
+                // product_idx: inferenceResult.products.map(p => p.productId).join(","),
+                // product_count: inferenceResult.products.map(p => p.count).join(","),
+                payment_file_list: {
+                    file_name: fileName,
+                    file_ext: 'png',
+                    file_size: stat.size,
+                },
+                // file_name: fileName,
+                // // file_ext: 'mp4',
+                // file_ext: 'png',
+                // file_size: stat.size,
             }
         }
         // 3) FormData 구성 (payload + paymentFile)
@@ -95,7 +127,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         form.append("payload", JSON.stringify(payload), {
            contentType: "application/json"  // 추가
         });
-        form.append("paymentFile", fs.createReadStream(dummyImg), {
+        form.append("payment_file", fs.createReadStream(dummyImg), {
             filename: fileName,
             // contentType: "video/mp4",
             contentType: "image/png",
