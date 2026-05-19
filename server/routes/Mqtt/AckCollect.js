@@ -1090,6 +1090,7 @@ async function handleEndCollect(reqData, reqSysid) {
   } = reqData;
 
   console.log("[AckCollect] END collect:", product_idx);
+  console.log('[COLLECT] end: ', reqData)
 
   // DoorCollect(IF04) 기준 설정값 조회
   const option = getLatestCollectOption();
@@ -1105,6 +1106,7 @@ async function handleEndCollect(reqData, reqSysid) {
     throw new Error(`No active collect session found for product_idx=${product_idx}`);
   }
   const storageType = session.storageType;
+  const normalizedStorageType = normalizeStorageType(storageType);
 
   const closed = await waitUntilDoorClosed();
 
@@ -1122,6 +1124,8 @@ async function handleEndCollect(reqData, reqSysid) {
     console.log('useLoadcell', useLoadcell)
     updateLoadcellWeight = await stopLoadcellRecording();
   }
+
+  console.log('Loadcell Weight: ', updateLoadcellWeight)
 
   // const loadcellWeight = await stopLoadcellRecording();
 
@@ -1153,7 +1157,7 @@ async function handleEndCollect(reqData, reqSysid) {
     foldername: uploadResult.foldername,
     folderpath: uploadResult.folderpath,
     filelength: uploadResult.filelength,
-    storageType: storageType,
+    storageType: normalizedStorageType,
     productLoadcellWeight: product_loadcell_weight == null ? updateLoadcellWeight : product_loadcell_weight,
     trainProductIdx: session.trainProductIdx,
   });
@@ -1164,7 +1168,7 @@ async function handleEndCollect(reqData, reqSysid) {
   const mappingResult = await syncDivisionAndDeviceTypeMapping({
       divisionIdx: division_idx,
       deviceIdx: device_idx,
-      storageType,
+      storageType: normalizedStorageType,
   });
 
   /**
