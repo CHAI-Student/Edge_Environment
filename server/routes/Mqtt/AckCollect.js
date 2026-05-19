@@ -1116,10 +1116,11 @@ async function handleEndCollect(reqData, reqSysid) {
 
   const useLoadcell = session.hasLoadcell === "Y";
   console.log('session.has_loadcell', session.hasLoadcell)
+  let updateLoadcellWeight = ''
 
   if (useLoadcell) {
     console.log('useLoadcell', useLoadcell)
-    await stopLoadcellRecording();
+    updateLoadcellWeight = await stopLoadcellRecording();
   }
 
   // const loadcellWeight = await stopLoadcellRecording();
@@ -1153,7 +1154,7 @@ async function handleEndCollect(reqData, reqSysid) {
     folderpath: uploadResult.folderpath,
     filelength: uploadResult.filelength,
     storageType: storageType,
-    productLoadcellWeight: product_loadcell_weight,
+    productLoadcellWeight: product_loadcell_weight == null ? updateLoadcellWeight : product_loadcell_weight,
     trainProductIdx: session.trainProductIdx,
   });
 
