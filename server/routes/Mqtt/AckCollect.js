@@ -660,6 +660,8 @@ async function notifyAiTrainingStore(product) {
 function normalizeStorageType(storageType) {
   if (storageType === "C") return "COLD";
   if (storageType === "F") return "FROZEN";
+  if (storageType === "COLD") return "COLD";
+  if (storageType === "FROZEN") return "FROZEN";
   return "UNKNOWN";
 }
 
@@ -676,7 +678,7 @@ async function syncDivisionAndDeviceTypeMapping({
 }) {
 
   await ensureMongoConnected();
-  const normalizedStorageType = normalizeStorageType(storageType);
+  const DivisionStorageType = normalizeStorageType(storageType);
   const now = new Date();
 
   /**
@@ -690,7 +692,7 @@ async function syncDivisionAndDeviceTypeMapping({
   const productDocs = await ProductUpload.find(
     {
       trainingStatus: "2",
-      storageType: normalizedStorageType,
+      storageType: DivisionStorageType,
     },
     { _id: 1 }
   ).lean();
@@ -1135,7 +1137,7 @@ async function handleEndCollect(reqData, reqSysid) {
     throw new Error(`No active collect session found for product_idx=${product_idx}`);
   }
   const storageType = session.storageType;
-  const normalizedStorageType = normalizeStorageType(storageType);
+  const finalStorageType = normalizeStorageType(storageType);
 
   const closed = await waitUntilDoorClosed();
 
@@ -1197,7 +1199,7 @@ async function handleEndCollect(reqData, reqSysid) {
     foldername: uploadResult.foldername,
     folderpath: uploadResult.folderpath,
     filelength: uploadResult.filelength,
-    storageType: normalizedStorageType,
+    storageType: finalStorageType,
     // productLoadcellWeight: product_loadcell_weight == null ? updateLoadcellWeight : product_loadcell_weight,
     productLoadcellWeight: String(product_loadcell_weight == null ? updateLoadcellWeight : product_loadcell_weight),
     trainProductIdx: session.trainProductIdx,
@@ -1209,7 +1211,7 @@ async function handleEndCollect(reqData, reqSysid) {
   const mappingResult = await syncDivisionAndDeviceTypeMapping({
       divisionIdx: division_idx,
       deviceIdx: device_idx,
-      storageType: normalizedStorageType,
+      storageType: finalStorageType,
   });
 
   /**
