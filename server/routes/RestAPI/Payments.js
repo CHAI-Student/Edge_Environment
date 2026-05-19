@@ -348,7 +348,7 @@ async function init() {
     // rfid:::: {"data": "1763193013"}
     // 사원증 토큰 수신
     TokenHandler.addEventListener('rfid_init', (event) => {
-      const checkRFID = await ModelBrunchCheck({
+      const checkRFID = ModelBrunchCheck({
         division_idx: config.divisionIdx,
         device_idx: config.deviceIdx || null,
         productIdx: null,
