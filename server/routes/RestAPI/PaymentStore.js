@@ -111,11 +111,11 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
                 }),
                 // product_idx: inferenceResult.products.map(p => p.productId).join(","),
                 // product_count: inferenceResult.products.map(p => p.count).join(","),
-                payment_file_list: {
+                payment_file_list: [{
                     file_name: fileName,
                     file_ext: 'png',
                     file_size: stat.size,
-                },
+                }],
                 // file_name: fileName,
                 // // file_ext: 'mp4',
                 // file_ext: 'png',
