@@ -347,37 +347,41 @@ async function init() {
 
     // rfid:::: {"data": "1763193013"}
     // 사원증 토큰 수신
-    TokenHandler.addEventListener('rfid_init', (event) => {
-      const checkRFID = ModelBrunchCheck({
-        division_idx: config.divisionIdx,
-        device_idx: config.deviceIdx || null,
-        productIdx: null,
-      });
-      console.log('checkRFID.DATA ======>', checkRFID.DATA)
-      // if (checkRFID.DATA.device_list.payment_type == 'POINT') {
-        const payload = JSON.parse(event.data);
-        console.log('rfid::::', payload); // {"data": "1763193013"}
-        if (payload.data) {
-            // PNT한테 사원증 토큰 전송 후 유효성 검사하기
-            rfidToken = payload.data;
-            CardMethod = 'R' // R = RFID
-            console.log('[RFID-Token] Token received:', rfidToken);
-            axios.get(`${config.restApi}/employee-uid/validate/${rfidToken}/${config.divisionIdx}`)
-                .then((response) => {
-                  console.log('[PAYMENT] RFID Response:', response.data);
-                  if (response.data.result == '0') {
-                    console.log('[RFID-Token] Token received:', response.data.message);
-                    startProcess(rfidToken, CardMethod); 
-                  } else {
-                    console.log('[RFID-Token] Token received:', response.data.message);
-                  }
-                }).catch((error) => {
-                  console.error('RFID Approval Error:', error);
-                });
+    TokenHandler.addEventListener('rfid_init', async (event) => {
+      try {
+        const checkRFID = await ModelBrunchCheck({
+          division_idx: config.divisionIdx,
+          device_idx: config.deviceIdx || null,
+          productIdx: null,
+        });
+        console.log('checkRFID.DATA ======>', checkRFID.DATA)
+        const paymentType = checkRFID?.DATA?.device_list?.payment_type;
+        console.log('paymentType ======>', paymentType);
+        if (paymentType == 'POINT') {
+          const payload = JSON.parse(event.data);
+          console.log('rfid::::', payload); // {"data": "1763193013"}
+          if (payload.data) {
+              // PNT한테 사원증 토큰 전송 후 유효성 검사하기
+              rfidToken = payload.data;
+              CardMethod = 'R' // R = RFID
+              console.log('[RFID-Token] Token received:', rfidToken);
+              await axios.get(`${config.restApi}/employee-uid/validate/${rfidToken}/${config.divisionIdx}`)
+                  .then((response) => {
+                    console.log('[PAYMENT] RFID Response:', response.data);
+                    if (response.data.result == '0') {
+                      console.log('[RFID-Token] Token received:', response.data.message);
+                      startProcess(rfidToken, CardMethod); 
+                    } else {
+                      console.log('[RFID-Token] Token received:', response.data.message);
+                    }
+                  })
+          }
+        } else {
+          console.log('[RFID-Token] This is not RFID Device');
         }
-      // } else {
-      //   console.log('[RFID-Token] This is not RFID Device');
-      // }
+      } catch (error) {
+        console.error('RFID Approval Error:', error);
+      }
     });
 }
 

@@ -145,7 +145,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
             maxBodyLength: Infinity,
             maxContentLength: Infinity,
         });
-        console.log('response', response)
+        // console.log('response', response)
         if (response.status === 200) {
             console.log("[PNT] Transfer Success:", response.data);
             return true;
