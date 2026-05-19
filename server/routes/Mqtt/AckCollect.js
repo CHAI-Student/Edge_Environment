@@ -479,7 +479,7 @@ async function syncProductMetadata({
   ).lean();
 
   const now = new Date();
-  console.log('[MONGODB]productLoadcellWeight', productLoadcellWeight)
+  console.log('[MONGODB] storageType', storageType)
   const setOnInsert = {};
 
   // if (!existing) {
