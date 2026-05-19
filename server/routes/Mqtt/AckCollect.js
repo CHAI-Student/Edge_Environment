@@ -702,14 +702,16 @@ async function syncDivisionAndDeviceTypeMapping({
   /**
    * DeviceTypeUpload 갱신
    */
-  const brunchName =
-    `${divisionIdx}_${brunchSuffixFromStorageType(normalizedStorageType)}`;
+  const brunchNameStorageType = brunchSuffixFromStorageType(normalizedStorageType)
+  const brunchName = `${divisionIdx}_${brunchNameStorageType}`;
 
   const deviceTypeDoc = await DeviceTypeUpload.findOne({
-      divisionIdx,
-      storageType: normalizedStorageType,
+      // divisionIdx,
+      // storageType: normalizedStorageType,
+      brunchName
     }).lean();
 
+  ///deviceIdx 중복 제거
   const deviceTypeDeviceIdxArr = Array.from(
     new Set([
       ...(deviceTypeDoc?.deviceIdx || []),
@@ -719,8 +721,9 @@ async function syncDivisionAndDeviceTypeMapping({
 
   await DeviceTypeUpload.updateOne(
     {
-      divisionIdx,
-      storageType: normalizedStorageType,
+      // divisionIdx,
+      // storageType: normalizedStorageType,
+      brunchName
     },
     {
       $set: {
@@ -883,8 +886,7 @@ async function handleStartCollect(reqData, reqSysid) {
 
   const timestamp = makeTimestampFolderName();
 
-  const foldername =
-    `${trainProductIdx}_${product_eng_name}_${timestamp}`;
+  const foldername = `${trainProductIdx}_${product_eng_name}_${timestamp}`;
 
   const BASE_PRODUCT_PATH = path.resolve(
     process.cwd(),
@@ -1112,8 +1114,8 @@ async function handleEndCollect(reqData, reqSysid) {
 
   await cameraStopSampling();
 
-  const useLoadcell = session.has_loadcell === "Y";
-  console.log('session.has_loadcell', session.has_loadcell)
+  const useLoadcell = session.hasLoadcell === "Y";
+  console.log('session.has_loadcell', session.hasLoadcell)
 
   if (useLoadcell) {
     console.log('useLoadcell', useLoadcell)
@@ -1202,7 +1204,7 @@ async function handleEndCollect(reqData, reqSysid) {
   const formattedDate = now.toISOString().replace(/[-:T]/g, "").slice(0, 14);
   const sysidDate = now.toISOString().replace(/[-:T]/g, "").slice(0, 8);
   const sysidTime = now.toISOString().replace(/[-:T]/g, "").slice(8, 14);
-  const aiStorageType = storageType == 'C' ? 'True' : 'False';
+  const aiStorageType = storageType == 'COLD' ? 'True' : 'False';
 
   const payload = {
       HEADER: {
@@ -1212,7 +1214,7 @@ async function handleEndCollect(reqData, reqSysid) {
           IF_DATE : formattedDate
       },
       DATA: {
-          division_idx: session.division_idx,
+          division_idx: session.divisionIdx,
           // True: 냉장(Cold) / False: 냉동(Frozen)
           is_cold: aiStorageType
       },
