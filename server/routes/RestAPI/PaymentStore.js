@@ -16,6 +16,8 @@ function formatIfDate(d = new Date()) {
 async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt, CardMethod, productData) {
     console.log("[PNT] Preparing IF_08 data transfer...");
     console.log('paymentResponse', paymentResponse)
+    console.log("[PNT] productData:", productData);
+    console.log("[PNT] inferenceResult.products:", inferenceResult?.products);
     try {
         // 추후 카메라가 촬영한 영상으로 전송
         // const camFolderPath = path.join(folderPath, "archival", "cam_0");
