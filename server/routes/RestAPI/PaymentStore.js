@@ -95,20 +95,20 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
                 provider: "chai",
                 state: inferenceResult.status === 'Y' ? '0' : '1',
                 product_list: inferenceResult.products.map(p => {
-                    const master = productMap.get(String(p.productId));
+                    const master = productMap.get(String(p.productIdx));
 
                     if (!master) {
                         console.warn(
-                            `[PNT] Product master not found in IF_11: productId=${p.productId}. ` +
+                            `[PNT] Product master not found in IF_11: productId=${p.productIdx}. ` +
                             `Falling back to unitPrice for sale_price, 0 for supply_price.`
                         );
                     }
 
                     return {
-                        product_idx: String(p.productId),
+                        product_idx: String(p.productIdx),
                         product_count: Number(p.count),
-                        supply_price: Number(master?.supply_price ?? 0),
-                        sale_price: Number(master?.sale_price ?? p.unitPrice ?? 0),
+                        supply_price: Number(master.supply_price),
+                        sale_price: Number(master.sale_price),
                     };
                 }),
                 // product_idx: inferenceResult.products.map(p => p.productId).join(","),

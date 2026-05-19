@@ -353,8 +353,8 @@ async function init() {
         device_idx: config.deviceIdx || null,
         productIdx: null,
       });
-      console.log('checkRFID.DATA.device_list.payment_type ======>', checkRFID.DATA.device_list.payment_type)
-      if (checkRFID.DATA.device_list.payment_type == 'POINT') {
+      console.log('checkRFID.DATA ======>', checkRFID.DATA)
+      // if (checkRFID.DATA.device_list.payment_type == 'POINT') {
         const payload = JSON.parse(event.data);
         console.log('rfid::::', payload); // {"data": "1763193013"}
         if (payload.data) {
@@ -375,9 +375,9 @@ async function init() {
                   console.error('RFID Approval Error:', error);
                 });
         }
-      } else {
-        console.log('[RFID-Token] This is not RFID Device');
-      }
+      // } else {
+      //   console.log('[RFID-Token] This is not RFID Device');
+      // }
     });
 }
 
