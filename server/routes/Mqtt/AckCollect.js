@@ -653,6 +653,8 @@ async function notifyAiTrainingStore(product) {
 function normalizeStorageType(storageType) {
   if (storageType === "C") return "COLD";
   if (storageType === "F") return "FROZEN";
+  if (storageType === "COLD") return "COLD";
+  if (storageType === "FROZEN") return "FROZEN";
   return "UNKNOWN";
 }
 
@@ -926,6 +928,16 @@ async function handleStartCollect(reqData, reqSysid) {
   //   `${safe(product_idx)}_${safe(product_eng_name)}_${timestamp}`
   // );
 
+  const useLoadcell = hasLoadcell === "Y";
+  console.log("Loadcell is", useLoadcell);
+
+  let loadcellStarted = false;
+
+  if (useLoadcell) {
+    await startLoadcellRecording();
+    loadcellStarted = true;
+  }
+
   collectSessions.set(String(product_idx), {
     timestamp,
     foldername,
@@ -940,19 +952,17 @@ async function handleStartCollect(reqData, reqSysid) {
     deviceIdx: device_idx,
     divisionIdx: division_idx,
     productLoadcellWeight: product_loadcell_weight,
+    loadcellStarted,
   });
 
   await cameraStartSampling(productFolder, [0, 2]);
-
-  const useLoadcell = hasLoadcell === "Y";
-  console.log('Loadcell is', useLoadcell)
 
   // if (useLoadcell) { 
   //   await startLoadcellRecording();
   // }
 
-  const testLoadcellWeight = await startLoadcellRecording();
-  console.log('testLoadcellWeight', testLoadcellWeight)
+  // const testLoadcellWeight = await startLoadcellRecording();
+  // console.log('testLoadcellWeight', testLoadcellWeight)
 
   const health = await ProductCollectionHealth();
 
@@ -1127,8 +1137,9 @@ async function handleEndCollect(reqData, reqSysid) {
   if (!session) {
     throw new Error(`No active collect session found for product_idx=${product_idx}`);
   }
-  const storageType = session.storageType;
-  const normalizedStorageType = normalizeStorageType(storageType);
+  // const storageType = session.storageType;
+  // const normalizedStorageType = normalizeStorageType(storageType);
+  const normalizedStorageType = session.storageType;
 
   const closed = await waitUntilDoorClosed();
 
@@ -1136,7 +1147,11 @@ async function handleEndCollect(reqData, reqSysid) {
     throw new Error("Door close timeout. Product collection cannot be finalized.");
   }
 
-  // await cameraStopSampling();
+  await cameraStopSampling();
+
+  await new Promise(resolve =>
+    setTimeout(resolve, 1000)
+  );
 
   const useLoadcell = session.hasLoadcell === "Y";
   console.log('session.has_loadcell', session.hasLoadcell)
@@ -1181,6 +1196,12 @@ async function handleEndCollect(reqData, reqSysid) {
     throw new Error(uploadResult.message || "MinIO upload failed");
   }
 
+  const finalWeight =
+  product_loadcell_weight
+  && product_loadcell_weight !== ""
+    ? product_loadcell_weight
+    : updateLoadcellWeight;
+
   const productDoc = await syncProductMetadata({
     productIdx: product_idx,
     productEngName: product_eng_name,
@@ -1192,7 +1213,8 @@ async function handleEndCollect(reqData, reqSysid) {
     filelength: uploadResult.filelength,
     storageType: normalizedStorageType,
     // productLoadcellWeight: product_loadcell_weight == null ? updateLoadcellWeight : product_loadcell_weight,
-    productLoadcellWeight: String(product_loadcell_weight == null ? updateLoadcellWeight : product_loadcell_weight),
+    // productLoadcellWeight: String(product_loadcell_weight == null ? updateLoadcellWeight : product_loadcell_weight),
+    productLoadcellWeight: finalWeight,
     trainProductIdx: session.trainProductIdx,
   });
 
@@ -1243,7 +1265,8 @@ async function handleEndCollect(reqData, reqSysid) {
   const formattedDate = now.toISOString().replace(/[-:T]/g, "").slice(0, 14);
   const sysidDate = now.toISOString().replace(/[-:T]/g, "").slice(0, 8);
   const sysidTime = now.toISOString().replace(/[-:T]/g, "").slice(8, 14);
-  const aiStorageType = storageType == 'COLD' ? 'True' : 'False';
+  // const aiStorageType = storageType == 'COLD' ? 'True' : 'False';
+  const aiStorageType = normalizedStorageType === "COLD" ? "True" : "False";
 
   const payload = {
       HEADER: {
