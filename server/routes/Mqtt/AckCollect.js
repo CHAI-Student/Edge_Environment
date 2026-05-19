@@ -304,15 +304,35 @@ async function startLoadcellRecording() {
   throw new Error(`[Loadcell] Start failed: ${JSON.stringify(response.data)}`);
 }
 
+// 1) 녹화 종료 (응답은 무게가 아님, 그냥 "끝났다" 신호로만 사용)
 async function stopLoadcellRecording() {
   const response = await axios.post(`${config.ioboardApi}/recording/stop`);
-
   if (response.status === 200) {
     console.log("[Loadcell] Recording stopped");
-    return response.data;
+    return true;
   }
-
   throw new Error(`[Loadcell] Stop failed: ${JSON.stringify(response.data)}`);
+}
+
+// 2) 기록된 데이터 조회 → 무게 계산
+async function fetchRecordedLoadcellData() {
+  const response = await axios.get(`${config.ioboardApi}/recording/data`);
+  if (response.status !== 200) {
+    throw new Error(`[Loadcell] Data fetch failed: ${JSON.stringify(response.data)}`);
+  }
+  return response.data?.logs || [];
+}
+
+// 3) 시계열에서 최종 무게 산출 (정책에 따라 골라야 함, 아래는 한 가지 예)
+function computeProductWeight(logs) {
+  if (!logs.length) return 0;
+
+  // 가장 마지막 스냅샷의 10채널 합산 (예시 정책)
+  const last = logs[logs.length - 1];
+  const cells = last?.loadcells || [];
+
+  const total = cells.reduce((sum, v) => sum + (parseInt(v, 10) || 0), 0);
+  return total;
 }
 
 function getAllFiles(dirPath, arrayOfFiles = []) {
@@ -927,8 +947,17 @@ async function handleStartCollect(reqData, reqSysid) {
   const useLoadcell = hasLoadcell === "Y";
   console.log('Loadcell is', useLoadcell)
 
-  if (useLoadcell) { 
-    await startLoadcellRecording();
+  // if (useLoadcell) { 
+  //   await startLoadcellRecording();
+  // }
+
+  let updateLoadcellWeight = '';
+
+  if (useLoadcell) {
+    await stopLoadcellRecording();                  // 객체를 변수에 담지 않음
+    const logs = await fetchRecordedLoadcellData(); // 실제 데이터는 여기서
+    const weight = computeProductWeight(logs);
+    updateLoadcellWeight = String(weight);          // 반드시 String 캐스팅
   }
 
   const testLoadcellWeight = await startLoadcellRecording();
