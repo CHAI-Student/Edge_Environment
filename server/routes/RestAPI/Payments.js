@@ -355,7 +355,7 @@ async function init() {
           productIdx: null,
         });
         console.log('checkRFID.DATA ======>', checkRFID.DATA)
-        const paymentType = checkRFID?.DATA?.device_list?.payment_type;
+        const paymentType = checkRFID.DATA.device_list[0].payment_type;
         console.log('paymentType ======>', paymentType);
         if (paymentType == 'POINT') {
           const payload = JSON.parse(event.data);
