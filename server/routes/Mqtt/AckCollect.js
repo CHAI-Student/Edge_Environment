@@ -327,19 +327,49 @@ async function fetchRecordedLoadcellData() {
 function computeProductWeight(logs) {
   if (!Array.isArray(logs) || logs.length === 0) return 0;
 
-  // 초기 3개 스냅샷의 3번째 채널(0-indexed = 2) 값 추출
-  console.log('[]')
-  const initialLogs = logs.slice(0, 3);
-  const CHANNEL_INDEX = 2;
+  const CHANNEL_INDEX = 2;      // 3번째 로드셀
+  const OFFSET_MS = 5000;       // startLoadcellRecording 이후 5초
+  const WINDOW_MS = 3000;       // 3초 동안
 
-  const values = initialLogs
-    .map(snap => parseInt(snap?.loadcells?.[CHANNEL_INDEX], 10))
-    .filter(v => !Number.isNaN(v));
+  const validLogs = logs
+    .filter(snap => snap?.timestamp && Array.isArray(snap?.loadcells))
+    .map(snap => ({
+      timestamp: new Date(snap.timestamp).getTime(),
+      value: parseInt(snap.loadcells[CHANNEL_INDEX], 10),
+      raw: snap,
+    }))
+    .filter(x => Number.isFinite(x.timestamp) && !Number.isNaN(x.value))
+    .sort((a, b) => a.timestamp - b.timestamp);
 
-  if (values.length === 0) return 0;
+  if (validLogs.length === 0) return 0;
 
-  // 평균값 반환 (노이즈 완화)
-  const avg = values.reduce((a, b) => a + b, 0) / values.length;
+  // 기록 데이터가 startLoadcellRecording 호출 시점부터 쌓인다는 전제
+  const recordingStartTime = validLogs[0].timestamp;
+  const windowStartTime = recordingStartTime + OFFSET_MS;
+  const windowEndTime = windowStartTime + WINDOW_MS;
+
+  const values = validLogs
+    .filter(x => x.timestamp >= windowStartTime && x.timestamp < windowEndTime)
+    .map(x => x.value);
+
+  if (values.length === 0) {
+    console.warn("[Loadcell] No values found in target window");
+    return 0;
+  }
+
+  const avg = values.reduce((sum, v) => sum + v, 0) / values.length;
+
+  // console.log("[Loadcell] weight window:", {
+  //   recordingStartTime: new Date(recordingStartTime).toISOString(),
+  //   windowStartTime: new Date(windowStartTime).toISOString(),
+  //   windowEndTime: new Date(windowEndTime).toISOString(),
+  //   channelIndex: CHANNEL_INDEX,
+  //   sampleCount: values.length,
+  //   min: Math.min(...values),
+  //   max: Math.max(...values),
+  //   avg,
+  // });
+
   return Math.round(avg);
 }
 
