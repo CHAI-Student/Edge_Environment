@@ -22,15 +22,24 @@ async function TrainingStore(productIdx, product_eng_name, training_status) {
                 IF_HOST : "CRKPNTCHAI",
                 IF_DATE : formattedDate
             },
+            // DATA: {
+            //     division_idx: config.divisionIdx,
+            //     device_idx: config.deviceIdx,
+            //     product_idx: productIdx,
+            //     product_eng_name: product_eng_name,
+            //     training_status: training_status,
+            //     result_cd: 'S',
+            //     result_msg: `${product_eng_name} training data update is successful`
+            // },
             DATA: {
-                division_idx: config.divisionIdx,
-                device_idx: config.deviceIdx,
-                product_idx: productIdx,
-                product_eng_name: product_eng_name,
-                training_status: training_status,
-                result_cd: 'S',
-                result_msg: `${product_eng_name} training data update is successful`
-            },
+                product_list: {
+                    division_idx: config.divisionIdx,
+                    device_idx: config.deviceIdx,
+                    product_idx: String(productIdx),
+                    product_eng_name: product_eng_name,
+                    training_status: String(training_status)
+                },
+            }
         };
         
         const response = await axios.post(targetUrl, payload);
