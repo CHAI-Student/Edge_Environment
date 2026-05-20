@@ -13,7 +13,7 @@ function formatIfDate(d = new Date()) {
          + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
-async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt, CardMethod, productData) {
+async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt, CardMethod, productData, token) {
     console.log("[PNT] Preparing IF_08 data transfer...");
     console.log('paymentResponse', paymentResponse)
     console.log("[PNT] productData:", productData);
@@ -71,57 +71,126 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         });
 
         const timestamp = Date.now();
-        const payload = {
-            HEADER: {
-                IF_ID: "IF_08",
-                IF_SYSID: uuidv4(),
-                IF_HOST: "CRKPNTCHAI", // 엑셀에는 EDGE라고 적혀있음
-                // IF_DATE: timestamp,
-                IF_DATE: formatIfDate(),
-            },
-            DATA:{
-                device_idx: config.deviceIdx,
-                division_idx: config.divisionIdx,
-                token_id: paymentResponse.vankey_hash || paymentResponse.vankey,
-                payment_at: paymentAt,
-                approve_at: paymentResponse.authorization_date,
-                approve_type: CardMethod === 'R' ? '2' : (CardMethod === 'S' ? '1' : '0'), // 0=일반카드, 1=삼성페이, 2=RFID
-                approve_result: (paymentResponse === "Y")? 0 : 1,
-                approve_price: inferenceResult.totalPrice,
-                approve_no: paymentResponse.authorization_number,
-                approve_card_issuer: paymentResponse.card_info.ISSUER_NAME,
-                approve_card_num: paymentResponse.card_info.SERIAL_NUMBER,
-                approve_card_json: JSON.stringify(paymentResponse),
-                provider: "chai",
-                state: inferenceResult.status === 'Y' ? '0' : '1',
-                product_list: inferenceResult.products.map(p => {
-                    const master = productMap.get(String(p.productIdx));
 
-                    if (!master) {
-                        console.warn(
-                            `[PNT] Product master not found in IF_11: productId=${p.productIdx}. ` +
-                            `Falling back to unitPrice for sale_price, 0 for supply_price.`
-                        );
-                    }
+        const now = new Date();
+        const rfidTime =
+        String(now.getFullYear()).slice(2) +
+        String(now.getMonth() + 1).padStart(2, "0") +
+        String(now.getDate()).padStart(2, "0") +
+        // String(now.getHours()).padStart(2, "0") +
+        // String(now.getMinutes()).padStart(2, "0") +
+        // String(now.getSeconds()).padStart(2, "0");
+        console.log(rfidTime);
 
-                    return {
-                        product_idx: String(p.productIdx),
-                        product_count: Number(p.count),
-                        supply_price: Number(master.supply_price),
-                        sale_price: Number(master.sale_price),
-                    };
-                }),
-                // product_idx: inferenceResult.products.map(p => p.productId).join(","),
-                // product_count: inferenceResult.products.map(p => p.count).join(","),
-                payment_file_list: [{
-                    file_name: fileName,
-                    file_ext: 'png',
-                    file_size: stat.size,
-                }],
-                // file_name: fileName,
-                // // file_ext: 'mp4',
-                // file_ext: 'png',
-                // file_size: stat.size,
+        const payload = {}
+
+        if (CardMethod == R) {
+            payload = {
+                HEADER: {
+                    IF_ID: "IF_08",
+                    IF_SYSID: uuidv4(),
+                    IF_HOST: "CRKPNTCHAI", // 엑셀에는 EDGE라고 적혀있음
+                    // IF_DATE: timestamp,
+                    IF_DATE: formatIfDate(),
+                },
+                DATA:{
+                    device_idx: config.deviceIdx,
+                    division_idx: config.divisionIdx,
+                    token_id: token,
+                    payment_at: paymentAt,
+                    approve_at: rfidTime,
+                    approve_type: CardMethod === 'R' ? '2' : (CardMethod === 'S' ? '1' : '0'), // 0=일반카드, 1=삼성페이, 2=RFID
+                    approve_result: 1,
+                    approve_price: inferenceResult.totalPrice,
+                    approve_no: token,
+                    approve_card_issuer: 'POINT',
+                    approve_card_num: token,
+                    approve_card_json: JSON.stringify(paymentResponse),
+                    provider: "chai",
+                    state: inferenceResult.status === 'Y' ? '0' : '1',
+                    product_list: inferenceResult.products.map(p => {
+                        const master = productMap.get(String(p.productIdx));
+
+                        if (!master) {
+                            console.warn(
+                                `[PNT] Product master not found in IF_11: productId=${p.productIdx}. ` +
+                                `Falling back to unitPrice for sale_price, 0 for supply_price.`
+                            );
+                        }
+
+                        return {
+                            product_idx: String(p.productIdx),
+                            product_count: Number(p.count),
+                            supply_price: Number(master.supply_price),
+                            sale_price: Number(master.sale_price),
+                        };
+                    }),
+                    // product_idx: inferenceResult.products.map(p => p.productId).join(","),
+                    // product_count: inferenceResult.products.map(p => p.count).join(","),
+                    payment_file_list: [{
+                        file_name: fileName,
+                        file_ext: 'png',
+                        file_size: stat.size,
+                    }],
+                    // file_name: fileName,
+                    // // file_ext: 'mp4',
+                    // file_ext: 'png',
+                    // file_size: stat.size,
+                }
+            }
+        } else {
+            payload = {
+                HEADER: {
+                    IF_ID: "IF_08",
+                    IF_SYSID: uuidv4(),
+                    IF_HOST: "CRKPNTCHAI", // 엑셀에는 EDGE라고 적혀있음
+                    // IF_DATE: timestamp,
+                    IF_DATE: formatIfDate(),
+                },
+                DATA:{
+                    device_idx: config.deviceIdx,
+                    division_idx: config.divisionIdx,
+                    token_id: paymentResponse.vankey_hash || paymentResponse.vankey,
+                    payment_at: paymentAt,
+                    approve_at: paymentResponse.authorization_date,
+                    approve_type: CardMethod === 'R' ? '2' : (CardMethod === 'S' ? '1' : '0'), // 0=일반카드, 1=삼성페이, 2=RFID
+                    approve_result: (paymentResponse === "Y")? 0 : 1,
+                    approve_price: inferenceResult.totalPrice,
+                    approve_no: paymentResponse.authorization_number,
+                    approve_card_issuer: paymentResponse.card_info.ISSUER_NAME,
+                    approve_card_num: paymentResponse.card_info.SERIAL_NUMBER,
+                    approve_card_json: JSON.stringify(paymentResponse),
+                    provider: "chai",
+                    state: inferenceResult.status === 'Y' ? '0' : '1',
+                    product_list: inferenceResult.products.map(p => {
+                        const master = productMap.get(String(p.productIdx));
+
+                        if (!master) {
+                            console.warn(
+                                `[PNT] Product master not found in IF_11: productId=${p.productIdx}. ` +
+                                `Falling back to unitPrice for sale_price, 0 for supply_price.`
+                            );
+                        }
+
+                        return {
+                            product_idx: String(p.productIdx),
+                            product_count: Number(p.count),
+                            supply_price: Number(master.supply_price),
+                            sale_price: Number(master.sale_price),
+                        };
+                    }),
+                    // product_idx: inferenceResult.products.map(p => p.productId).join(","),
+                    // product_count: inferenceResult.products.map(p => p.count).join(","),
+                    payment_file_list: [{
+                        file_name: fileName,
+                        file_ext: 'png',
+                        file_size: stat.size,
+                    }],
+                    // file_name: fileName,
+                    // // file_ext: 'mp4',
+                    // file_ext: 'png',
+                    // file_size: stat.size,
+                }
             }
         }
         // 3) FormData 구성 (payload + paymentFile)
@@ -135,12 +204,12 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
             contentType: "image/png",
         });
 
-        const token = config.jwtToken
+        const jwtToken = config.jwtToken
         console.log('[EDGE->PNT] REQUEST PAYLOAD', payload)
         const response = await external.post("/chai/payment/store", form, {
             headers: {
                 ...form.getHeaders(),
-                Authorization: `Bearer ${token}`,
+                Authorization: `Bearer ${jwtToken}`,
             }, 
             timeout: 30000,
             maxBodyLength: Infinity,

@@ -659,7 +659,8 @@ async function Payments(token, CardMethod) {
                 folderPath,
                 paymentAt,
                 CardMethod,
-                productData
+                productData,
+                token
               )
           } else if (paymentResponse && CardMethod === "R") {
             // RFID 결제 정보 전송
@@ -671,7 +672,8 @@ async function Payments(token, CardMethod) {
               folderPath,
               paymentAt,
               CardMethod,
-              productData
+              productData,
+              token
             )
           } else {
               console.error("[PAYMENT] Failed:", paymentResponse.data);
