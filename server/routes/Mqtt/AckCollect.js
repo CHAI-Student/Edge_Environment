@@ -762,7 +762,7 @@ async function syncDivisionAndDeviceTypeMapping({
   /**
    * DeviceTypeUpload 갱신
    */
-  const brunchNameStorageType = brunchSuffixFromStorageType(normalizedStorageType)
+  const brunchNameStorageType = brunchSuffixFromStorageType(DivisionStorageType)
   const brunchName = `${divisionIdx}_${brunchNameStorageType}`;
 
   const deviceTypeDoc = await DeviceTypeUpload.findOne({
@@ -788,7 +788,7 @@ async function syncDivisionAndDeviceTypeMapping({
     {
       $set: {
         divisionIdx,
-        storageType: normalizedStorageType,
+        storageType: DivisionStorageType,
         brunchName,
         deviceIdx: deviceTypeDeviceIdxArr,
         products: productMappings,
