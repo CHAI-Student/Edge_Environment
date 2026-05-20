@@ -82,9 +82,9 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         // String(now.getSeconds()).padStart(2, "0");
         console.log(rfidTime);
 
-        const payload = {}
+        let payload = {}
 
-        if (CardMethod == 'R') {
+        if (CardMethod === 'R') {
             payload = {
                 HEADER: {
                     IF_ID: "IF_08",
