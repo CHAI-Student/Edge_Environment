@@ -16,39 +16,39 @@ async function CardTerminalStatusAPI() {
     // console.log(response.data)
 
     // API 응답 확인
-    // const CatResCode = response.data.response_code;
-    // const CatStatus = response.data.message;
-    // if (CatResCode == "0") { // 상태 이상 없음
-    //   CardTerminalState = '39'
-    //   // console.log(`[CARD-DEVICE]: ${CatResCode} / ${CatStatus}`);
-    // } else if (CatResCode == "176") { // 일정 시간 내 카드 미인식
-    //   CardTerminalState = '32'
-    //   // console.log(`[CARD-DEVICE]: ${CatResCode} / ${CatStatus}`);
-    // } else if (CatResCode == "177" || CatStatus == 'CANCEL') { // 단말기에서 토큰 생성 취소
-    //   CardTerminalState = '33'
-    //   // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
-    // } else if (CatResCode == "178" || CatStatus == 'NOT_CONDITION') { // 단말기에서 토큰 생성 취소
-    //   CardTerminalState = '34'
-    //   // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
-    // } else if (CatResCode == "179" || CatStatus == 'FORMAT_ERROR') { // 단말기 전문 오류
-    //   CardTerminalState = '35'
-    //   // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
-    // } else if (CatResCode == "180" || CatStatus == 'CAT_RUNNING') { // 단말기에서 다른 명령어 처리 중
-    //   CardTerminalState = '36'
-    //   // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
-    // } else if (CatResCode == "181" || CatStatus == 'ERROR_RF') { // RF 카드 인식 오류
-    //   CardTerminalState = '37'
-    //   // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
-    // } else if (CatResCode == "182" || CatStatus == 'ERROR_VAN') { // 카드 단말기 네트워크 이상
-    //   CardTerminalState = '31'
-    //   // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
-    // } else if (CatResCode == "192" || CatResCode == "193" || CatStatus == 'ERROR_POS' || CatStatus == 'NETWORK_ERROR') { // 카드 단말기 통신 불량
-    //   CardTerminalState = '30'
-    //   // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
-    // } else if (CatResCode == "255" || CatStatus == 'ERROR') { // 기타 오류
-    //   CardTerminalState = '38'
-    //   // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
-    // } return CardTerminalState
+    const CatResCode = response.data.response_code;
+    const CatStatus = response.data.message;
+    if (CatResCode == "0") { // 상태 이상 없음
+      CardTerminalState = '39'
+      // console.log(`[CARD-DEVICE]: ${CatResCode} / ${CatStatus}`);
+    } else if (CatResCode == "176") { // 일정 시간 내 카드 미인식
+      CardTerminalState = '32'
+      // console.log(`[CARD-DEVICE]: ${CatResCode} / ${CatStatus}`);
+    } else if (CatResCode == "177" || CatStatus == 'CANCEL') { // 단말기에서 토큰 생성 취소
+      CardTerminalState = '33'
+      // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
+    } else if (CatResCode == "178" || CatStatus == 'NOT_CONDITION') { // 단말기에서 토큰 생성 취소
+      CardTerminalState = '34'
+      // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
+    } else if (CatResCode == "179" || CatStatus == 'FORMAT_ERROR') { // 단말기 전문 오류
+      CardTerminalState = '35'
+      // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
+    } else if (CatResCode == "180" || CatStatus == 'CAT_RUNNING') { // 단말기에서 다른 명령어 처리 중
+      CardTerminalState = '36'
+      // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
+    } else if (CatResCode == "181" || CatStatus == 'ERROR_RF') { // RF 카드 인식 오류
+      CardTerminalState = '37'
+      // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
+    } else if (CatResCode == "182" || CatStatus == 'ERROR_VAN') { // 카드 단말기 네트워크 이상
+      CardTerminalState = '31'
+      // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
+    } else if (CatResCode == "192" || CatResCode == "193" || CatStatus == 'ERROR_POS' || CatStatus == 'NETWORK_ERROR') { // 카드 단말기 통신 불량
+      CardTerminalState = '30'
+      // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
+    } else if (CatResCode == "255" || CatStatus == 'ERROR') { // 기타 오류
+      CardTerminalState = '38'
+      // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
+    } return CardTerminalState
   } catch (error) {
     // 카드 단말기에서 return이 없는 경우 -- timeout
     if (error.code === "ECONNREFUSED" || error.code === 'EHOSTUNREACH') {
