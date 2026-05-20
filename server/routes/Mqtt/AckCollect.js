@@ -706,11 +706,31 @@ async function syncDivisionAndDeviceTypeMapping({
   divisionIdx,
   deviceIdx,
   storageType,
+  currentProductIdxList = [],
 }) {
 
   await ensureMongoConnected();
   const DivisionStorageType = normalizeStorageType(storageType);
   const now = new Date();
+
+  const brunchName =
+    `${divisionIdx}_${brunchSuffixFromStorageType(DivisionStorageType)}`;
+
+  const deviceTypeDoc = await DeviceTypeUpload.findOne({ brunchName })
+    .populate("products.product")
+    .lean();
+
+  const existingProductIdxList =
+    (deviceTypeDoc?.products || [])
+      .map((x) => x?.product?.productIdx)
+      .filter(Boolean);
+
+  const mergedProductIdxList = Array.from(
+    new Set([
+      ...existingProductIdxList,
+      ...currentProductIdxList,
+    ].filter(Boolean))
+  );
 
   /**
    * ProductUpload 전체 조회
@@ -720,12 +740,24 @@ async function syncDivisionAndDeviceTypeMapping({
   //   { trainingStatus: "2" },
   //   { _id: 1 }
   // ).lean();
+
+  // const productDocs = await ProductUpload.find(
+  //   {
+  //     trainingStatus: "2",
+  //     storageType: DivisionStorageType,
+  //   },
+  //   { _id: 1 }
+  // ).lean();
+
   const productDocs = await ProductUpload.find(
     {
       trainingStatus: "2",
       storageType: DivisionStorageType,
+      productIdx: {
+        $in: mergedProductIdxList,
+      },
     },
-    { _id: 1 }
+    { _id: 1, productIdx: 1 }
   ).lean();
 
   const productMappings = productDocs.map((x) => ({
@@ -762,16 +794,41 @@ async function syncDivisionAndDeviceTypeMapping({
   /**
    * DeviceTypeUpload 갱신
    */
-  const brunchNameStorageType = brunchSuffixFromStorageType(normalizedStorageType)
-  const brunchName = `${divisionIdx}_${brunchNameStorageType}`;
+  // const brunchNameStorageType = brunchSuffixFromStorageType(DivisionStorageType)
+  // const brunchName = `${divisionIdx}_${brunchNameStorageType}`;
+  // const brunchName = `${division_idx}_${brunchSuffixFromStorageType(DivisionStorageType)}`;
 
-  const deviceTypeDoc = await DeviceTypeUpload.findOne({
-      // divisionIdx,
-      // storageType: normalizedStorageType,
-      brunchName
-    }).lean();
+  // const deviceTypeDoc = await DeviceTypeUpload.findOne({
+  //     // divisionIdx,
+  //     // storageType: normalizedStorageType,
+  //     brunchName
+  //   }).lean();
+
+  // const deviceTypeDoc =
+  //   await DeviceTypeUpload.findOne({
+  //     brunchName,
+  //   })
+  //   .populate("products.product")
+  //   .lean();
+
+  // const existingProductIdxList =
+  //   (deviceTypeDoc?.products || [])
+  //     .map(x => x?.product?.productIdx)
+  //     .filter(Boolean);
 
   ///deviceIdx 중복 제거
+  // const deviceTypeDeviceIdxArr = Array.from(
+  //   new Set([
+  //     ...(deviceTypeDoc?.deviceIdx || []),
+  //     deviceIdx,
+  //   ].filter(Boolean))
+  // );
+  // const deviceTypeDeviceIdxArr = Array.from(
+  //   new Set([
+  //     ...existingProductIdxList,
+  //     product_idx,
+  //   ])
+  // );
   const deviceTypeDeviceIdxArr = Array.from(
     new Set([
       ...(deviceTypeDoc?.deviceIdx || []),
@@ -788,7 +845,7 @@ async function syncDivisionAndDeviceTypeMapping({
     {
       $set: {
         divisionIdx,
-        storageType: normalizedStorageType,
+        storageType: DivisionStorageType,
         brunchName,
         deviceIdx: deviceTypeDeviceIdxArr,
         products: productMappings,
@@ -1243,6 +1300,7 @@ async function handleEndCollect(reqData, reqSysid) {
       divisionIdx: division_idx,
       deviceIdx: device_idx,
       storageType: finalStorageType,
+      currentProductIdxList: [product_idx],
   });
 
   /**
@@ -1278,7 +1336,7 @@ async function handleEndCollect(reqData, reqSysid) {
 
   console.log('[AckCollect] sending to PNT:', notifyResult)
 
-  const aiServerApi = `${config.aiServerApi}/v1/events/product/created`
+  const aiServer = `${config.aiServerApi}/v1/events/product/created`
   const now = new Date();
   const formattedDate = now.toISOString().replace(/[-:T]/g, "").slice(0, 14);
   const sysidDate = now.toISOString().replace(/[-:T]/g, "").slice(0, 8);
@@ -1299,7 +1357,7 @@ async function handleEndCollect(reqData, reqSysid) {
       },
   };
   
-  const response = await axios.post(aiServerApi, payload);
+  const response = await axios.post(aiServer, payload);
   // return response.data.DATA;
   console.log('[EDGE->AI] request api:', response.data.DATA)
 
