@@ -24,7 +24,7 @@ module.exports = {
     // deviceIdx: 'DE17683631997086480',
     // 테스트용
     // deviceIdx: 'DE17790815108130388', // 이전거
-    deviceIdx: DE17683631997086480,
+    deviceIdx: 'DE17683631997086480',
     // PNT RestAPI 연결
     restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
     userId: 'chaitest',   
