@@ -84,7 +84,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
 
         const payload = {}
 
-        if (CardMethod == R) {
+        if (CardMethod == 'R') {
             payload = {
                 HEADER: {
                     IF_ID: "IF_08",
