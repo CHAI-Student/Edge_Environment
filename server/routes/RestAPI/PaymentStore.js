@@ -136,6 +136,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         });
 
         const token = config.jwtToken
+        console.log('[EDGE->PNT] REQUEST PAYLOAD', payload)
         const response = await external.post("/chai/payment/store", form, {
             headers: {
                 ...form.getHeaders(),
@@ -145,7 +146,6 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
             maxBodyLength: Infinity,
             maxContentLength: Infinity,
         });
-        // console.log('response', response)
         if (response.status === 200) {
             console.log("[PNT] Transfer Success:", response.data);
             return true;

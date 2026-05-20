@@ -11,6 +11,9 @@ module.exports = {
     // 브로커 계정 정보는 고유해야함
     mqttID: 'pnt',
     mqttPW: 'chai',
+
+    // 사원증(RFID) 매장 브로커ID
+    // userId: 'chaitest3',   
     // 매장 고유번호
     divisionIdx: 'DI17647205538493077',
     // 테스트용
@@ -23,7 +26,7 @@ module.exports = {
     // PNT RestAPI 연결
     restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
     userId: 'chaitest',   
-    // userId: 'chaitest2',    
+    // userId: 'chaitest2',   
     userPassword: 'iljin123!',
     get jwtToken() {
         return process.env.JWT_TOKEN;
