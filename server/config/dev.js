@@ -15,14 +15,14 @@ module.exports = {
     // 사원증(RFID) 매장 브로커ID
 
     // 매장 고유번호
-    divisionIdx: 'DI17647205538493077',
+    // divisionIdx: 'DI17647205538493077',
     // 테스트용
-    // divisionIdx: 'DI17790813642907755',
+    divisionIdx: 'DI17790813642907755',
     // 장비 고유번호
     // deviceIdx: 'DE17560868094789999',
-    deviceIdx: 'DE17683631997086480',
+    // deviceIdx: 'DE17683631997086480',
     // 테스트용
-    // deviceIdx: 'DE17790815108130388',
+    deviceIdx: 'DE17790815108130388',
     // PNT RestAPI 연결
     restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
     userId: 'chaitest',   
