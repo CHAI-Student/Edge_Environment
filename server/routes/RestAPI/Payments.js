@@ -360,12 +360,17 @@ async function init() {
         if (paymentType == 'POINT') {
           const payload = JSON.parse(event.data);
           console.log('rfid::::', payload); // {"data": "1763193013"}
+          const token = config.jwtToken
           if (payload.data) {
               // PNT한테 사원증 토큰 전송 후 유효성 검사하기
               rfidToken = payload.data;
               CardMethod = 'R' // R = RFID
               console.log('[RFID-Token] Token received:', rfidToken);
-              await axios.get(`${config.restApi}/employee-uid/validate/${rfidToken}/${config.divisionIdx}`)
+              await axios.get(`${config.restApi}/employee-uid/validate/${rfidToken}/${config.divisionIdx}`, {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              })
                   .then((response) => {
                     console.log('[PAYMENT] RFID Response:', response.data);
                     if (response.data.result == '0') {
