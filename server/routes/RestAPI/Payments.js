@@ -670,7 +670,8 @@ async function Payments(token, CardMethod) {
               inferenceResult,
               folderPath,
               paymentAt,
-              CardMethod
+              CardMethod,
+              productData
             )
           } else {
               console.error("[PAYMENT] Failed:", paymentResponse.data);
