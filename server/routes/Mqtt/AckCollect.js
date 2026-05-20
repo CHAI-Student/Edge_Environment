@@ -325,6 +325,7 @@ async function fetchRecordedLoadcellData() {
 
 // 3) 시계열에서 최종 무게 산출 (정책에 따라 골라야 함, 아래는 한 가지 예)
 function computeProductWeight(logs) {
+  //
   if (!Array.isArray(logs) || logs.length === 0) return 0;
 
   const CHANNEL_INDEX = 2;      // 3번째 로드셀
