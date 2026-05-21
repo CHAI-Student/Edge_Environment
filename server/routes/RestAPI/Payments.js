@@ -588,7 +588,7 @@ async function Payments(token, CardMethod) {
     // [Model] request failed: Request failed with status code 422
     // product_idx 기준 map 생성
     const productMap = new Map(
-        productList.map(p => [
+        productData.map(p => [
             String(p.product_idx),
             p
         ])
@@ -625,7 +625,7 @@ async function Payments(token, CardMethod) {
                 );
             }
             return {
-                name: (master?.product_name || product.name || "").slice(0, 5),
+                name: (master.product_name || product.name || "").slice(0, 5),
                 quantity: Number(product.count),
                 total_price: Number(product.price) * Number(product.count || 1)
             };
