@@ -3,6 +3,12 @@ const config = require("../../config/key");
 const { v4: uuidv4 } = require("uuid");
 const { devAutoLogin } = require("../auth");
 
+function formatIfDate(d = new Date()) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`
+         + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
 const external = axios.create({
   baseURL: config.restApi, // https://apichaidev.atcrk.co.kr/api/v1
   timeout: 10000,
@@ -24,7 +30,7 @@ async function DeviceInfo({
       IF_ID: "IF_13",
       IF_SYSID: uuidv4(),
       IF_HOST: "CRKPNTCHAI",
-      IF_DATE: Date.now(),
+      IF_DATE: formatIfDate(),
     },
     DATA: {
       division_idx,

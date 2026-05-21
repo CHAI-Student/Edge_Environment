@@ -6,6 +6,12 @@ const config = require("../../config/key");
 // 분리한 API 서비스 모듈을 가져옵니다.
 const { callApiToControlDeadbolt } = require("./DeadboltApiService");
 
+function formatIfDate(d = new Date()) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`
+         + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
 // =========================================================
 // [메인 로직: MQTT 메시지 처리]
 // =========================================================
@@ -86,13 +92,13 @@ async function ManualDeadbolt() {
     // ---------------------------------------------------------
     // [MQTT ACK 전송]
     // ---------------------------------------------------------
-    const timestamp = Date.now();
+    
     const ackPayload = JSON.stringify({
       HEADER: {
         IF_ID: "IF_03",
         IF_SYSID: ifSysId,
         IF_HOST: "CRKPNTCHAI",
-        IF_DATE: timestamp,
+        IF_DATE: formatIfDate(),
       },
       DATA: {
         device_idx: deviceIdx,

@@ -10,6 +10,18 @@ function getCardMethod(tokenId = "") {
   if (tokenId.startsWith("VANKEY")) return "N";  // Credit Card
 }
 
+function formatIfDate(d = new Date()) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`
+         + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+function approveDate(d = new Date()) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`;
+        //  + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
 // 서버 시작 시 1회만 호출해서 구독/처리 루프를 올리는 방식 추천
 function Repayment() {
   const deviceIdx = config.deviceIdx;
@@ -154,14 +166,13 @@ function Repayment() {
       // 진행 중이면 취소 불가 ACK
       if (getProcessing()) {
         const ifSysId = (res.HEADER && res.HEADER.IF_SYSID) ? res.HEADER.IF_SYSID : uuidv4();
-        const timestamp = Date.now();
 
         const ackPayload = JSON.stringify({
           HEADER: {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
             IF_HOST: "CRKPNTCHAI",
-            IF_DATE: timestamp,
+            IF_DATE: formatIfDate(),
           },
           DATA: {
             device_idx: res.device_idx,
@@ -208,13 +219,13 @@ function Repayment() {
 
         // ✅ Unknown 케이스도 실패 ACK (선택이지만 운영상 권장)
         const ifSysId = (res.HEADER && res.HEADER.IF_SYSID) ? res.HEADER.IF_SYSID : uuidv4();
-        const timestamp = Date.now();
+
         const ackPayload = JSON.stringify({
           HEADER: {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
             IF_HOST: "CRKPNTCHAI",
-            IF_DATE: timestamp,
+            IF_DATE: formatIfDate(),
           },
           DATA: {
             device_idx: res.device_idx,
@@ -241,14 +252,13 @@ function Repayment() {
         console.error("[CANCEL] Cancel API error:", err.message, err.response?.data);
 
         const ifSysId = (res.HEADER && res.HEADER.IF_SYSID) ? res.HEADER.IF_SYSID : uuidv4();
-        const timestamp = Date.now();
 
         const ackPayload = JSON.stringify({
           HEADER: {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
             IF_HOST: "CRKPNTCHAI",
-            IF_DATE: timestamp,
+            IF_DATE: formatIfDate(),
           },
           DATA: {
             device_idx: res.device_idx,
@@ -276,14 +286,13 @@ function Repayment() {
         console.log("[CANCEL] Cancellation Successful:", response.data);
 
         const ifSysId = (res.HEADER && res.HEADER.IF_SYSID) ? res.HEADER.IF_SYSID : uuidv4();
-        const timestamp = Date.now();
 
         const ackPayload = JSON.stringify({
           HEADER: {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
             IF_HOST: "CRKPNTCHAI",
-            IF_DATE: timestamp,
+            IF_DATE: formatIfDate(),
           },
           DATA: {
             device_idx: response.data.device_idx,
@@ -292,7 +301,8 @@ function Repayment() {
             token_id: response.data.token_id,
             org_token_id: "null",
             request_type: "CANCEL",
-            approve_at: timestamp,
+            payment_at: formatIfDate(),
+            approve_at: approveDate(),
             approve_price: response.data.approve_price,
             approve_no: response.data.approve_no,
             org_approve_at: "null",
@@ -312,14 +322,13 @@ function Repayment() {
 
         // ✅ 실패 ACK 추가 (2번 보완의 핵심)
         const ifSysId = (res.HEADER && res.HEADER.IF_SYSID) ? res.HEADER.IF_SYSID : uuidv4();
-        const timestamp = Date.now();
 
         const ackPayload = JSON.stringify({
           HEADER: {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
             IF_HOST: "CRKPNTCHAI",
-            IF_DATE: timestamp,
+            IF_DATE: formatIfDate(),
           },
           DATA: {
             device_idx: res.device_idx,
@@ -344,7 +353,6 @@ function Repayment() {
       console.log("[REPAY] response data:", res);
 
       let ifSysId = res.HEADER.IF_SYSID || uuidv4();
-      let timestamp = Date.now();
 
       // 진행 중이면 취소 불가 ACK
       if (getProcessing()) {
@@ -354,7 +362,7 @@ function Repayment() {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
             IF_HOST: "CRKPNTCHAI",
-            IF_DATE: timestamp,
+            IF_DATE: formatIfDate(),
           },
           DATA: {
             device_idx: res.device_idx,
@@ -397,7 +405,7 @@ function Repayment() {
         }).then((response) => {
           if (response.data.status == 'Y' && response.data.response_code == 0) {
             console.log('[REPAY] response success: ', response.data)
-            paymentAt = Date.now();
+            paymentAt = formatIfDate();
             newApproveNo = response.data.authorization_number
             newApproveAt = response.data.authorization_date
             newApprovePrice = oldApprovePrice
@@ -418,7 +426,7 @@ function Repayment() {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
             IF_HOST: "CRKPNTCHAI",
-            IF_DATE: timestamp,
+            IF_DATE: formatIfDate(),
           },
           //여기 마무리
           DATA: {
@@ -448,14 +456,13 @@ function Repayment() {
         console.log('[REPAY] SamsungPay cannot use Repay system')
 
         const ifSysId = res.HEADER.IF_SYSID || uuidv4();
-        const timestamp = Date.now();
 
         const ackPayload = JSON.stringify({
           HEADER: {
             IF_ID: "IF_09",
             IF_SYSID: ifSysId,
             IF_HOST: "CRKPNTCHAI",
-            IF_DATE: timestamp,
+            IF_DATE: formatIfDate(),
           },
           DATA: {
             device_idx: res.device_idx,

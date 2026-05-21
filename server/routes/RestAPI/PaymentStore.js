@@ -13,6 +13,16 @@ function formatIfDate(d = new Date()) {
          + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
+function makeIFDate(d = new Date()) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const HH = String(d.getHours()).padStart(2, "0");
+  const MM = String(d.getMinutes()).padStart(2, "0");
+  const SS = String(d.getSeconds()).padStart(2, "0");
+  return `${yyyy}${mm}${dd}${HH}${MM}${SS}`;
+}
+
 async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt, CardMethod, productData, token) {
     console.log("[PNT] Preparing IF_08 data transfer...");
     console.log('paymentResponse', paymentResponse)
@@ -70,9 +80,8 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         //   headers: { "Content-Type": "multipart/form-data" },
         });
 
-        const timestamp = Date.now();
-
         const now = new Date();
+        const formattedDate = makeIFDate(now)
         const rfidTime =
         String(now.getFullYear()).slice(2) +
         String(now.getMonth() + 1).padStart(2, "0") +
@@ -97,7 +106,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
                     device_idx: config.deviceIdx,
                     division_idx: config.divisionIdx,
                     token_id: token,
-                    payment_at: paymentAt,
+                    payment_at: formattedDate,
                     approve_at: rfidTime,
                     approve_type: CardMethod === 'R' ? '2' : (CardMethod === 'S' ? '1' : '0'), // 0=일반카드, 1=삼성페이, 2=RFID
                     approve_result: 1,
@@ -151,7 +160,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
                     device_idx: config.deviceIdx,
                     division_idx: config.divisionIdx,
                     token_id: paymentResponse.vankey_hash || paymentResponse.vankey,
-                    payment_at: paymentAt,
+                    payment_at: formattedDate,
                     approve_at: paymentResponse.authorization_date,
                     approve_type: CardMethod === 'R' ? '2' : (CardMethod === 'S' ? '1' : '0'), // 0=일반카드, 1=삼성페이, 2=RFID
                     approve_result: (paymentResponse === "Y")? 0 : 1,

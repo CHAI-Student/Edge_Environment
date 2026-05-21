@@ -3,6 +3,13 @@ const { getClient, subscribe } = require("./MqttClient");
 const { v4: uuidv4 } = require("uuid");
 const axios = require("axios"); // ✅ API 통신을 위한 라이브러리
 const { devAutoLogin } = require("../../routes/auth");
+
+function formatIfDate(d = new Date()) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`
+         + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
 async function CardTerminalStatusAPI() {
   let CardTerminalState = '39'
   try {
@@ -248,12 +255,11 @@ async function HealthMqtt() {
       //   LoadcellStatusAPI(),
       // ]);
 
-      const timestamp = Date.now();
       const header = {
         IF_ID: "IF_02",
         IF_SYSID: uuidv4(),
         IF_HOST: "CRKPNTCHAI",
-        IF_DATE: timestamp,
+        IF_DATE: formatIfDate(),
       };
 
       const body = {
