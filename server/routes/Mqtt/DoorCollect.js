@@ -359,13 +359,6 @@ async function DoorCollect() {
       ifSysId = payload.HEADER.IF_SYSID
       reqData = payload.DATA || {};
 
-      await callApiToControlDeadbolt(reqDoorState);
-
-      const finalState = await waitForDoorState(reqDoorState, 5000);
-      const health = await getHealthStatus(hasLoadcell);
-
-      const isDoorOk = finalState === reqDoorState;
-
       const {
         device_idx: deviceIdx,
         division_idx: divisionIdx,
@@ -376,10 +369,17 @@ async function DoorCollect() {
 
       console.log("[DoorCollect] Request:", reqData);
 
+      await callApiToControlDeadbolt(reqDoorState);
+
+      const finalState = await waitForDoorState(reqDoorState, 5000);
+      const health = await getHealthStatus(hasLoadcell);
+
+      const isDoorOk = finalState === reqDoorState;
+
       latestCollectOption = {
         hasLoadcell,
         storageType,
-        doorState
+        doorState: reqDoorState,
       };
 
       console.log("[DoorCollect] latestCollectOption:", latestCollectOption);
