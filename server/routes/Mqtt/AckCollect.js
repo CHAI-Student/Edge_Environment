@@ -667,8 +667,15 @@ async function syncProductMetadata({
 // }
 
 async function notifyAiTrainingStore(product) {
+  console.log(
+    '[notifyAiTrainingStore] product ======>',
+    JSON.stringify(product, null, 2)
+  );
   if (typeof aiNotifyService.notifyTrainingStore === "function") {
-    console.log('aiNotifyService.notifyTrainingStore', aiNotifyService.notifyTrainingStore)
+    console.log(
+      '[notifyAiTrainingStore] input:',
+      JSON.stringify(product, null, 2)
+    );
     return aiNotifyService.notifyTrainingStore({
       productIdx: product.productIdx,
       productEngName: product.productEngName,
