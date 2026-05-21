@@ -32,11 +32,11 @@ function Repayment() {
 
   client.subscribe(repaymentSub, { qos: 1 }, (err, granted) => {
     if (err) {
-      console.error("[DoorCollect] Subscribe Error:", err.message);
+      console.error("[REPAY] Subscribe Error:", err.message);
       return;
     }
 
-    console.log("[DoorCollect] Subscribe granted:", granted);
+    console.log("[REPAY] Subscribe granted:", granted);
     // console.log(`[DoorCollect] Subscribed: ${subTopic}`);
   });
 
@@ -61,17 +61,12 @@ function Repayment() {
   //   console.log("[REPAY] MQTT Connected");
   //   };
 
-  client.on("message", async (topic, payloadBuf) => {
+  client.on("message", async (topic, payload) => {
     if (topic !== repaymentSub) return;
 
     console.log("[REPAY] message received:", topic);
-    let res;
-    try {
-      res = JSON.parse(payloadBuf.toString());
-    } catch (e) {
-      console.error("[REPAY] invalid JSON:", payloadBuf.toString());
-      return;
-    }
+    console.log('[REPAY] payload: ', payload)
+    const res = payload.DATA
 
     if (res.request_type == "CANCEL") {
       console.log("[CANCEL] response data:", res);
