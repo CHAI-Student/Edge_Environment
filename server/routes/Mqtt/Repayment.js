@@ -114,7 +114,7 @@ function Repayment() {
       if (reqData.payment_mode === "SAMSUNG") {
         cancelEndpoint = `${config.cardTerminalApi}/payment/samsung-pay/cancel`;
         cancelPayload = {
-          amount: reqData.approve_price,
+          amount: String(reqData.approve_price),
           original_authorization_date: reqData.approve_at,
           original_authorization_number: reqData.approve_no,
           vankey: reqData.token_id,
@@ -122,7 +122,7 @@ function Repayment() {
       } else if (reqData.payment_mode === "CARD") {
         cancelEndpoint = `${config.cardTerminalApi}/payment/token/cancel`;
         cancelPayload = {
-          amount: reqData.approve_price,
+          amount: String(reqData.approve_price),
           original_authorization_date: reqData.approve_at,
           original_authorization_number: reqData.approve_no,
           vankey_hash: reqData.token_id,
@@ -313,7 +313,7 @@ function Repayment() {
         let approveJson = null;
 
         axios.post(`${config.cardTerminalApi}/payment/token/approve`, {
-          amount: oldApprovePrice,
+          amount: String(oldApprovePrice),
           vankey_hash: oldToken
         }).then((response) => {
           if (response.data.status == 'Y' && response.data.response_code == 0) {
@@ -321,12 +321,12 @@ function Repayment() {
             paymentAt = formatIfDate();
             newApproveNo = response.data.authorization_number
             newApproveAt = response.data.authorization_date
-            newApprovePrice = oldApprovePrice
+            newApprovePrice = String(oldApprovePrice)
             newToken = response.data.vankey
             approveJson = response.data
           }
           axios.post(`${config.cardTerminalApi}/payment/token/cancel`, {
-            amount: oldApprovePrice,
+            amount: String(oldApprovePrice),
             original_authorization_date: oldApproveAt,
             original_authorization_number: oldApproveNo,
             vankey_hash: oldToken,
