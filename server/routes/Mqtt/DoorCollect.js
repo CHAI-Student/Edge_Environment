@@ -14,6 +14,7 @@ const { getClient } = require("./MqttClient");
 let latestCollectOption = {
   hasLoadcell: null,
   storageType: null,
+  doorState: null
 };
 
 function getLatestCollectOption() {
@@ -371,6 +372,7 @@ async function DoorCollect() {
       latestCollectOption = {
         hasLoadcell,
         storageType,
+        doorState
       };
 
       console.log("[DoorCollect] latestCollectOption:", latestCollectOption);
