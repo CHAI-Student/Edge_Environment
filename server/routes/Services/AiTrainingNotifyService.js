@@ -14,6 +14,8 @@ async function notifyTrainingStore({
     training_status: trainingStatus,
   });
 
+  console.log('CHECK IF07 res::::', res)
+
   return {
     success: res?.result_cd === "S" || res?.DATA?.result_cd === "S",
     raw: res,

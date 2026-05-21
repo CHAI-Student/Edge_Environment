@@ -668,6 +668,7 @@ async function syncProductMetadata({
 
 async function notifyAiTrainingStore(product) {
   if (typeof aiNotifyService.notifyTrainingStore === "function") {
+    console.log('aiNotifyService.notifyTrainingStore', aiNotifyService.notifyTrainingStore)
     return aiNotifyService.notifyTrainingStore({
       productIdx: product.productIdx,
       productEngName: product.productEngName,

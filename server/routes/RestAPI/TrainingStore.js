@@ -12,6 +12,7 @@ const external = axios.create({
  * [IF_07] 학습 진행 상태 전달
  */
 async function TrainingStore(productIdx, product_eng_name, training_status) {
+    console.log(`MAKE TRAINING STORE FOR IF07:::: ${productIdx}, ${product_eng_name}, ${training_status}`)
     try {
         const token = process.env.JWT_TOKEN;
         if (!token) {
