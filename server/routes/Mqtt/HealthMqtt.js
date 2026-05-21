@@ -273,7 +273,8 @@ async function HealthMqtt() {
       });
     };
     // publishOnce(); // ✅ 연결 직후 1회
-    setInterval(publishOnce, 30000); // ✅ 이후 주기
+    // setInterval(publishOnce, 30000); // ✅ 이후 주기
+    setInterval(publishOnce, 180000); // ✅ 
   });
 }
 
