@@ -1231,13 +1231,13 @@ async function handleEndCollect(reqData, reqSysid) {
   const storageType = session.storageType;
   const finalStorageType = normalizeStorageType(storageType);
 
+  await cameraStopSampling();
+
   const closed = await waitUntilDoorClosed();
 
   if (!closed) {
     throw new Error("Door close timeout. Product collection cannot be finalized.");
   }
-
-  await cameraStopSampling();
 
   const useLoadcell = session.hasLoadcell === "Y";
   console.log('session.has_loadcell', session.hasLoadcell)
@@ -1377,6 +1377,7 @@ async function handleEndCollect(reqData, reqSysid) {
       productEngName: product_eng_name,
       categoryIdx: category_idx,
       isNew: is_new,
+      productLoadcellWeight: updateLoadcellWeight,
       resultCd: health.isSuccess ? "S" : "F",
       resultMsg: health.resultMsg,
       health,
