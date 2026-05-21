@@ -30,12 +30,25 @@ function Repayment() {
 
   const client = getClient();
 
-  client.subscribe(repaymentSub, { qos: 1 }, (err, granted) => {
-    if (err) {
-      console.error("[DoorCollect] Subscribe Error:", err.message);
-      return;
-    }
-  });
+  // client.subscribe(repaymentSub, { qos: 1 }, (err, granted) => {
+  //   if (err) {
+  //     console.error("[DoorCollect] Subscribe Error:", err.message);
+  //     return;
+  //   }
+  // });
+
+  const subscribeRepayment = () => {
+    console.log("[REPAY] subscribing:", repaymentSub);
+
+    client.subscribe(repaymentSub, { qos: 1 }, (err, granted) => {
+      if (err) {
+        console.error("[REPAY] Subscribe Error:", err.message);
+        return;
+      }
+
+      console.log("[REPAY] subscribed:", granted);
+    });
+  };
 
   if (client.connected) {
     subscribeRepayment();
