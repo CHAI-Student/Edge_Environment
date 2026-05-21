@@ -1,13 +1,23 @@
-// src/Service/DeviceService.js
 const axios = require("axios");
 const config = require("../../config/key");
 const { v4: uuidv4 } = require("uuid");
 
+const external = axios.create({
+  baseURL: config.restApi, // https://apichaidev.atcrk.co.kr/api/v1
+  timeout: 10000,
+  headers: { "Content-Type": "application/json" },
+});
+
 /**
- * [IF_13] 장비 정보 조회 서비스
+ * [IF_07] 학습 진행 상태 전달
  */
 async function TrainingStore(productIdx, product_eng_name, training_status) {
     try {
+        const token = process.env.JWT_TOKEN;
+        if (!token) {
+            throw new Error("JWT_TOKEN not set");
+        }
+
         // 1. 정의서상 URL 경로 반영 (오타 수정) 
         const targetUrl = `${config.restApi}/training/store`;
 
@@ -42,8 +52,12 @@ async function TrainingStore(productIdx, product_eng_name, training_status) {
             }
         };
         
-        const response = await axios.post(targetUrl, payload);
-        return response.data.DATA;
+        const response = await external.post(targetUrl, payload, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+        });
+        return response.data;
 
     } catch (error) {
         console.error(`[IF07] 통신 실패: ${error.message}`);

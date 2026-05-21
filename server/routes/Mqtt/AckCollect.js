@@ -1067,6 +1067,7 @@ async function handleStartCollect(reqData, reqSysid) {
       productEngName: product_eng_name,
       categoryIdx: category_idx,
       isNew: is_new,
+      productLoadcellWeight: 'null',
       resultCd: health.isSuccess ? "S" : "F",
       resultMsg: health.resultMsg,
       health,
@@ -1282,6 +1283,12 @@ async function handleEndCollect(reqData, reqSysid) {
     throw new Error(uploadResult.message || "MinIO upload failed");
   }
 
+  const finalLoadcellWeight =
+  product_loadcell_weight == null ||
+  product_loadcell_weight === ""
+    ? updateLoadcellWeight
+    : product_loadcell_weight;
+
   const productDoc = await syncProductMetadata({
     productIdx: product_idx,
     productEngName: product_eng_name,
@@ -1293,7 +1300,8 @@ async function handleEndCollect(reqData, reqSysid) {
     filelength: uploadResult.filelength,
     storageType: finalStorageType,
     // productLoadcellWeight: product_loadcell_weight == null ? updateLoadcellWeight : product_loadcell_weight,
-    productLoadcellWeight: String(product_loadcell_weight == null ? updateLoadcellWeight : product_loadcell_weight),
+    // productLoadcellWeight: String(product_loadcell_weight == null ? updateLoadcellWeight : product_loadcell_weight),
+    productLoadcellWeight: finalLoadcellWeight,
     trainProductIdx: session.trainProductIdx,
   });
 
@@ -1363,7 +1371,7 @@ async function handleEndCollect(reqData, reqSysid) {
   
   const response = await axios.post(aiServer, payload);
   // return response.data.DATA;
-  console.log('[EDGE->AI] request api:', response.data.DATA)
+  console.log('[EDGE->AI] request api:', response)
 
   const health = await ProductCollectionHealth();
 
@@ -1377,7 +1385,7 @@ async function handleEndCollect(reqData, reqSysid) {
       productEngName: product_eng_name,
       categoryIdx: category_idx,
       isNew: is_new,
-      productLoadcellWeight: updateLoadcellWeight,
+      productLoadcellWeight: finalLoadcellWeight,
       resultCd: health.isSuccess ? "S" : "F",
       resultMsg: health.resultMsg,
       health,
