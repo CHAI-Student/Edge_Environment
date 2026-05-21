@@ -263,7 +263,7 @@ function Repayment() {
     } else if (reqData.request_type == "REPAY") {
       // 재결제 기능 진행 --> 신용카드 (삼성 페이 X)
       // 재결제 기능이 들어오면 -> 새로운 금액으로 결제를 진행하고 -> 이전 결제는 vankey로 다시 취소 처리 필요
-      console.log("[REPAY] response data:", res);
+      console.log("[REPAY] response data:", reqData);
 
       let ifSysId = payload.HEADER.IF_SYSID || uuidv4();
 
