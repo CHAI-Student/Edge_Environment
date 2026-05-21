@@ -604,6 +604,17 @@ async function Payments(token, CardMethod) {
           return;
         }
         if (inferenceResult.success == true && inferenceResult.totalPrice == 0) {
+          // 0원일 때 선결제 취소되게 하기
+          if (CardMethod === "S") {
+            await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/cancel`,{
+                amount: preAmount,
+                original_authorization_date: preAuthDate,
+                original_authorization_number: preAuthNum,
+                vankey: samsungpayToken
+            }).then((response) => {
+              console.log('canceled samsung-pay : ', response.data)
+            })
+          }
           console.log('total price is 0, running end')
           return;
         }
