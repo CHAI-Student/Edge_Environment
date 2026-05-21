@@ -5,10 +5,10 @@ const { getProcessing } = require("../RestAPI/PaymentProcessing");
 const { v4: uuidv4 } = require("uuid");
 
 // 토큰 prefix로 결제 타입 판단
-function getCardMethod(tokenId = "") {
-  if (tokenId.startsWith("SPAYKEY")) return "S"; // Samsung Pay
-  if (tokenId.startsWith("VANKEY")) return "N";  // Credit Card
-}
+// function getCardMethod(tokenId = "") {
+//   if (tokenId.startsWith("SPAYKEY")) return "S"; // Samsung Pay
+//   if (tokenId.startsWith("VANKEY")) return "N";  // Credit Card
+// }
 
 function formatIfDate(d = new Date()) {
     const pad = (n) => String(n).padStart(2, '0');
@@ -106,12 +106,12 @@ function Repayment() {
       }
 
       // token_id 로 카드 방식 결정 --> 불가능 다르지가 않음
-      const cardMethod = getCardMethod(reqData.token_id);
+      // const cardMethod = getCardMethod(reqData.token_id);
 
       let cancelEndpoint = "";
       let cancelPayload = {};
 
-      if (cardMethod === "S") {
+      if (reqData.payment_mode === "SAMSUNG") {
         cancelEndpoint = `${config.cardTerminalApi}/payment/samsung-pay/cancel`;
         cancelPayload = {
           amount: reqData.approve_price,
@@ -119,7 +119,7 @@ function Repayment() {
           original_authorization_number: reqData.approve_no,
           vankey: reqData.token_id,
         };
-      } else if (cardMethod === "N") {
+      } else if (reqData.payment_mode === "CARD") {
         cancelEndpoint = `${config.cardTerminalApi}/payment/token/cancel`;
         cancelPayload = {
           amount: reqData.approve_price,
@@ -296,9 +296,9 @@ function Repayment() {
       }
 
       // token_id 로 신용카드가 맞는지 확인
-      const cardMethod = getCardMethod(reqData.token_id);
+      // const cardMethod = getCardMethod(reqData.token_id);
       //승인 후 취소 방식 채택
-      if (cardMethod === "N") {
+      if (reqData.payment_mode === "CARD") {
         //새로운 결제 승인
         const oldToken = reqData.token_id
         const oldApproveAt = reqData.approve_at
@@ -365,7 +365,7 @@ function Repayment() {
           if (e) console.error("[REPAY] Publish Error:", e.message);
           else console.log("[REPAY] Success ACK sent");
         });
-      } else if (cardMethod == 'S') {
+      } else if (reqData.payment_mode == 'SAMSUNG') {
         console.log('[REPAY] SamsungPay cannot use Repay system')
 
         const ifSysId = payload.HEADER.IF_SYSID || uuidv4();
