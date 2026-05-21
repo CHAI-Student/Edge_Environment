@@ -98,6 +98,7 @@ function publishAck(payload) {
     }
 
     console.log("[AckCollect] ACK published:", PUB_TOPIC);
+    console.log('[IF06] payload:', payload)
   });
 }
 
