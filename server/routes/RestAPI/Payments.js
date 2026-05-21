@@ -586,6 +586,14 @@ async function Payments(token, CardMethod) {
     // [10] 모델 서버에 상품 목록 + 카메라 폴더명 + 로드셀 데이터 전송 → 추론 결과 수신
     // [10] 모델 서버에 상품 목록 → 추론 결과 수신
     // [Model] request failed: Request failed with status code 422
+    // product_idx 기준 map 생성
+    const productMap = new Map(
+        productList.map(p => [
+            String(p.product_idx),
+            p
+        ])
+    );
+
     try {
         inferenceResult = await inferencePromise;
         console.log("[Model] Inference Result:", inferenceResult);
@@ -604,11 +612,24 @@ async function Payments(token, CardMethod) {
           const finalAmount = inferenceResult.totalPrice;
           // console.log('inferenceResult', inferenceResult)
           const products = inferenceResult.products
-          const items = products.map(product => ({
-            name: product.name.slice(0, 5),
-            quantity: Number(product.count),
-            total_price: Number(product.price) * Number(product.count || 1)
-          }));
+          // const items = products.map(product => ({
+          //   name: product.name.slice(0, 5),
+          //   quantity: Number(product.count),
+          //   total_price: Number(product.price) * Number(product.count || 1)
+          // }));
+          const items = products.map(product => {
+            const master = productMap.get(String(product.productIdx));
+            if (!master) {
+                console.warn(
+                    `[PNT] Product master not found: productIdx=${product.productIdx}`
+                );
+            }
+            return {
+                name: (master?.product_name || product.name || "").slice(0, 5),
+                quantity: Number(product.count),
+                total_price: Number(product.price) * Number(product.count || 1)
+            };
+          });
           // 삼성 페이
           if (CardMethod === "S") {
             paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {

@@ -17,7 +17,7 @@ const annotationLabelSchema = mongoose.Schema({
     },
     attributes: {
         type: Object,
-        default: {}
+        default: []
     }
     }, { versionKey: false }
 )
