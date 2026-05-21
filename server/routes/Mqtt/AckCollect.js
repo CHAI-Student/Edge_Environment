@@ -1246,6 +1246,7 @@ async function handleEndCollect(reqData, reqSysid) {
   // DoorCollect(IF04) 기준 설정값 조회
   const option = getLatestCollectOption();
   const doorState = option.doorState;
+  console.log('option -------- ', option)
 
   // 학습 대상 storage type
   // const hasLoadcell = option.hasLoadcell;
@@ -1376,47 +1377,47 @@ async function handleEndCollect(reqData, reqSysid) {
 
   console.log('[AckCollect] sending to PNT:', notifyResult)
 
-  console.log('[PNT DOOR REQ] status of doorState: ', doorState)
-  if (doorState === 'CLOSE') {
-    const aiServer = `${config.aiServerApi}/v1/events/product/created`
-    const now = new Date();
-    const formattedDate = makeIFDate(now)
-    const sysidDate = now.toISOString().replace(/[-:T]/g, "").slice(0, 8);
-    const sysidTime = now.toISOString().replace(/[-:T]/g, "").slice(8, 14);
-    const aiStorageType = storageType == 'COLD' ? 'True' : 'False';
+  // console.log('[PNT DOOR REQ] status of doorState: ', doorState)
+  // if (doorState === 'CLOSE') {
+  //   const aiServer = `${config.aiServerApi}/v1/events/product/created`
+  //   const now = new Date();
+  //   const formattedDate = makeIFDate(now)
+  //   const sysidDate = now.toISOString().replace(/[-:T]/g, "").slice(0, 8);
+  //   const sysidTime = now.toISOString().replace(/[-:T]/g, "").slice(8, 14);
+  //   const aiStorageType = storageType == 'COLD' ? 'True' : 'False';
 
-    const payload = {
-        HEADER: {
-            IF_ID   : "IF_EDGE_01",
-            IF_SYSID: `EDGEPC-${sysidDate}-${sysidTime}`,
-            IF_HOST : "EDGEPC",
-            IF_DATE : formattedDate
-        },
-        DATA: {
-            division_idx: session.divisionIdx,
-            // True: 냉장(Cold) / False: 냉동(Frozen)
-            is_cold: aiStorageType
-        },
-    };
+  //   const payload = {
+  //       HEADER: {
+  //           IF_ID   : "IF_EDGE_01",
+  //           IF_SYSID: `EDGEPC-${sysidDate}-${sysidTime}`,
+  //           IF_HOST : "EDGEPC",
+  //           IF_DATE : formattedDate
+  //       },
+  //       DATA: {
+  //           division_idx: session.divisionIdx,
+  //           // True: 냉장(Cold) / False: 냉동(Frozen)
+  //           is_cold: aiStorageType
+  //       },
+  //   };
 
-    console.log("[EDGE->AI] url:", aiServer);
-    console.log("[EDGE->AI] payload:", JSON.stringify(payload, null, 2));
+  //   console.log("[EDGE->AI] url:", aiServer);
+  //   console.log("[EDGE->AI] payload:", JSON.stringify(payload, null, 2));
     
-    try {
-      const response = await axios.post(aiServer, payload, {
-        headers: {
-          "Content-Type": "application/json",
-        },
-        timeout: 10000,
-      });
+  //   try {
+  //     const response = await axios.post(aiServer, payload, {
+  //       headers: {
+  //         "Content-Type": "application/json",
+  //       },
+  //       timeout: 10000,
+  //     });
 
-      console.log("[EDGE->AI] response:", response.data);
-    } catch (err) {
-      console.error("[EDGE->AI] status:", err.response?.status);
-      console.error("[EDGE->AI] data:", err.response?.data);
-      console.error("[EDGE->AI] message:", err.message);
-    }
-  }
+  //     console.log("[EDGE->AI] response:", response.data);
+  //   } catch (err) {
+  //     console.error("[EDGE->AI] status:", err.response?.status);
+  //     console.error("[EDGE->AI] data:", err.response?.data);
+  //     console.error("[EDGE->AI] message:", err.message);
+  //   }
+  // }
 
   const health = await ProductCollectionHealth();
 

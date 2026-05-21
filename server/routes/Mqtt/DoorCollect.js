@@ -390,10 +390,6 @@ async function DoorCollect() {
         (health.loadcell_status === "1" || health.loadcell_status === "9");
 
       const resultCd = isDoorOk && isHealthOk ? "S" : "F";
-      // const resultMsg =
-      //   resultCd === "S"
-      //     ? "status access"
-      //     : `door=${finalState}, camera=${health.camera_status}, deadbolt=${health.deadbolt_status}, loadcell=${health.loadcell_status}`;
 
       const resultMsg = resultCd === "S" ? "status access" : "status error";
 
@@ -412,6 +408,48 @@ async function DoorCollect() {
         resultCd,
         resultMsg,
       });
+
+      console.log('[PNT DOOR REQ] status of doorState: ', latestCollectOption.doorState)
+      if (latestCollectOption.doorState === 'CLOSE') {
+        const aiServer = `${config.aiServerApi}/v1/events/product/created`
+        const now = new Date();
+        const formattedDate = makeIFDate(now)
+        const sysidDate = now.toISOString().replace(/[-:T]/g, "").slice(0, 8);
+        const sysidTime = now.toISOString().replace(/[-:T]/g, "").slice(8, 14);
+        const aiStorageType = latestCollectOption.storageType == 'COLD' ? 'True' : 'False';
+    
+        const payload = {
+            HEADER: {
+                IF_ID   : "IF_EDGE_01",
+                IF_SYSID: `EDGEPC-${sysidDate}-${sysidTime}`,
+                IF_HOST : "EDGEPC",
+                IF_DATE : formattedDate
+            },
+            DATA: {
+                division_idx: config.divisionIdx,
+                // True: 냉장(Cold) / False: 냉동(Frozen)
+                is_cold: aiStorageType
+            },
+        };
+    
+        console.log("[EDGE->AI] url:", aiServer);
+        console.log("[EDGE->AI] payload:", JSON.stringify(payload, null, 2));
+        
+        try {
+          const response = await axios.post(aiServer, payload, {
+            headers: {
+              "Content-Type": "application/json",
+            },
+            timeout: 10000,
+          });
+    
+          console.log("[EDGE->AI] response:", response.data);
+        } catch (err) {
+          console.error("[EDGE->AI] status:", err.response?.status);
+          console.error("[EDGE->AI] data:", err.response?.data);
+          console.error("[EDGE->AI] message:", err.message);
+        }
+      }
 
     } catch (error) {
       console.error("[DoorCollect] Error:", error.message);
