@@ -331,8 +331,8 @@ function computeProductWeight(logs) {
   if (!Array.isArray(logs) || logs.length === 0) return 0;
 
   const CHANNEL_INDEX = 2;      // 3번째 로드셀
-  const OFFSET_MS = 5000;       // startLoadcellRecording 이후 5초
-  const WINDOW_MS = 3000;       // 3초 동안
+  const OFFSET_MS = 2000;       // startLoadcellRecording 이후 5초
+  const WINDOW_MS = 2000;       // 3초 동안
 
   const validLogs = logs
     .filter(snap => snap?.timestamp && Array.isArray(snap?.loadcells))
