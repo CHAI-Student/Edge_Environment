@@ -10,7 +10,7 @@ const mongoose = require("mongoose");
 const { v4: uuidv4 } = require("uuid");
 const { EventSource } = require("eventsource");
 const { getClient } = require("./MqttClient");
-const config = require("../../config/key");
+const config = require("../../config/dev");
 const {
   DeadboltStatusAPI,
   LoadcellStatusAPI,
@@ -1377,7 +1377,7 @@ async function handleEndCollect(reqData, reqSysid) {
 
   const aiServer = `${config.aiServerApi}/v1/events/product/created`
   const now = new Date();
-  const formattedDate = now.toISOString().replace(/[-:T]/g, "").slice(0, 14);
+  const formattedDate = makeIFDate(now)
   const sysidDate = now.toISOString().replace(/[-:T]/g, "").slice(0, 8);
   const sysidTime = now.toISOString().replace(/[-:T]/g, "").slice(8, 14);
   const aiStorageType = storageType == 'COLD' ? 'True' : 'False';
@@ -1395,10 +1395,24 @@ async function handleEndCollect(reqData, reqSysid) {
           is_cold: aiStorageType
       },
   };
+
+  console.log("[EDGE->AI] url:", aiServer);
+  console.log("[EDGE->AI] payload:", JSON.stringify(payload, null, 2));
   
-  const response = await axios.post(aiServer, payload);
-  // return response.data.DATA;
-  console.log('[EDGE->AI] request api:', response)
+  try {
+    const response = await axios.post(aiServer, payload, {
+      headers: {
+        "Content-Type": "application/json",
+      },
+      timeout: 10000,
+    });
+
+    console.log("[EDGE->AI] response:", response.data);
+  } catch (err) {
+    console.error("[EDGE->AI] status:", err.response?.status);
+    console.error("[EDGE->AI] data:", err.response?.data);
+    console.error("[EDGE->AI] message:", err.message);
+  }
 
   const health = await ProductCollectionHealth();
 

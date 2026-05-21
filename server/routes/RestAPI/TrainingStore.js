@@ -68,6 +68,9 @@ async function TrainingStore(productIdx, product_eng_name, training_status) {
 
     } catch (error) {
         console.error(`[IF07] 통신 실패: ${error.message}`);
+        console.error("[IF07] 통신 실패 status:", err.response?.status);
+        console.error("[IF07] 통신 실패 data:", err.response?.data);
+        console.error("[IF07] request payload:", payload);
         throw error; 
     }
 }
