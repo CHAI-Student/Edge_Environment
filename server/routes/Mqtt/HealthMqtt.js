@@ -221,6 +221,12 @@ async function HealthMqtt() {
   // publish
   const healthCheck = `chai/device/${deviceIdx}/health` // healthcare
 
+  // ai server health-check
+  console.log(`[AI SERVER-EDGEPC] Sending Request to ${config.aiServerApi}`);
+  const AIServerCheck = await axios.get(`${config.aiServerApi}/health`, { timeout: 5000 });
+  console.log('[AI SERVER] AIServerCheck:', AIServerCheck.data);
+
+
   const client = getClient(); // 연결 시작
   client.on("connect", () => {
     console.log("[MQTT] connected");

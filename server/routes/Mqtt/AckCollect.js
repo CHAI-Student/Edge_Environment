@@ -246,6 +246,8 @@ async function ProductCollectionHealth() {
     DeadboltHealth === "19" &&
     LoadcellHealth === "29";
 
+  console.log('[ACK-CHECK] isHealthOk: ', isHealthOk)
+
   return {
     CameraStatus,
     DeadboltHealth,
