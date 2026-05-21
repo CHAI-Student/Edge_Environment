@@ -30,22 +30,23 @@ function Repayment() {
 
   const client = getClient();
 
-  const Subscribe = () => {
-    client.subscribe(repaymentSub, { qos: 1 }, (err, granted) => {
-      if (err) console.error("[REPAY] subscribe error:", err.message);
-      else console.log("[REPAY] subscribed:", granted);
-    });
-  };
-
-  if (client.connected) Subscribe();
-  client.on("connect", () => {
-    console.log("[REPAY] MQTT Connected");
-    Subscribe();
+  client.subscribe(repaymentSub, { qos: 1 }, (err, granted) => {
+    if (err) {
+      console.error("[DoorCollect] Subscribe Error:", err.message);
+      return;
+    }
   });
+
+  if (client.connected) {
+    subscribeRepayment();
+  } else {
+    console.log("[REPAY] MQTT Connected");
+    };
 
   client.on("message", async (topic, payloadBuf) => {
     if (topic !== repaymentSub) return;
 
+    console.log("[REPAY] message received:", topic);
     let res;
     try {
       res = JSON.parse(payloadBuf.toString());
