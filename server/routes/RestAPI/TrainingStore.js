@@ -12,7 +12,13 @@ const external = axios.create({
  * [IF_07] 학습 진행 상태 전달
  */
 async function TrainingStore(productIdx, product_eng_name, training_status) {
-    console.log(`MAKE TRAINING STORE FOR IF07:::: ${productIdx}, ${product_eng_name}, ${training_status}`)
+    console.log(
+        "MAKE TRAINING STORE FOR IF07::::",
+        productIdx,
+        product_eng_name,
+        training_status
+    );
+    // console.log(`MAKE TRAINING STORE FOR IF07:::: ${productIdx}, ${product_eng_name}, ${training_status}`)
     try {
         const token = process.env.JWT_TOKEN;
         if (!token) {
@@ -20,7 +26,7 @@ async function TrainingStore(productIdx, product_eng_name, training_status) {
         }
 
         // 1. 정의서상 URL 경로 반영 (오타 수정) 
-        const targetUrl = `${config.restApi}/training/store`;
+        const targetUrl = `${config.restApi}/chai/training/store`;
 
         // 현재 시간을 정의서 규격(YYYYMMDDHHMMSS)으로 변환
         const now = new Date();

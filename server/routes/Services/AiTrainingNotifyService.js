@@ -8,11 +8,17 @@ async function notifyTrainingStore({
 } = {}) {
   if (!productIdx) throw new Error("productIdx is required");
 
-  const res = await TrainingStore({
+  // const res = await TrainingStore({
+  //   productIdx,
+  //   product_eng_name: productEngName,
+  //   training_status: trainingStatus,
+  // });
+
+  const res = await TrainingStore(
     productIdx,
-    product_eng_name: productEngName,
-    training_status: trainingStatus,
-  });
+    productEngName,
+    trainingStatus
+  );
 
   console.log('CHECK IF07 res::::', res)
 
