@@ -281,7 +281,7 @@ function Repayment() {
             device_idx: reqData.device_idx,
             division_idx: reqData.division_idx,
             payment_idx: reqData.payment_idx,
-            token_id: reqData.token_id,
+            token_id: reqData.org_token_id,
             request_type: "REPAY",
             result_cd: "F",
             result_msg: "[재결제] 현재 카드단말기가 이용중입니다. 잠시 후 다시 시도해주세요",
@@ -300,7 +300,7 @@ function Repayment() {
       //승인 후 취소 방식 채택
       if (reqData.payment_mode === "CARD") {
         //새로운 결제 승인
-        const oldToken = reqData.token_id
+        const oldToken = reqData.org_token_id
         const oldApproveAt = reqData.approve_at
         const oldApprovePrice = reqData.approve_price // 여기에 새로 결제할 가격 정보가 들어오는건지 아니면 old_approve_price로 들어오는 건지 확인 필요 (0213)
         const oldApproveNo = reqData.approve_no
@@ -381,7 +381,7 @@ function Repayment() {
             device_idx: reqData.device_idx,
             division_idx: reqData.division_idx,
             payment_idx: reqData.payment_idx,
-            token_id: reqData.token_id,
+            token_id: reqData.org_token_id,
             request_type: "REPAY",
             result_cd: "F",
             result_msg: "[재결제] 삼성페이는 재결제가 불가합니다. 결제 취소를 이용해주세요.",
