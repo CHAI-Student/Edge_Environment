@@ -61,19 +61,21 @@ function Repayment() {
   //   console.log("[REPAY] MQTT Connected");
   //   };
 
-  client.on("message", async (topic, payload) => {
+
+  client.on("message", async (topic, message) => {
     if (topic !== repaymentSub) return;
 
     console.log("[REPAY] message received:", topic);
-    console.log('[REPAY] payload: ', payload)
-    const res = payload.DATA
+    const payload = JSON.parse(message.toString());
+    console.log('[Request] payload.DATA', payload.DATA)
 
-    if (res.request_type == "CANCEL") {
-      console.log("[CANCEL] response data:", res);
+    if (payload.request_type == "CANCEL") {
+      console.log("[CANCEL] response data:", payload);
+      
 
       // 진행 중이면 취소 불가 ACK
       if (getProcessing()) {
-        const ifSysId = (res.HEADER && res.HEADER.IF_SYSID) ? res.HEADER.IF_SYSID : uuidv4();
+        const ifSysId = (payload.HEADER && payload.HEADER.IF_SYSID) ? payload.HEADER.IF_SYSID : uuidv4();
 
         const ackPayload = JSON.stringify({
           HEADER: {
@@ -83,10 +85,10 @@ function Repayment() {
             IF_DATE: formatIfDate(),
           },
           DATA: {
-            device_idx: res.device_idx,
-            division_idx: res.division_idx,
-            payment_idx: res.payment_idx,
-            token_id: res.token_id,
+            device_idx: payload.device_idx,
+            division_idx: payload.division_idx,
+            payment_idx: payload.payment_idx,
+            token_id: payload.token_id,
             request_type: "CANCEL",
             result_cd: "F",
             result_msg: "[결제 취소] 현재 카드단말기가 이용중입니다. 잠시 후 다시 시도해주세요",
@@ -101,7 +103,7 @@ function Repayment() {
       }
 
       // token_id 로 카드 방식 결정
-      const cardMethod = getCardMethod(res.token_id);
+      const cardMethod = getCardMethod(payload.token_id);
 
       let cancelEndpoint = "";
       let cancelPayload = {};
@@ -109,24 +111,24 @@ function Repayment() {
       if (cardMethod === "S") {
         cancelEndpoint = `${config.cardTerminalApi}/payment/samsung-pay/cancel`;
         cancelPayload = {
-          amount: res.approve_price,
-          original_authorization_date: res.approve_at,
-          original_authorization_number: res.approve_no,
-          vankey: res.token_id,
+          amount: payload.approve_price,
+          original_authorization_date: payload.approve_at,
+          original_authorization_number: payload.approve_no,
+          vankey: payload.token_id,
         };
       } else if (cardMethod === "N") {
         cancelEndpoint = `${config.cardTerminalApi}/payment/token/cancel`;
         cancelPayload = {
-          amount: res.approve_price,
-          original_authorization_date: res.approve_at,
-          original_authorization_number: res.approve_no,
-          vankey_hash: res.token_id,
+          amount: payload.approve_price,
+          original_authorization_date: payload.approve_at,
+          original_authorization_number: payload.approve_no,
+          vankey_hash: payload.token_id,
         };
       } else {
-        console.error("[CANCEL] Unknown Payment Method:", res.token_id);
+        console.error("[CANCEL] Unknown Payment Method:", payload.token_id);
 
         // ✅ Unknown 케이스도 실패 ACK (선택이지만 운영상 권장)
-        const ifSysId = (res.HEADER && res.HEADER.IF_SYSID) ? res.HEADER.IF_SYSID : uuidv4();
+        const ifSysId = (payload.HEADER && payload.HEADER.IF_SYSID) ? payload.HEADER.IF_SYSID : uuidv4();
 
         const ackPayload = JSON.stringify({
           HEADER: {
@@ -136,10 +138,10 @@ function Repayment() {
             IF_DATE: formatIfDate(),
           },
           DATA: {
-            device_idx: res.device_idx,
-            division_idx: res.division_idx,
-            payment_idx: res.payment_idx,
-            token_id: res.token_id,
+            device_idx: payload.device_idx,
+            division_idx: payload.division_idx,
+            payment_idx: payload.payment_idx,
+            token_id: payload.token_id,
             request_type: "CANCEL",
             result_cd: "F",
             result_msg: "[결제 취소] Unknown Payment Method (token_id prefix)",
@@ -159,7 +161,7 @@ function Repayment() {
       } catch (err) {
         console.error("[CANCEL] Cancel API error:", err.message, err.response?.data);
 
-        const ifSysId = (res.HEADER && res.HEADER.IF_SYSID) ? res.HEADER.IF_SYSID : uuidv4();
+        const ifSysId = (payload.HEADER && payload.HEADER.IF_SYSID) ? payload.HEADER.IF_SYSID : uuidv4();
 
         const ackPayload = JSON.stringify({
           HEADER: {
@@ -169,10 +171,10 @@ function Repayment() {
             IF_DATE: formatIfDate(),
           },
           DATA: {
-            device_idx: res.device_idx,
-            division_idx: res.division_idx,
-            payment_idx: res.payment_idx,
-            token_id: res.token_id,
+            device_idx: payload.device_idx,
+            division_idx: payload.division_idx,
+            payment_idx: payload.payment_idx,
+            token_id: payload.token_id,
             request_type: "CANCEL",
             result_cd: "F",
             result_msg: `[결제 취소] 취소 요청 실패: ${err.message}`,
@@ -193,7 +195,7 @@ function Repayment() {
       if (ok) {
         console.log("[CANCEL] Cancellation Successful:", response.data);
 
-        const ifSysId = (res.HEADER && res.HEADER.IF_SYSID) ? res.HEADER.IF_SYSID : uuidv4();
+        const ifSysId = (payload.HEADER && payload.HEADER.IF_SYSID) ? payload.HEADER.IF_SYSID : uuidv4();
 
         const ackPayload = JSON.stringify({
           HEADER: {
@@ -229,7 +231,7 @@ function Repayment() {
         console.error("[CANCEL] Cancellation Failed:", response.data);
 
         // ✅ 실패 ACK 추가 (2번 보완의 핵심)
-        const ifSysId = (res.HEADER && res.HEADER.IF_SYSID) ? res.HEADER.IF_SYSID : uuidv4();
+        const ifSysId = (payload.HEADER && payload.HEADER.IF_SYSID) ? payload.HEADER.IF_SYSID : uuidv4();
 
         const ackPayload = JSON.stringify({
           HEADER: {
@@ -239,10 +241,10 @@ function Repayment() {
             IF_DATE: formatIfDate(),
           },
           DATA: {
-            device_idx: res.device_idx,
-            division_idx: res.division_idx,
-            payment_idx: res.payment_idx,
-            token_id: res.token_id,
+            device_idx: payload.device_idx,
+            division_idx: payload.division_idx,
+            payment_idx: payload.payment_idx,
+            token_id: payload.token_id,
             request_type: "CANCEL",
             result_cd: "F",
             result_msg: "[결제 취소] 취소 실패(단말 응답 오류)",
@@ -255,12 +257,12 @@ function Repayment() {
           else console.log("[CANCEL] Fail ACK sent (rejected)");
         });
       }
-    } else if (res.request_type == "REPAY") {
+    } else if (payload.request_type == "REPAY") {
       // 재결제 기능 진행 --> 신용카드 (삼성 페이 X)
       // 재결제 기능이 들어오면 -> 새로운 금액으로 결제를 진행하고 -> 이전 결제는 vankey로 다시 취소 처리 필요
       console.log("[REPAY] response data:", res);
 
-      let ifSysId = res.HEADER.IF_SYSID || uuidv4();
+      let ifSysId = payload.HEADER.IF_SYSID || uuidv4();
 
       // 진행 중이면 취소 불가 ACK
       if (getProcessing()) {
@@ -273,10 +275,10 @@ function Repayment() {
             IF_DATE: formatIfDate(),
           },
           DATA: {
-            device_idx: res.device_idx,
-            division_idx: res.division_idx,
-            payment_idx: res.payment_idx,
-            token_id: res.token_id,
+            device_idx: payload.device_idx,
+            division_idx: payload.division_idx,
+            payment_idx: payload.payment_idx,
+            token_id: payload.token_id,
             request_type: "REPAY",
             result_cd: "F",
             result_msg: "[재결제] 현재 카드단말기가 이용중입니다. 잠시 후 다시 시도해주세요",
@@ -291,14 +293,14 @@ function Repayment() {
       }
 
       // token_id 로 신용카드가 맞는지 확인
-      const cardMethod = getCardMethod(res.token_id);
+      const cardMethod = getCardMethod(payload.token_id);
       //승인 후 취소 방식 채택
       if (cardMethod === "N") {
         //새로운 결제 승인
-        const oldToken = res.token_id
-        const oldApproveAt = res.approve_at
-        const oldApprovePrice = res.approve_price // 여기에 새로 결제할 가격 정보가 들어오는건지 아니면 old_approve_price로 들어오는 건지 확인 필요 (0213)
-        const oldApproveNo = res.approve_no
+        const oldToken = payload.token_id
+        const oldApproveAt = payload.approve_at
+        const oldApprovePrice = payload.approve_price // 여기에 새로 결제할 가격 정보가 들어오는건지 아니면 old_approve_price로 들어오는 건지 확인 필요 (0213)
+        const oldApproveNo = payload.approve_no
 
         let paymentAt = null;
         let newApproveNo = null;
@@ -326,7 +328,7 @@ function Repayment() {
             original_authorization_number: oldApproveNo,
             vankey_hash: oldToken,
           }).then((canRes) => {
-            if (canRes.data.status == 'Y' && canRes.data.response_code == 0) console.log('[REPAY/CANCEL] repayment cancel is successful: ', canRes);
+            if (canpayload.data.status == 'Y' && canpayload.data.response_code == 0) console.log('[REPAY/CANCEL] repayment cancel is successful: ', canRes);
           })
         })
         const ackPayload = JSON.stringify({
@@ -338,9 +340,9 @@ function Repayment() {
           },
           //여기 마무리
           DATA: {
-            device_idx: res.device_idx,
-            division_idx: res.division_idx,
-            payment_idx: res.payment_idx,
+            device_idx: payload.device_idx,
+            division_idx: payload.division_idx,
+            payment_idx: payload.payment_idx,
             token_id: newToken,
             org_token_id: oldToken,
             payment_at: paymentAt,
@@ -363,7 +365,7 @@ function Repayment() {
       } else if (cardMethod == 'S') {
         console.log('[REPAY] SamsungPay cannot use Repay system')
 
-        const ifSysId = res.HEADER.IF_SYSID || uuidv4();
+        const ifSysId = payload.HEADER.IF_SYSID || uuidv4();
 
         const ackPayload = JSON.stringify({
           HEADER: {
@@ -373,10 +375,10 @@ function Repayment() {
             IF_DATE: formatIfDate(),
           },
           DATA: {
-            device_idx: res.device_idx,
-            division_idx: res.division_idx,
-            payment_idx: res.payment_idx,
-            token_id: res.token_id,
+            device_idx: payload.device_idx,
+            division_idx: payload.division_idx,
+            payment_idx: payload.payment_idx,
+            token_id: payload.token_id,
             request_type: "REPAY",
             result_cd: "F",
             result_msg: "[재결제] 삼성페이는 재결제가 불가합니다. 결제 취소를 이용해주세요.",
@@ -389,7 +391,7 @@ function Repayment() {
         });
         return;
       } else {
-        console.error("[CANCEL] Unknown Payment Method:", res.token_id);
+        console.error("[CANCEL] Unknown Payment Method:", payload.token_id);
         return;
       }
     }
