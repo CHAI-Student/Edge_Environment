@@ -236,7 +236,8 @@ async function HealthMqtt() {
     // const CardTerminalStatus = '39'
 
     const publishOnce = async () => {
-      const CardTerminalStatus = await CardTerminalStatusAPI();
+      // const CardTerminalStatus = await CardTerminalStatusAPI();
+      const CardTerminalStatus = '39'
       const DeadboltStatus = await DeadboltStatusAPI();
       const LoadcellStatus = await LoadcellStatusAPI();
       const CameraStatus = await CameraStatusAPI();

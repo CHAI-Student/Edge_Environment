@@ -49,13 +49,13 @@ async function TrainingStore(productIdx, product_eng_name, training_status) {
             //     result_msg: `${product_eng_name} training data update is successful`
             // },
             DATA: {
-                product_list: {
+                product_list: [{
                     division_idx: config.divisionIdx,
                     device_idx: config.deviceIdx,
                     product_idx: String(productIdx),
                     product_eng_name: product_eng_name,
                     training_status: String(training_status)
-                },
+                }],
             }
         };
         
@@ -68,10 +68,9 @@ async function TrainingStore(productIdx, product_eng_name, training_status) {
 
     } catch (error) {
         console.error(`[IF07] 통신 실패: ${error.message}`);
-        console.error("[IF07] 통신 실패 status:", err.response?.status);
-        console.error("[IF07] 통신 실패 data:", err.response?.data);
-        console.error("[IF07] request payload:", payload);
-        throw error; 
+        console.error("[IF07] 통신 실패 status:", error.response?.status);
+        console.error("[IF07] 통신 실패 data:", error.response?.data);
+        throw error;
     }
 }
 
