@@ -359,6 +359,13 @@ async function DoorCollect() {
       ifSysId = payload.HEADER.IF_SYSID
       reqData = payload.DATA || {};
 
+      await callApiToControlDeadbolt(reqDoorState);
+
+      const finalState = await waitForDoorState(reqDoorState, 5000);
+      const health = await getHealthStatus(hasLoadcell);
+
+      const isDoorOk = finalState === reqDoorState;
+
       const {
         device_idx: deviceIdx,
         division_idx: divisionIdx,
@@ -376,13 +383,7 @@ async function DoorCollect() {
       };
 
       console.log("[DoorCollect] latestCollectOption:", latestCollectOption);
-      
-      await callApiToControlDeadbolt(reqDoorState);
 
-      const finalState = await waitForDoorState(reqDoorState, 5000);
-      const health = await getHealthStatus(hasLoadcell);
-
-      const isDoorOk = finalState === reqDoorState;
       const isHealthOk =
         health.camera_status === "1" &&
         health.deadbolt_status === "1" &&
