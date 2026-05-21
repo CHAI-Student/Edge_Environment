@@ -1,5 +1,5 @@
 const axios = require("axios");
-const config = require("../../config/key");
+const config = require("../../config/dev");
 const { v4: uuidv4 } = require("uuid");
 
 const external = axios.create({

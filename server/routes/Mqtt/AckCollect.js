@@ -676,11 +676,30 @@ async function notifyAiTrainingStore(product) {
       '[notifyAiTrainingStore] input:',
       JSON.stringify(product, null, 2)
     );
-    return aiNotifyService.notifyTrainingStore({
+    console.log(
+      "[aiNotifyService keys]",
+      Object.keys(aiNotifyService)
+    );
+
+    console.log(
+      "[aiNotifyService.notifyTrainingStore source]",
+      aiNotifyService.notifyTrainingStore.toString()
+    );
+
+    const payload = {
       productIdx: product.productIdx,
       productEngName: product.productEngName,
       trainingStatus: product.trainingStatus || "2",
-    });
+    };
+
+    console.log("[notifyAiTrainingStore -> service payload]", payload);
+
+    return aiNotifyService.notifyTrainingStore(payload);
+    // return aiNotifyService.notifyTrainingStore({
+    //   productIdx: product.productIdx,
+    //   productEngName: product.productEngName,
+    //   trainingStatus: product.trainingStatus || "2",
+    // });
   }
 
   if (typeof aiNotifyService.notifyTrainingStoreMany === "function") {
