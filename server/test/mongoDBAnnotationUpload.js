@@ -4,6 +4,14 @@ require("dotenv").config();
 
 const { AnnotationLabel } = require("../model/AnnotationLabel");
 
+const fixedLabel = {
+  id: 0,
+  name: "hand",
+  color: "#F08CB3",
+  attributes: [],
+  type: "any",
+};
+
 function randomHexColor() {
   const n = Math.floor(Math.random() * 0xffffff);
   return `#${n.toString(16).padStart(6, "0").toUpperCase()}`;
@@ -12,11 +20,14 @@ function randomHexColor() {
 function uniqueColor(usedColors) {
   let c = randomHexColor();
   let guard = 0;
-  while (usedColors.has(c) && guard < 10000) {
+
+  while ((usedColors.has(c) || c === fixedLabel.color) && guard < 10000) {
     c = randomHexColor();
     guard++;
   }
+
   if (guard >= 10000) throw new Error("Failed to generate unique HEX color");
+
   usedColors.add(c);
   return c;
 }
@@ -25,15 +36,28 @@ async function main() {
   await mongoose.connect(config.mongoURI);
   console.log("[MongoDB] connected");
 
-  // ✅ 모델 없이 컬렉션 직접 접근
+  // 고정 hand label upsert
+  await AnnotationLabel.updateOne(
+    { id: fixedLabel.id },
+    {
+      $set: {
+        name: fixedLabel.name,
+        color: fixedLabel.color,
+        attributes: fixedLabel.attributes,
+        type: fixedLabel.type,
+      },
+    },
+    { upsert: true }
+  );
+
   const productListCol = mongoose.connection.collection("ProductsList");
 
-  // 필요한 필드만 projection
   const products = await productListCol
     .find({}, { projection: { trainProductIdx: 1, productEngName: 1 } })
     .toArray();
 
   console.log("[ProductList] items:", products.length);
+
   if (!products.length) {
     await mongoose.disconnect();
     console.log("[MongoDB] disconnected");
@@ -42,12 +66,15 @@ async function main() {
 
   console.log("[ProductList] sample:", products[0]);
 
-  // 기존 라벨(색 중복 방지)
   const existing = await AnnotationLabel.find({}, { id: 1, color: 1 }).lean();
+
   const usedColors = new Set(existing.map((x) => x.color).filter(Boolean));
+  usedColors.add(fixedLabel.color);
+
   const existingById = new Map(existing.map((x) => [Number(x.id), x]));
 
-  const desiredIds = new Set();
+  const desiredIds = new Set([fixedLabel.id]);
+
   let upserted = 0;
   let skipped = 0;
 
@@ -63,21 +90,34 @@ async function main() {
     desiredIds.add(id);
 
     const existed = existingById.get(id);
-    const setOnInsert = existed ? {} : { color: uniqueColor(usedColors) };
+    const setOnInsert = existed
+      ? {}
+      : {
+          color: uniqueColor(usedColors),
+          attributes: [],
+          type: "any",
+        };
 
     await AnnotationLabel.updateOne(
       { id },
-      { $set: { name }, $setOnInsert: setOnInsert },
+      {
+        $set: { name },
+        ...(Object.keys(setOnInsert).length
+          ? { $setOnInsert: setOnInsert }
+          : {}),
+      },
       { upsert: true }
     );
 
     upserted++;
   }
 
-  // 삭제 정책(원치 않으면 주석 처리)
-  const delRes = await AnnotationLabel.deleteMany({ id: { $nin: Array.from(desiredIds) } });
+  const delRes = await AnnotationLabel.deleteMany({
+    id: { $nin: Array.from(desiredIds) },
+  });
 
   await mongoose.disconnect();
+
   console.log("[SYNC DONE]", {
     totalProducts: products.length,
     desiredLabels: desiredIds.size,
@@ -85,6 +125,7 @@ async function main() {
     skipped,
     deleted: delRes?.deletedCount ?? 0,
   });
+
   console.log("[MongoDB] disconnected");
 }
 
