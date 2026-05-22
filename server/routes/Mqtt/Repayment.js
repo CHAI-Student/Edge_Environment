@@ -312,7 +312,8 @@ function Repayment() {
           const approveRes = await axios.post(
             `${config.cardTerminalApi}/payment/token/approve`,
             {
-              amount: String(newApprovePrice),
+              // amount: String(newApprovePrice),
+              amount: '5',
               // items: reqData.items,
               items: reqData.items.map(item => ({
                 ...item,
@@ -321,6 +322,7 @@ function Repayment() {
               vankey_hash: oldToken,
             }
           );
+          console.log('[REPAY-CANCEL] approveRes.data: ', approveRes.data)
 
           const approveOk =
             approveRes.data?.status === "Y" &&
