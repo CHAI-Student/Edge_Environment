@@ -26,7 +26,7 @@ function makeIFDate(d = new Date()) {
 async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt, CardMethod, productData, token) {
     console.log("[PNT] Preparing IF_08 data transfer...");
     console.log('paymentResponse', paymentResponse)
-    console.log("[PNT] productData:", productData);
+    // console.log("[PNT] productData:", productData);
     console.log("[PNT] inferenceResult.products:", inferenceResult?.products);
     try {
         // 추후 카메라가 촬영한 영상으로 전송
@@ -159,7 +159,8 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
                 DATA:{
                     device_idx: config.deviceIdx,
                     division_idx: config.divisionIdx,
-                    token_id: paymentResponse.vankey_hash || paymentResponse.vankey,
+                    token_id: CardMethod === 'N' ? token : paymentResponse.vankey,
+                    // token_id: token || paymentResponse.vankey_hash || paymentResponse.vankey,
                     payment_at: formattedDate,
                     approve_at: paymentResponse.authorization_date,
                     approve_type: CardMethod === 'R' ? '2' : (CardMethod === 'S' ? '1' : '0'), // 0=일반카드, 1=삼성페이, 2=RFID
