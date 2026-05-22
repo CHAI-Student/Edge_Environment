@@ -30,6 +30,9 @@ function makeIFDate() {
   return `${yyyy}${mm}${dd}${HH}${MM}${SS}`;
 }
 
+//"수동 : MANUAL
+//임베딩 : EMBEDDING"	 조건문 달아야함
+
 function runReboot() {
   if (process.platform === "darwin") {
     console.log("[REBOOT] (dev/mac) would reboot now. (skip)");
