@@ -313,7 +313,11 @@ function Repayment() {
             `${config.cardTerminalApi}/payment/token/approve`,
             {
               amount: String(newApprovePrice),
-              items: reqData.items,
+              // items: reqData.items,
+              items: reqData.items.map(item => ({
+                ...item,
+                name: String(item.name || "").slice(0, 5),
+              })),
               vankey_hash: oldToken,
             }
           );
