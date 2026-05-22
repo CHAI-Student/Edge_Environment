@@ -114,7 +114,8 @@ function Repayment() {
       if (reqData.payment_mode === "SAMSUNG") {
         cancelEndpoint = `${config.cardTerminalApi}/payment/samsung-pay/cancel`;
         cancelPayload = {
-          amount: String(reqData.approve_price),
+          // amount: String(reqData.approve_price),
+          amount: '5',
           original_authorization_date: reqData.approve_at,
           original_authorization_number: reqData.approve_no,
           vankey: reqData.token_id,
@@ -122,7 +123,8 @@ function Repayment() {
       } else if (reqData.payment_mode === "CARD") {
         cancelEndpoint = `${config.cardTerminalApi}/payment/token/cancel`;
         cancelPayload = {
-          amount: String(reqData.approve_price),
+          // amount: String(reqData.approve_price),
+          amount: '5',
           original_authorization_date: reqData.approve_at,
           original_authorization_number: reqData.approve_no,
           vankey_hash: reqData.token_id,
@@ -186,14 +188,14 @@ function Repayment() {
           },
         });
 
-        client.publish(repaymentPub, ackPayload, { qos: 1, retain: false }, (e) => {
+        client.publish(repaymentPub, ackPayload, { qos: 1 }, (e) => {
           if (e) console.error("[CANCEL] Publish Error:", e.message);
           else console.log("[CANCEL] Fail ACK sent (exception)");
         });
         return;
       }
 
-      const ok = response?.data?.response_code == 0 && response?.data?.status === "Y";
+      const ok = response.data.response_code == 0 && response.data.status === "Y";
 
       if (ok) {
         console.log("[CANCEL] Cancellation Successful:", response.data);
@@ -233,7 +235,6 @@ function Repayment() {
       } else {
         console.error("[CANCEL] Cancellation Failed:", response.data);
 
-        // ✅ 실패 ACK 추가 (2번 보완의 핵심)
         const ifSysId = (payload.HEADER && payload.HEADER.IF_SYSID) ? payload.HEADER.IF_SYSID : uuidv4();
 
         const ackPayload = JSON.stringify({
@@ -255,9 +256,9 @@ function Repayment() {
           },
         });
 
-        client.publish(repaymentPub, ackPayload, { qos: 1, retain: false }, (e) => {
+        client.publish(repaymentPub, ackPayload, { qos: 1 }, (e) => {
           if (e) console.error("[CANCEL] Publish Error:", e.message);
-          else console.log("[CANCEL] Fail ACK sent (rejected)");
+          else console.log("[CANCEL] Fail ACK sent success (rejected)");
         });
       }
     } else if (reqData.request_type == "REPAY") {
@@ -299,104 +300,227 @@ function Repayment() {
       // const cardMethod = getCardMethod(reqData.token_id);
       //승인 후 취소 방식 채택
       if (reqData.payment_mode === "CARD") {
-        //새로운 결제 승인
-        const oldToken = reqData.org_token_id
-        const oldApproveAt = reqData.approve_at
-        const oldApprovePrice = reqData.approve_price // 여기에 새로 결제할 가격 정보가 들어오는건지 아니면 old_approve_price로 들어오는 건지 확인 필요 (0213)
-        const oldApproveNo = reqData.approve_no
+        const oldToken = reqData.org_token_id || reqData.token_id;
+        const oldApproveAt = reqData.approve_at;
+        // 나중에 reqData.org_approve_at 로 바꾸기
+        const oldApprovePrice = reqData.org_approve_price || reqData.approve_price;
+        const oldApproveNo = reqData.org_approve_no || reqData.approve_no;
 
-        let paymentAt = null;
-        let newApproveNo = null;
-        let newApproveAt = null;
-        let newApprovePrice = null;
-        let newToken = null;
-        let approveJson = null;
+        const newApprovePrice = reqData.approve_price;
 
-        axios.post(`${config.cardTerminalApi}/payment/token/approve`, {
-          amount: String(oldApprovePrice),
-          vankey_hash: oldToken
-        }).then((response) => {
-          if (response.data.status == 'Y' && response.data.response_code == 0) {
-            console.log('[REPAY] response success: ', response.data)
-            paymentAt = formatIfDate();
-            newApproveNo = response.data.authorization_number
-            newApproveAt = response.data.authorization_date
-            newApprovePrice = String(oldApprovePrice)
-            newToken = response.data.vankey
-            approveJson = response.data
+        try {
+          const approveRes = await axios.post(
+            `${config.cardTerminalApi}/payment/token/approve`,
+            {
+              amount: String(newApprovePrice),
+              items: reqData.items,
+              vankey_hash: oldToken,
+            }
+          );
+
+          const approveOk =
+            approveRes.data?.status === "Y" &&
+            approveRes.data?.response_code == 0;
+
+          if (!approveOk) {
+            throw new Error(
+              `[재결제] 승인 실패: ${JSON.stringify(approveRes.data)}`
+            );
           }
-          axios.post(`${config.cardTerminalApi}/payment/token/cancel`, {
-            amount: String(oldApprovePrice),
-            original_authorization_date: oldApproveAt,
-            original_authorization_number: oldApproveNo,
-            vankey_hash: oldToken,
-          }).then((canRes) => {
-            if (canRes.data.status == 'Y' && canRes.data.response_code == 0) console.log('[REPAY/CANCEL] repayment cancel is successful: ', canRes);
-          })
-        })
-        const ackPayload = JSON.stringify({
-          HEADER: {
-            IF_ID: "IF_09",
-            IF_SYSID: ifSysId,
-            IF_HOST: "CRKPNTCHAI",
-            IF_DATE: formatIfDate(),
-          },
-          //여기 마무리
-          DATA: {
-            device_idx: reqData.device_idx,
-            division_idx: reqData.division_idx,
-            payment_idx: reqData.payment_idx,
-            token_id: newToken,
-            org_token_id: oldToken,
-            payment_at: paymentAt,
-            request_type: "REPAY",
-            approve_at: newApproveAt,
-            approve_price: newApprovePrice,
-            approve_no: newApproveNo,
-            org_approve_at: oldApproveAt,
-            org_approve_price: oldApprovePrice,
-            org_approve_no: oldApproveNo,
-            result_cd: "S",
-            result_msg: "재결제가 완료되었습니다",
-          },
-        });
 
-        client.publish(repaymentPub, ackPayload, { qos: 1, retain: false }, (e) => {
-          if (e) console.error("[REPAY] Publish Error:", e.message);
-          else console.log("[REPAY] Success ACK sent");
-        });
-      } else if (reqData.payment_mode == 'SAMSUNG') {
-        console.log('[REPAY] SamsungPay cannot use Repay system')
+          const newToken = approveRes.data.vankey;
+          const newApproveNo = approveRes.data.authorization_number;
+          const newApproveAt = approveRes.data.authorization_date;
+          const paymentAt = formatIfDate();
 
-        const ifSysId = payload.HEADER.IF_SYSID || uuidv4();
+          const cancelRes = await axios.post(
+            `${config.cardTerminalApi}/payment/token/cancel`,
+            {
+              // amount: String(oldApprovePrice),
+              amount: '5',
+              original_authorization_date: oldApproveAt,
+              original_authorization_number: oldApproveNo,
+              vankey_hash: oldToken,
+            }
+          );
 
-        const ackPayload = JSON.stringify({
-          HEADER: {
-            IF_ID: "IF_09",
-            IF_SYSID: ifSysId,
-            IF_HOST: "CRKPNTCHAI",
-            IF_DATE: formatIfDate(),
-          },
-          DATA: {
-            device_idx: reqData.device_idx,
-            division_idx: reqData.division_idx,
-            payment_idx: reqData.payment_idx,
-            token_id: reqData.org_token_id,
-            request_type: "REPAY",
-            result_cd: "F",
-            result_msg: "[재결제] 삼성페이는 재결제가 불가합니다. 결제 취소를 이용해주세요.",
-          },
-        });
+          const cancelOk =
+            cancelRes.data?.status === "Y" &&
+            cancelRes.data?.response_code == 0;
 
-        client.publish(repaymentPub, ackPayload, { qos: 1, retain: false }, (e) => {
-          if (e) console.error("[REPAY] Publish Error:", e.message);
-          else console.log("[REPAY] Busy ACK sent");
-        });
-        return;
-      } else {
-        console.error("[CANCEL] Unknown Payment Method:", reqData.token_id);
-        return;
+          if (!cancelOk) {
+            throw new Error(
+              `[재결제] 기존 결제 취소 실패: ${JSON.stringify(cancelRes.data)}`
+            );
+          }
+
+          const ackPayload = JSON.stringify({
+            HEADER: {
+              IF_ID: "IF_09",
+              IF_SYSID: ifSysId,
+              IF_HOST: "CRKPNTCHAI",
+              IF_DATE: formatIfDate(),
+            },
+            DATA: {
+              device_idx: reqData.device_idx,
+              division_idx: reqData.division_idx,
+              payment_idx: reqData.payment_idx,
+              token_id: newToken,
+              org_token_id: oldToken,
+              payment_at: paymentAt,
+              request_type: "REPAY",
+              approve_at: newApproveAt,
+              approve_price: String(newApprovePrice),
+              approve_no: newApproveNo,
+              org_approve_at: oldApproveAt,
+              org_approve_price: oldApprovePrice,
+              org_approve_no: oldApproveNo,
+              result_cd: "S",
+              result_msg: "재결제가 완료되었습니다",
+            },
+          });
+
+          client.publish(repaymentPub, ackPayload, { qos: 1, retain: false }, (e) => {
+            if (e) console.error("[REPAY] Publish Error:", e.message);
+            else console.log("[REPAY] Success ACK sent");
+          });
+
+        } catch (err) {
+          console.error("[REPAY] Error:", err.message, err.response?.data);
+
+          const failPayload = JSON.stringify({
+            HEADER: {
+              IF_ID: "IF_09",
+              IF_SYSID: ifSysId,
+              IF_HOST: "CRKPNTCHAI",
+              IF_DATE: formatIfDate(),
+            },
+            DATA: {
+              device_idx: reqData.device_idx,
+              division_idx: reqData.division_idx,
+              payment_idx: reqData.payment_idx,
+              token_id: null,
+              org_token_id: oldToken,
+              payment_at: null,
+              request_type: "REPAY",
+              approve_at: null,
+              approve_price: null,
+              approve_no: null,
+              org_approve_at: oldApproveAt,
+              org_approve_price: oldApprovePrice,
+              org_approve_no: oldApproveNo,
+              result_cd: "F",
+              result_msg: err.response?.data?.detail || err.message,
+              terminal_response: err.response?.data ?? null,
+            },
+          });
+
+          client.publish(repaymentPub, failPayload, { qos: 1, retain: false }, (e) => {
+            if (e) console.error("[REPAY] Fail Publish Error:", e.message);
+            else console.log("[REPAY] Fail ACK sent");
+          });
+        }
       }
+      // if (reqData.payment_mode === "CARD") {
+      //   //새로운 결제 승인
+      //   const oldToken = reqData.org_token_id
+      //   const oldApproveAt = reqData.approve_at
+      //   const oldApprovePrice = reqData.approve_price // 여기에 새로 결제할 가격 정보가 들어오는건지 아니면 old_approve_price로 들어오는 건지 확인 필요 (0213)
+      //   const oldApproveNo = reqData.approve_no
+
+      //   let paymentAt = null;
+      //   let newApproveNo = null;
+      //   let newApproveAt = null;
+      //   let newApprovePrice = null;
+      //   let newToken = null;
+      //   let approveJson = null;
+
+      //   const approveRes = await axios.post(`${config.cardTerminalApi}/payment/token/approve`, {
+      //     amount: String(oldApprovePrice),
+      //     vankey_hash: oldToken,
+
+      //   }).then((response) => {
+      //     if (response.data.status == 'Y' && response.data.response_code == 0) {
+      //       console.log('[REPAY] response success: ', response.data)
+      //       paymentAt = formatIfDate();
+      //       newApproveNo = response.data.authorization_number
+      //       newApproveAt = response.data.authorization_date
+      //       newApprovePrice = String(oldApprovePrice)
+      //       newToken = response.data.vankey
+      //       approveJson = response.data
+      //     }
+      //     axios.post(`${config.cardTerminalApi}/payment/token/cancel`, {
+      //       amount: String(oldApprovePrice),
+      //       original_authorization_date: oldApproveAt,
+      //       original_authorization_number: oldApproveNo,
+      //       vankey_hash: oldToken,
+      //     }).then((canRes) => {
+      //       if (canRes.data.status == 'Y' && canRes.data.response_code == 0) console.log('[REPAY/CANCEL] repayment cancel is successful: ', canRes);
+      //     })
+      //   })
+      //   const ackPayload = JSON.stringify({
+      //     HEADER: {
+      //       IF_ID: "IF_09",
+      //       IF_SYSID: ifSysId,
+      //       IF_HOST: "CRKPNTCHAI",
+      //       IF_DATE: formatIfDate(),
+      //     },
+      //     //여기 마무리
+      //     DATA: {
+      //       device_idx: reqData.device_idx,
+      //       division_idx: reqData.division_idx,
+      //       payment_idx: reqData.payment_idx,
+      //       token_id: newToken,
+      //       org_token_id: oldToken,
+      //       payment_at: paymentAt,
+      //       request_type: "REPAY",
+      //       approve_at: newApproveAt,
+      //       approve_price: newApprovePrice,
+      //       approve_no: newApproveNo,
+      //       org_approve_at: oldApproveAt,
+      //       org_approve_price: oldApprovePrice,
+      //       org_approve_no: oldApproveNo,
+      //       result_cd: "S",
+      //       result_msg: "재결제가 완료되었습니다",
+      //     },
+      //   });
+
+      //   client.publish(repaymentPub, ackPayload, { qos: 1, retain: false }, (e) => {
+      //     if (e) console.error("[REPAY] Publish Error:", e.message);
+      //     else console.log("[REPAY] Success ACK sent");
+      //   });
+      // } else if (reqData.payment_mode == 'SAMSUNG') {
+      //   console.log('[REPAY] SamsungPay cannot use Repay system')
+
+      //   const ifSysId = payload.HEADER.IF_SYSID || uuidv4();
+
+      //   const ackPayload = JSON.stringify({
+      //     HEADER: {
+      //       IF_ID: "IF_09",
+      //       IF_SYSID: ifSysId,
+      //       IF_HOST: "CRKPNTCHAI",
+      //       IF_DATE: formatIfDate(),
+      //     },
+      //     DATA: {
+      //       device_idx: reqData.device_idx,
+      //       division_idx: reqData.division_idx,
+      //       payment_idx: reqData.payment_idx,
+      //       token_id: reqData.org_token_id,
+      //       request_type: "REPAY",
+      //       result_cd: "F",
+      //       result_msg: "[재결제] 삼성페이는 재결제가 불가합니다. 결제 취소를 이용해주세요.",
+      //     },
+      //   });
+
+      //   client.publish(repaymentPub, ackPayload, { qos: 1, retain: false }, (e) => {
+      //     if (e) console.error("[REPAY] Publish Error:", e.message);
+      //     else console.log("[REPAY] Busy ACK sent");
+      //   });
+      //   return;
+      // } else {
+      //   console.error("[CANCEL] Unknown Payment Method:", reqData.token_id);
+      //   return;
+      // }
     }
   });
 }
