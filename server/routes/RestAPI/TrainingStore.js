@@ -2,6 +2,12 @@ const axios = require("axios");
 const config = require("../../config/dev");
 const { v4: uuidv4 } = require("uuid");
 
+let currentTrainingStatus = null;
+
+function getTrainingStatus() {
+  return currentTrainingStatus;
+}
+
 const external = axios.create({
   baseURL: config.restApi, // https://apichaidev.atcrk.co.kr/api/v1
   timeout: 10000,
@@ -19,6 +25,9 @@ async function TrainingStore(productIdx, product_eng_name, training_status) {
         training_status
     );
     // console.log(`MAKE TRAINING STORE FOR IF07:::: ${productIdx}, ${product_eng_name}, ${training_status}`)
+
+    currentTrainingStatus = String(training_status);
+
     try {
         const token = process.env.JWT_TOKEN;
         if (!token) {
@@ -74,4 +83,4 @@ async function TrainingStore(productIdx, product_eng_name, training_status) {
     }
 }
 
-module.exports = { TrainingStore };
+module.exports = { TrainingStore, getTrainingStatus };

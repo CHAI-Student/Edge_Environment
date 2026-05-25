@@ -4,11 +4,195 @@ const { v4: uuidv4 } = require("uuid");
 const { getClient, publish } = require("./MqttClient");
 const config = require("../../config/key");
 const { exec } = require("child_process");
-
+const { ms } = require("zod/locales");
+const envPath = path.resolve(__dirname, "../../.env"); // 실제 .env 파일 경로
+const { getTrainingStatus, TrainingStore } = require("../RestAPI/TrainingStore");
+const { DeviceInfo } = require("../RestAPI/DeviceInfo");
+const {ProductCollectionHealth} = require("./AckCollect")
+const {
+  DeadboltStatusAPI,
+  LoadcellStatusAPI,
+  CameraStatusAPI,
+} = require("./HealthMqtt");
+const jwt = require("jsonwebtoken");
+const { is } = require("zod/v4/locales");
 
 const REBOOT_FLAG = path.resolve(__dirname, "../../log/reboot.flag");
 
 let rebooting = false;
+
+// 1. 시스템 서비스 상태 확인 (systemctl)
+function checkServiceStatus() {
+  return new Promise((resolve) => {
+    // OS 쉘에서 systemctl is-active 로 서비스 상태를 확인합니다.
+    exec("systemctl is-active edge-environment.service", (err, stdout) => {
+      const status = stdout ? stdout.trim() : "unknown";
+      if (err || status !== "active") {
+        resolve({ ok: false, msg: status || (err && err.message) });
+      } else {
+        resolve({ ok: true, msg: status });
+      }
+    });
+  });
+}
+
+// JWT Access Token 확인
+function checkJwtToken() {
+  // 실제 환경에서 토큰을 어떻게 받아오는지에 따라 로직을 수정할 수 있습니다.
+  // 여기서는 process.env.JWT_TOKEN이 세팅되어 있는지 확인합니다.
+  const token = process.env.JWT_TOKEN;
+  if (token && typeof token === "string" && token.length > 10) {
+    return true;
+  }
+  return false;
+}
+
+// MQTT Connect, Publish, Subscribe 정상 동작 체크
+function checkMqttPubSub(client, deviceIdx) {
+  return new Promise((resolve) => {
+    const testTopic = `chai/device/${deviceIdx}/health/test`;
+    const testPayload = "ping_" + Date.now();
+
+    // 임시 메시지 리스너: 내가 보낸 핑(ping)이 잘 돌아오는지 대기
+    const testListener = (topic, payload) => {
+      if (topic === testTopic && payload.toString() === testPayload) {
+        clearTimeout(timeout);
+        client.removeListener("message", testListener); // 리스너 해제
+        client.unsubscribe(testTopic);                  // 구독 해제
+        resolve(true);                                  // 정상 동작 인정
+      }
+    };
+
+    client.on("message", testListener);
+
+    // 테스트 토픽 구독 후, 동일한 토픽으로 Publish
+    client.subscribe(testTopic, { qos: 1 }, (err) => {
+      if (err) {
+        return resolve(false);
+      }
+      client.publish(testTopic, testPayload, { qos: 1 });
+    });
+
+    // 5초 안에 메시지를 돌려받지 못하면 실패로 간주
+    const timeout = setTimeout(() => {
+      client.removeListener("message", testListener);
+      client.unsubscribe(testTopic);
+      resolve(false);
+    }, 5000);
+  });
+}
+
+// 위의 3개 진단을 하나로 묶어 실행하는 종합 함수
+async function runStartupDiagnostics(client, deviceIdx) {
+  console.log("\n========== [Reboot Diagnostics] ==========");
+  console.log("재부팅 완료 감지됨. 시스템 자가 진단을 시작합니다...");
+
+  // 1. 서비스 상태 체크
+  const srv = await checkServiceStatus();
+  console.log(`[Diagnostic] 1. edge-environment.service : ${srv.ok ? '✅ OK' : '❌ FAIL'} (${srv.msg})`);
+
+  // 2. JWT 토큰 체크
+  const jwtOk = checkJwtToken();
+  console.log(`[Diagnostic] 2. JWT Access Token : ${jwtOk ? '✅ OK' : '❌ FAIL'}`);
+
+  // 3. MQTT Pub/Sub 체크
+  const mqttOk = await checkMqttPubSub(client, deviceIdx);
+  console.log(`[Diagnostic] 3. MQTT Pub/Sub Check : ${mqttOk ? '✅ OK' : '❌ FAIL (Timeout/Error)'}`);
+
+  console.log("==========================================\n");
+  
+  return srv.ok && jwtOk && mqttOk;
+}
+
+// ====================================================================
+// 💡 .env 파일을 읽어 MODEL_VERSION 값을 영구적으로 변경하는 함수
+// ====================================================================
+async function updateEnvModelVersion(newVersion) {
+  try {
+    let envContent = "";
+    
+    // .env 파일이 존재하는지 확인 후 읽기
+    if (await fileExists(ENV_FILE_PATH)) {
+      envContent = await fs.readFile(ENV_FILE_PATH, "utf-8");
+    }
+
+    // 정규식을 사용해 기존 MODEL_VERSION=... 줄을 찾아서 교체
+    const regex = /^MODEL_VERSION=.*$/m;
+    if (regex.test(envContent)) {
+      envContent = envContent.replace(regex, `MODEL_VERSION=${newVersion}`);
+    } else {
+      // 기존에 MODEL_VERSION 항목이 없었다면 맨 아랫줄에 추가
+      envContent += `\nMODEL_VERSION=${newVersion}\n`;
+    }
+
+    // 수정된 내용으로 .env 파일 덮어쓰기
+    await fs.writeFile(ENV_FILE_PATH, envContent, "utf-8");
+    
+    // 현재 실행 중인 프로세스의 메모리 환경변수도 즉시 업데이트
+    process.env.MODEL_VERSION = newVersion;
+    
+    console.log(`[ENV] .env 파일 영구 업데이트 완료: MODEL_VERSION=${newVersion}`);
+  } catch (error) {
+    console.error(`[ENV] .env 파일 업데이트 중 오류 발생:`, error.message);
+    throw error; // 실패 시 상위로 에러를 던져 재부팅을 막습니다.
+  }
+}
+
+// ====================================================================
+// 💡 Docker 이미지를 Pull 받아오는 Helper 함수
+// ====================================================================
+function pullDockerImage(modelVersion) {
+  return new Promise((resolve, reject) => {
+    // 환경 변수나 설정에서 저장소 및 이미지 이름을 가져옵니다.
+    // 예: DOCKER_IMAGE_NAME="myregistry.com/myusername/mymodel"
+    const imageName = process.env.DOCKER_IMAGE_NAME || "username/image-name";
+    
+    // 가져온 모델 버전을 tag로 사용합니다.
+    const command = `docker pull ${imageName}:${modelVersion}`;
+
+    console.log(`[DOCKER] 모델 다운로드 시작: ${command}`);
+
+    // exec를 통해 OS 쉘에 명령어 전달
+    exec(command, (err, stdout, stderr) => {
+      if (err) {
+        console.error(`[DOCKER] 다운로드 실패: ${err.message}`);
+        return reject(err);
+      }
+      
+      // 도커 명령어의 진행 과정(경고 등)이 stderr로 출력될 수 있음
+      if (stderr && !stderr.includes("Downloaded newer image")) {
+        console.warn(`[DOCKER] stderr: ${stderr}`);
+      }
+      
+      console.log(`[DOCKER] 다운로드 완료:\n${stdout}`);
+      resolve(true);
+    });
+  });
+}
+
+async function ProductCollectionHealth() {
+
+  const [
+    CameraStatus,
+    DeadboltHealth,
+    LoadcellHealth,
+    CurrentDoorState,
+  ] = await Promise.all([
+    CameraStatusAPI(),
+    DeadboltStatusAPI(),
+    LoadcellStatusAPI(),
+    fetchCurrentDoorState(),
+  ]);
+
+  const isHealthOk =
+    CameraStatus === "09" &&
+    DeadboltHealth === "19" &&
+    LoadcellHealth === "29";
+
+  console.log('[ACK-CHECK] isHealthOk: ', isHealthOk)
+
+  return isHealthOk;
+}
 
 async function fileExists(p) {
   try {
@@ -157,6 +341,80 @@ async function RebootMqtt() {
 
     console.log("[MQTT] reboot cmd received. IF_SYSID=", ifSysId);
 
+    if (msg?.DATA?.reboot_mode === "MANUAL"){
+      const currentStatus = getTrainingStatus();
+      if (currentStatus === "7") {
+        console.log(`[RebootMqtt(ModelEmbedding)] 수동(MANUAL) 재부팅 조건 충족 (training_status: 7)`);
+        try {
+            console.log(`[MQTT] IF_13(장비 정보) 조회를 시작합니다...`);
+            
+            // DeviceInfo.js 함수 실행 (장비 리스트 반환)
+            const deviceList = await DeviceInfo(); 
+
+            // 리스트에 데이터가 있는지 확인 (IF_13 정의서에 의하면 비활성화 시 빈 배열 반환 가능)
+            if (deviceList && deviceList.length > 0) {
+                const myDeviceInfo = deviceList[0];
+                
+                const modelVersion = myDeviceInfo.model_version;
+                const brunchName = myDeviceInfo.brunch_name;
+                
+                console.log(`✅ [IF_13 체크 완료] 장비 상세 정보:`);
+                console.log(`[RebootMqtt(ModelEmbedding)] 모델 버전 (model_version): ${modelVersion}`);
+                console.log(`[RebootMqtt(ModelEmbedding)] 브런치 명 (brunch_name): ${brunchName}`);
+
+                if (String(process.env.MODEL_VERSION) != modelVersion){
+                  const healthCare = await ProductCollectionHealth();
+                  // [수정] 여기에 결제상태(현재 결제가 진행되고 있는 상황인지)를 확인하는 기능 추가해야 될거 같음
+                  console.log(`[RebootMqtt(ModelEmbedding)] 헬스체크 결과: ${healthCare}. 재부팅 절차를 이어서 진행합니다.`);
+                  console.log(`[RebootMqtt(ModelEmbedding)] 모델 업데이트 필요. (기존: ${process.env.MODEL_VERSION} -> 신규: ${modelVersion})`);
+                  try {
+                    // DockerHub로 엣지 내 임베딩
+                    await pullDockerImage(modelVersion); // [수정] docker pull을 이렇게 해도 되는지 확인
+                    console.log(`[RebootMqtt(ModelEmbedding)] 신규 모델(Docker Pull) 임베딩이 성공적으로 완료되었습니다.`);
+                    // [수정] pull된 임베딩 된 docker를 engine 파일로 바꾸는 광
+                    // -> 이거는 먼저 pt 파일이 어디에 임베딩 되는지 확인하고
+                    // -> 그걸 기반으로 기존에 만들었던 sh 파일로 engine 파일로 바꾸면 될듯
+                    
+                    // 환경변수인 모델 버전 변겅
+                    await updateEnvModelVersion(modelVersion);
+                  }
+                  catch (updateError) {
+                    console.error(`[RebootMqtt(ModelEmbedding)] 도커 이미지 다운로드 실패로 재부팅을 취소합니다.`);
+                    await publishRebootAck({
+                      deviceIdx, divisionIdx, ifSysId,
+                      rebootState: "FAILED", resultCd: "F", resultMsg: "Model Image Pull Failed"
+                    });
+                    rebooting = false;
+                    return;
+                  }
+                } else{
+                  console.warn(`[RebootMqtt(ModelEmbedding)] 재부팅 취소: 기존 모델 버전과 조회된 버전이 동일합니다.`);
+                  await publishRebootAck({
+                    deviceIdx,
+                    divisionIdx,
+                    ifSysId,
+                    rebootState: "FAILED", // 혹은 요구사항에 맞는 상태값(ex: REJECTED)
+                    resultCd: "F",
+                    resultMsg: "This Division Model Version is SAME"
+                  });
+                  rebooting = false; // 진행 상태 초기화
+                  return; // ⛔ 더 이상 아래로 내려가지 않고 중단 (실제 재부팅 X)
+                }
+            } else {
+                console.warn(`⚠️ [IF_13] 장비 정보를 성공적으로 가져왔으나 조회된 데이터가 없습니다. (비활성화 상태 등)`);
+                rebooting = false; return; // 데이터가 없을 때 재부팅 멈춤
+            }
+        } catch (error) {
+            console.error(`❌ [IF_13] 장비 정보 조회 중 오류 발생:`, error.message);
+            rebooting = false; return; // 에러 시 재부팅 프로세스를 중단
+        }
+      } else {
+        console.warn(`[MQTT] 수동(MANUAL) 재부팅 거부: 현재 학습 상태가 7이 아닙니다. (현재: ${currentStatus})`);
+        rebooting = false;
+        return; 
+      }
+    }
+
     try {
       await fs.mkdir(path.dirname(REBOOT_FLAG), { recursive: true });
       await fs.writeFile(
@@ -178,6 +436,7 @@ async function RebootMqtt() {
       });
 
       console.log("[REBOOT] flag saved. rebooting...");
+      
       runReboot();
     } catch (e) {
       rebooting = false;
@@ -198,7 +457,19 @@ async function RebootMqtt() {
   const onReady = async () => {
     console.log("[MQTT] connected (reboot)");
 
-    await publishRebootAckOnce(deviceIdx, divisionIdx);
+    // ====================================================================
+    // 💡 재부팅 직후인지 확인하고, 맞다면 진단 후 완료 ACK 발송
+    // ====================================================================
+    const isAfterReboot = await fileExists(REBOOT_FLAG);
+
+    if (isAfterReboot) {
+      console.log("[RebootMqtt] 재부팅 플래그 발견. 자가 진단을 시작합니다.");
+      // 1. 자가 진단 실행 (서비스 상태, JWT 토큰, MQTT 송수신 테스트)
+      const isSystemHealthy = await runStartupDiagnostics(client, deviceIdx);
+      await publishRebootAckOnce(deviceIdx, divisionIdx);
+    } else {
+        console.warn("[경고] 재부팅 후 일부 자가 진단에 실패했습니다. 시스템 상태를 점검하세요.");
+      }
 
     console.log("[MQTT] subscribing...", rebootSub);
 
