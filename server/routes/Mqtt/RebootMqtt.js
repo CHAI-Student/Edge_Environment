@@ -21,6 +21,18 @@ const REBOOT_FLAG = path.resolve(__dirname, "../../log/reboot.flag");
 
 let rebooting = false;
 
+async function notifyDeployCompleteForProduct(product) {
+  if (!product?.product_idx || !product?.product_eng_name) {
+    throw new Error("product_idx or product_eng_name is missing");
+  }
+
+  return await notifyAiTrainingStore({
+    productIdx: product.product_idx,
+    productEngName: product.product_eng_name,
+    trainingStatus: "1",
+  });
+}
+
 // 1. 시스템 서비스 상태 확인 (systemctl)
 function checkServiceStatus() {
   return new Promise((resolve) => {
@@ -452,38 +464,44 @@ async function RebootMqtt() {
   const onReady = async () => {
     console.log("[MQTT] connected (reboot)");
 
-    // ====================================================================
-    // 💡 재부팅 직후인지 확인하고, 맞다면 진단 후 완료 ACK 발송
-    // ====================================================================
     const isAfterReboot = await fileExists(REBOOT_FLAG);
 
     if (isAfterReboot) {
       console.log("[RebootMqtt] 재부팅 플래그 발견. 자가 진단을 시작합니다.");
-      // 1. 자가 진단 실행 (서비스 상태, JWT 토큰, MQTT 송수신 테스트)
+
       const isSystemHealthy = await runStartupDiagnostics(client, deviceIdx);
-      if (isSystemHealthy) {
-        try {
-              const notifyResult = await notifyAiTrainingStore({
-                productIdx: "", // [수정] 여기 어떻게 해야할지 모르겠음
-                productEngName: "", // [수정] 여기 어떻게 해야할지 모르겠음
-                trainingStatus: "1",
-              });
-              const resultCd = notifyResult?.result_cd || notifyResult?.DATA?.result_cd || "S";
-              
-              if (resultCd === "S") {
-                console.log(`✅ [IF_07] 배포 완료 전송 성공`);
-              } else {
-                console.error(`❌ [IF_07] 배포 완료 전송 실패`);
-              }
-            } catch (notifyErr) {
-              console.error(`❌ [IF_07] 배포 중 에러:`, notifyErr.message);
-            }
+
+      if (!isSystemHealthy) {
+        console.warn("[RebootMqtt] 재부팅 후 자가 진단 실패. IF07 배포 완료를 전송하지 않습니다.");
+        return;
+      }
+
+      try {
+        const results = await notifyDeployCompleteForAllProducts();
+
+        const hasFail = results.some((item) => {
+          const resultCd =
+            item.result?.result_cd ||
+            item.result?.DATA?.result_cd ||
+            item.result?.body?.result_cd;
+
+          return resultCd && resultCd !== "S";
+        });
+
+        if (hasFail) {
+          console.error("[IF07] 일부 상품 배포 완료 전송 실패");
+          return;
+        }
+
+        console.log("[IF07 after Reboot] 배포 완료(training_status=1) 전송 성공");
+
         await publishRebootAckOnce(deviceIdx, divisionIdx);
-      } else {
-        console.warn("[isAfterReboot] 재부팅 후 일부 자가 진단에 실패했습니다. 시스템 상태를 점검하세요.");
+      } catch (notifyErr) {
+        console.error("[IF07] 배포 완료 전송 중 에러:", notifyErr.message);
+        return;
       }
     } else {
-      console.warn("[isAfterReboot] 재부팅이 안되었습니다.");
+      console.log("[RebootMqtt] 일반 MQTT 연결. 재부팅 후 처리 없음.");
     }
 
     console.log("[MQTT] subscribing...", rebootSub);
