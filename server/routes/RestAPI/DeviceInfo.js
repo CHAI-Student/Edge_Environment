@@ -3,6 +3,12 @@ const axios = require("axios");
 const config = require("../../config/key");
 const { v4: uuidv4 } = require("uuid");
 
+function formatIfDate(d = new Date()) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`
+         + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
 /**
  * [IF_13] 장비 정보 조회 서비스
  * @param {string} divisionIdx - 매장코드 
@@ -22,7 +28,7 @@ async function DeviceInfo() {
                 IF_ID   : "IF_13",
                 IF_SYSID: uuidv4(),
                 IF_HOST : "CRKPNTCHAI",
-                IF_DATE : formattedDate
+                IF_DATE : formatIfDate()
             },
             DATA: {
                 division_idx    : config.divisionIdx,

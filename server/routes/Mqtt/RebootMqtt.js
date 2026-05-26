@@ -7,7 +7,7 @@ const { exec } = require("child_process");
 const { ms } = require("zod/locales");
 const ENV_FILE_PATH = path.resolve(__dirname, "../../.env"); // 실제 .env 파일 경로
 const { getTrainingStatus, TrainingStore } = require("../RestAPI/TrainingStore");
-const { DeviceInfo } = require("../RestAPI/DivisionInfo");
+const { DeviceInfo } = require("../RestAPI/DeviceInfo");
 const { ProductList } = require("../RestAPI/ProductList");
 const {notifyAiTrainingStore, fetchCurrentDoorState} = require("./AckCollect")
 const {
@@ -379,7 +379,7 @@ async function RebootMqtt() {
             console.log(`[MQTT] IF_13(장비 정보) 조회를 시작합니다...`);
             
             // DeviceInfo.js 함수 실행 (장비 리스트 반환)
-            const deviceList = await DeviceInfo(config.divisionIdx, config.deviceIdx); 
+            const deviceList = await DeviceInfo(); 
             console.log(`[RebootMqtt(ModelEmbedding)] IF_13(장비 정보) 조회가 완료 결과: ${deviceList}}`)
             // 리스트에 데이터가 있는지 확인 (IF_13 정의서에 의하면 비활성화 시 빈 배열 반환 가능)
             if (deviceList && deviceList.length > 0) {
