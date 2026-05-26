@@ -252,6 +252,83 @@ async function minioObjectExists(objectKey) {
   }
 }
 
+function runShellCommand(command, label) {
+  return new Promise((resolve) => {
+    console.log(`[CLEANUP] ${label}: ${command}`);
+
+    exec(command, { maxBuffer: 1024 * 1024 * 10 }, (err, stdout, stderr) => {
+      if (stdout) {
+        console.log(`[CLEANUP][${label}] stdout:\n${stdout}`);
+      }
+
+      if (stderr) {
+        console.warn(`[CLEANUP][${label}] stderr:\n${stderr}`);
+      }
+
+      if (err) {
+        console.warn(`[CLEANUP][${label}] failed: ${err.message}`);
+        return resolve(false);
+      }
+
+      resolve(true);
+    });
+  });
+}
+
+async function getAvailableDiskMB(targetPath = "/") {
+  return new Promise((resolve, reject) => {
+    exec(`df -Pm "${targetPath}" | awk 'NR==2 {print $4}'`, (err, stdout, stderr) => {
+      if (err) {
+        return reject(err);
+      }
+
+      const availableMB = Number(String(stdout).trim());
+
+      if (Number.isNaN(availableMB)) {
+        return reject(new Error(`failed to parse df output: ${stdout || stderr}`));
+      }
+
+      resolve(availableMB);
+    });
+  });
+}
+
+async function cleanupCachesBeforeModelDownload() {
+  const targetPath = "/home/chai/Desktop/Codes/CRK-model/models";
+
+  console.log("[CLEANUP] 모델 다운로드 전 캐시 정리를 시작합니다.");
+
+  const beforeMB = await getAvailableDiskMB("/").catch(() => null);
+  if (beforeMB !== null) {
+    console.log(`[CLEANUP] cleanup before available disk: ${beforeMB} MB`);
+  }
+
+  /*
+    일반 사용자 권한으로 삭제 가능한 캐시 위주로 정리합니다.
+    sudo가 필요한 명령은 넣지 않습니다.
+  */
+  await runShellCommand("uv cache clean || true", "uv cache clean");
+  await runShellCommand("python3 -m pip cache purge || true", "pip cache purge");
+
+  await runShellCommand("rm -rf /home/chai/.cache/uv/* || true", "remove uv cache");
+  await runShellCommand("rm -rf /home/chai/.cache/pip/* || true", "remove pip cache");
+
+  /*
+    이전 MinIO 다운로드 실패로 남은 .part.minio 임시파일 삭제
+  */
+  await runShellCommand(
+    `find "${targetPath}" -maxdepth 1 -name "*.part.minio" -type f -delete || true`,
+    "remove minio partial files"
+  );
+
+  const afterMB = await getAvailableDiskMB("/").catch(() => null);
+  if (afterMB !== null) {
+    console.log(`[CLEANUP] cleanup after available disk: ${afterMB} MB`);
+  }
+
+  console.log("[CLEANUP] 모델 다운로드 전 캐시 정리 완료");
+}
+
 async function downloadMinioObject(objectKey, localPath) {
   await fs.mkdir(path.dirname(localPath), { recursive: true });
 
@@ -619,6 +696,9 @@ async function RebootMqtt() {
                     console.log(
                       `[RebootMqtt(ModelEmbedding)] MinIO 모델 폴더 확인 완료: trained_model/${targetFolderName}/`
                     );
+
+                    // 모델 파일 다운로드 전에 디스크 공간 확보
+                    await cleanupCachesBeforeModelDownload();
 
                     const downloadedFiles = await downloadModelFilesFromBrunchFolder(
                     targetFolderName,
