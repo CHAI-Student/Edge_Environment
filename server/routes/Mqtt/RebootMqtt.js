@@ -380,7 +380,7 @@ async function RebootMqtt() {
             
             // DeviceInfo.js 함수 실행 (장비 리스트 반환)
             const deviceList = await DeviceInfo(config.divisionIdx, config.deviceIdx); 
-
+            console.log(`[RebootMqtt(ModelEmbedding)] IF_13(장비 정보) 조회가 완료 결과: ${deviceList}}`)
             // 리스트에 데이터가 있는지 확인 (IF_13 정의서에 의하면 비활성화 시 빈 배열 반환 가능)
             if (deviceList && deviceList.length > 0) {
                 const myDeviceInfo = deviceList[0];
