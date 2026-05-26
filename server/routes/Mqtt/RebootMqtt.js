@@ -8,6 +8,7 @@ const { ms } = require("zod/locales");
 const ENV_FILE_PATH = path.resolve(__dirname, "../../.env"); // 실제 .env 파일 경로
 const { getTrainingStatus, TrainingStore } = require("../RestAPI/TrainingStore");
 const { DeviceInfo } = require("../RestAPI/DeviceInfo");
+const { ProductList } = require("../RestAPI/ProductList");
 const {notifyAiTrainingStore, fetchCurrentDoorState} = require("./AckCollect")
 const {
   DeadboltStatusAPI,
@@ -21,16 +22,38 @@ const REBOOT_FLAG = path.resolve(__dirname, "../../log/reboot.flag");
 
 let rebooting = false;
 
-async function notifyDeployCompleteForProduct(product) {
-  if (!product?.product_idx || !product?.product_eng_name) {
-    throw new Error("product_idx or product_eng_name is missing");
+async function notifyDeployCompleteForAllProducts() {
+  const products = await ProductList();
+
+  if (!Array.isArray(products) || products.length === 0) {
+    throw new Error("IF11 product_list is empty");
   }
 
-  return await notifyAiTrainingStore({
-    productIdx: product.product_idx,
-    productEngName: product.product_eng_name,
-    trainingStatus: "1",
-  });
+  const results = [];
+
+  for (const product of products) {
+    const productIdx = product.product_idx || product.productIdx;
+    const productEngName = product.product_eng_name || product.productEngName;
+
+    if (!productIdx || !productEngName) {
+      console.warn("[IF07] skip product: missing product_idx/product_eng_name", product);
+      continue;
+    }
+
+    const result = await notifyAiTrainingStore({
+      productIdx,
+      productEngName,
+      trainingStatus: "1",
+    });
+
+    results.push({
+      productIdx,
+      productEngName,
+      result,
+    });
+  }
+
+  return results;
 }
 
 // 1. 시스템 서비스 상태 확인 (systemctl)
@@ -348,7 +371,7 @@ async function RebootMqtt() {
 
     console.log("[MQTT] reboot cmd received. IF_SYSID=", ifSysId);
 
-    if (msg?.DATA?.reboot_mode === "MANUAL"){
+    if (msg?.DATA?.reboot_mode === "EMBEDDING"){
       const currentStatus = getTrainingStatus();
       // if (currentStatus === "7") {
         console.log(`[RebootMqtt(ModelEmbedding)] 수동(MANUAL) 재부팅 조건 충족 (training_status: 7)`);
@@ -493,7 +516,7 @@ async function RebootMqtt() {
           return;
         }
 
-        console.log("[IF07 after Reboot] 배포 완료(training_status=1) 전송 성공");
+        console.log("[IF07] 배포 완료(training_status=1) 전송 성공");
 
         await publishRebootAckOnce(deviceIdx, divisionIdx);
       } catch (notifyErr) {
