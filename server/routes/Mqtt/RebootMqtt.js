@@ -30,6 +30,7 @@ const minioClient = new Minio.Client({
 const MINIO_BUCKET = config.minioBucket || "chaiimage";
 const TRAINED_MODEL_PREFIX = "trained_model/";
 const LOCAL_MODEL_DIR = "/home/chai/Desktop/Codes/CRK-model/models";
+const LOCAL_MODEL_CODES_DIR = "/home/chai/Desktop/Codes/CRK-model";
 
 const REBOOT_FLAG = path.resolve(__dirname, "../../log/reboot.flag");
 
@@ -298,6 +299,50 @@ async function downloadModelFilesFromBrunchFolder(brunchName, modelVersion) {
   };
 }
 
+function writeEngineBuildTxt(pt_filename){
+  const filePath = '/home/chai/Desktop/crk-model-build.txt';
+  const content = `MODEL_DIR=${LOCAL_MODEL_CODES_DIR}
+                  VENV_ACTIVATE=${LOCAL_MODEL_CODES_DIR}/.engine_build_env/bin/activate
+                  MODELS_DIR=${LOCAL_MODEL_DIR}
+                  PT_FILE=${LOCAL_MODEL_DIR}/${pt_filename}.pt
+                  ENGINE_FILE=${LOCAL_MODEL_DIR}/siyeon_best.engine`;
+
+    try {
+        // 파일을 새로 생성하고 내용을 씁니다 (기존 내용이 있으면 덮어씁니다)
+        await fs.writeFile(filePath, content, 'utf8');
+        console.log('📄 파일 쓰기 성공!');
+    } catch (error) {
+        console.error('❌ 파일 쓰기 중 에러 발생:', error);
+    }
+}
+
+function startCrkModelBuildService() {
+  return new Promise((resolve, reject) => {
+    const command = "systemctl start crk-model-build.service";
+
+    console.log(`[SYSTEMD] 실행: ${command}`);
+
+    exec(command, (err, stdout, stderr) => {
+      if (err) {
+        console.error(`[SYSTEMD] crk-model-build.service start 실패: ${err.message}`);
+        if (stderr) console.error(`[SYSTEMD] stderr: ${stderr}`);
+        return reject(err);
+      }
+
+      if (stdout) {
+        console.log(`[SYSTEMD] stdout: ${stdout}`);
+      }
+
+      if (stderr) {
+        console.warn(`[SYSTEMD] stderr: ${stderr}`);
+      }
+
+      console.log("[SYSTEMD] crk-model-build.service start 완료");
+      resolve(true);
+    });
+  });
+}
+
 async function ProductCollectionHealth() {
   const [
     CameraStatus,
@@ -523,7 +568,7 @@ async function RebootMqtt() {
                     console.log(
                       `[RebootMqtt(ModelEmbedding)] MinIO 모델 폴더 확인 완료: trained_model/${targetFolderName}/`
                     );
-                    
+
                     const downloadedFiles = await downloadModelFilesFromBrunchFolder(
                     targetFolderName,
                     modelVersion
@@ -534,11 +579,15 @@ async function RebootMqtt() {
                     downloadedFiles
                   );
 
+                  writeEngineBuildTxt(modelVersion);
+
+
                   // 환경변수인 모델 버전 변경
                   await updateEnvModelVersion(modelVersion);
 
+                  await startCrkModelBuildService();
                   console.log(
-                    `[RebootMqtt(ModelEmbedding)] 모델 파일 저장 완료. reboot 절차 없이 현재 MQTT 처리 종료.`
+                    `[RebootMqtt(ModelEmbedding)] crk-model-build.service 실행 완료`
                   );
 
                   rebooting = false;
