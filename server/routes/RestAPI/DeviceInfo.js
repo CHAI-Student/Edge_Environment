@@ -9,6 +9,12 @@ function formatIfDate(d = new Date()) {
          + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
+const external = axios.create({
+  baseURL: config.restApi, // https://apichaidev.atcrk.co.kr/api/v1
+  timeout: 10000,
+  headers: { "Content-Type": "application/json" },
+});
+
 /**
  * [IF_13] 장비 정보 조회 서비스
  * @param {string} divisionIdx - 매장코드 
