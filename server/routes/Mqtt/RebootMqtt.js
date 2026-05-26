@@ -17,6 +17,19 @@ const {
 } = require("./HealthMqtt");
 const jwt = require("jsonwebtoken");
 const { is } = require("zod/v4/locales");
+const Minio = require("minio");
+
+const minioClient = new Minio.Client({
+  endPoint: config.minioURL,      // 예: "aipnt.atcrk.co.kr"
+  port: Number(config.minioPort || 9000),
+  useSSL: Boolean(config.minioUseSSL || false),
+  accessKey: config.minioAccessKey,
+  secretKey: config.minioSecretKey,
+});
+
+const MINIO_BUCKET = config.minioBucket || "chaiimage";
+const TRAINED_MODEL_PREFIX = "trained_model/";
+const LOCAL_MODEL_DIR = "/home/chai/Desktop/Codes/CRK-model/models";
 
 const REBOOT_FLAG = path.resolve(__dirname, "../../log/reboot.flag");
 
@@ -174,34 +187,118 @@ async function updateEnvModelVersion(newVersion) {
 }
 
 // ====================================================================
-// 💡 Docker 이미지를 Pull 받아오는 Helper 함수
+// MinIO trained_model/ 하위 폴더 조회 함수
 // ====================================================================
-function pullDockerImage(username, image_name, tag) {
+function listTrainedModelFolders() {
   return new Promise((resolve, reject) => {
-    const command = `docker pull ${username}/${image_name}:${tag}`;
+    const folders = new Set();
 
-    console.log(`[DOCKER] 모델 다운로드 시작: ${command}`);
+    const stream = minioClient.listObjectsV2(
+      MINIO_BUCKET,
+      TRAINED_MODEL_PREFIX,
+      false
+    );
 
-    // exec를 통해 OS 쉘에 명령어 전달
-    exec(command, (err, stdout, stderr) => {
-      if (err) {
-        console.error(`[DOCKER] 다운로드 실패: ${err.message}`);
-        return reject(err);
+    stream.on("data", (obj) => {
+      // MinIO에서 폴더 형태 prefix가 내려오는 경우
+      if (obj.prefix) {
+        const folderName = obj.prefix
+          .replace(TRAINED_MODEL_PREFIX, "")
+          .replace(/\/$/, "");
+
+        if (folderName) {
+          folders.add(folderName);
+        }
       }
-      
-      // 도커 명령어의 진행 과정(경고 등)이 stderr로 출력될 수 있음
-      if (stderr && !stderr.includes("Downloaded newer image")) {
-        console.warn(`[DOCKER] stderr: ${stderr}`);
+
+      // 혹시 prefix가 아니라 name으로 내려오는 경우까지 대비
+      if (obj.name) {
+        const rest = obj.name.replace(TRAINED_MODEL_PREFIX, "");
+        const firstDepth = rest.split("/")[0];
+
+        if (firstDepth && rest.includes("/")) {
+          folders.add(firstDepth);
+        }
       }
-      
-      console.log(`[DOCKER] 다운로드 완료:\n${stdout}`);
-      resolve(true);
+    });
+
+    stream.on("error", (err) => {
+      console.error("[MINIO] trained_model folder list failed:", err.message);
+      reject(err);
+    });
+
+    stream.on("end", () => {
+      const result = [...folders].sort();
+      console.log("[MINIO] trained_model folders:", result);
+      resolve(result);
     });
   });
 }
 
-async function ProductCollectionHealth() {
+async function minioObjectExists(objectKey) {
+  try {
+    await minioClient.statObject(MINIO_BUCKET, objectKey);
+    return true;
+  } catch (err) {
+    if (
+      err.code === "NotFound" ||
+      err.code === "NoSuchKey" ||
+      err.statusCode === 404
+    ) {
+      return false;
+    }
+    throw err;
+  }
+}
 
+async function downloadMinioObject(objectKey, localPath) {
+  await fs.mkdir(path.dirname(localPath), { recursive: true });
+
+  console.log(`[MINIO] download start: ${MINIO_BUCKET}/${objectKey}`);
+  console.log(`[MINIO] save to: ${localPath}`);
+
+  await minioClient.fGetObject(MINIO_BUCKET, objectKey, localPath);
+
+  console.log(`[MINIO] download complete: ${localPath}`);
+}
+
+async function downloadModelFilesFromBrunchFolder(brunchName, modelVersion) {
+  if (!brunchName) {
+    throw new Error("brunchName is empty");
+  }
+
+  if (!modelVersion) {
+    throw new Error("modelVersion is empty");
+  }
+
+  const folderPrefix = `${TRAINED_MODEL_PREFIX}${brunchName}/`;
+
+  const ptObjectKey = `${folderPrefix}${modelVersion}.pt`;
+  const onnxObjectKey = `${folderPrefix}${modelVersion}.onnx`;
+
+  const localPtPath = path.join(LOCAL_MODEL_DIR, `${modelVersion}.pt`);
+  const localOnnxPath = path.join(LOCAL_MODEL_DIR, `${modelVersion}.onnx`);
+
+  const ptExists = await minioObjectExists(ptObjectKey);
+  if (!ptExists) {
+    throw new Error(`MinIO object not found: ${ptObjectKey}`);
+  }
+
+  const onnxExists = await minioObjectExists(onnxObjectKey);
+  if (!onnxExists) {
+    throw new Error(`MinIO object not found: ${onnxObjectKey}`);
+  }
+
+  await downloadMinioObject(ptObjectKey, localPtPath);
+  await downloadMinioObject(onnxObjectKey, localOnnxPath);
+
+  return {
+    pt: localPtPath,
+    onnx: localOnnxPath,
+  };
+}
+
+async function ProductCollectionHealth() {
   const [
     CameraStatus,
     DeadboltHealth,
@@ -220,6 +317,12 @@ async function ProductCollectionHealth() {
     LoadcellHealth === "29";
 
   console.log('[ACK-CHECK] isHealthOk: ', isHealthOk)
+  if (!isHealthOk){
+    console.log("[RebootMqtt(ModelEmbedding)]!!! Not HEALTHY !!!")
+    console.log(`CameraStatus: ${CameraStatus}`)
+    console.log(`DeadboltHealth: ${DeadboltHealth}`)
+    console.log(`LoadcellHealth: ${LoadcellHealth}`)
+  }
 
   return isHealthOk;
 }
@@ -372,7 +475,7 @@ async function RebootMqtt() {
     console.log("[MQTT] reboot cmd received. IF_SYSID=", ifSysId);
 
     if (msg?.DATA?.reboot_mode === "EMBEDDING"){
-      const currentStatus = getTrainingStatus();
+      // const currentStatus = getTrainingStatus();
       // if (currentStatus === "7") {
         console.log(`[RebootMqtt(ModelEmbedding)] 수동(MANUAL) 재부팅 조건 충족 (training_status: 7)`);
         try {
@@ -394,19 +497,52 @@ async function RebootMqtt() {
 
                 if (String(process.env.MODEL_VERSION) != modelVersion){
                   const healthCare = await ProductCollectionHealth();
+                  // if (!healthCare){
+                  //   rebooting = false;
+                  //   return;
+                  // }
                   // [수정] 여기에 결제상태(현재 결제가 진행되고 있는 상황인지)를 확인하는 기능 추가해야 될거 같음
                   console.log(`[RebootMqtt(ModelEmbedding)] 헬스체크 결과: ${healthCare}. 재부팅 절차를 이어서 진행합니다.`);
                   console.log(`[RebootMqtt(ModelEmbedding)] 모델 업데이트 필요. (기존: ${process.env.MODEL_VERSION} -> 신규: ${modelVersion})`);
                   try {
-                    // DockerHub로 엣지 내 임베딩
-                    await pullDockerImage("CHAI", "crk-model", modelVersion); // [수정] docker pull을 이렇게 해도 되는지 확인
-                    console.log(`[RebootMqtt(ModelEmbedding)] 신규 모델(Docker Pull) 임베딩이 성공적으로 완료되었습니다.`);
-                    // [수정] pull된 임베딩 된 docker를 engine 파일로 바꾸는 과정
-                    // -> 이거는 먼저 pt 파일이 어디에 임베딩 되는지 확인하고
-                    // -> 그걸 기반으로 기존에 만들었던 sh 파일로 engine 파일로 바꾸면 될듯
+                    const trainedModelFolders = await listTrainedModelFolders();
+                    console.log(
+                      `[RebootMqtt(ModelEmbedding)] MinIO trained_model 폴더 조회 완료:`,
+                      trainedModelFolders
+                    );
+
+                    // IF_13에서 받은 brunch_name을 trained_model 하위 폴더명으로 사용
+                    const targetFolderName = brunchName
+
+                    if (!trainedModelFolders.includes(targetFolderName)) {
+                      throw new Error(
+                        `MinIO trained_model/${targetFolderName}/ 폴더가 존재하지 않습니다.`
+                      );
+                    }
+
+                    console.log(
+                      `[RebootMqtt(ModelEmbedding)] MinIO 모델 폴더 확인 완료: trained_model/${targetFolderName}/`
+                    );
                     
-                    // 환경변수인 모델 버전 변겅
-                    await updateEnvModelVersion(modelVersion);
+                    const downloadedFiles = await downloadModelFilesFromBrunchFolder(
+                    targetFolderName,
+                    modelVersion
+                  );
+
+                  console.log(
+                    `[RebootMqtt(ModelEmbedding)] 모델 파일 다운로드 완료:`,
+                    downloadedFiles
+                  );
+
+                  // 환경변수인 모델 버전 변경
+                  await updateEnvModelVersion(modelVersion);
+
+                  console.log(
+                    `[RebootMqtt(ModelEmbedding)] 모델 파일 저장 완료. reboot 절차 없이 현재 MQTT 처리 종료.`
+                  );
+
+                  rebooting = false;
+                  return;
                   }
                   catch (updateError) {
                     console.error(`[RebootMqtt(ModelEmbedding)] 도커 이미지 다운로드 실패로 재부팅을 취소합니다.`);
