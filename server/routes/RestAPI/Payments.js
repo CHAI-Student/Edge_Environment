@@ -25,47 +25,47 @@ function formatIfDate(d = new Date()) {
 
 const closedStates = ["LOCK", "LOCKED", "CLOSE", "CLOSED"];
 
-const CARD_ERROR_CODE = {
-  SUCCESS: 1,
-  TIMEOUT: 2,
-  CANCEL: 3,
-  NOT_CONDITION: 4,
-  FORMAT_ERROR: 5,
-  CAT_RUNNING: 6,
-  ERROR_RF: 7,
-  ERROR_VAN: 8,
-  ERROR_POS: 9,
-  NETWORK_ERROR: 10,
-  ERROR: 11,
-};
+// const CARD_ERROR_CODE = {
+//   SUCCESS: 1,
+//   TIMEOUT: 2,
+//   CANCEL: 3,
+//   NOT_CONDITION: 4,
+//   FORMAT_ERROR: 5,
+//   CAT_RUNNING: 6,
+//   ERROR_RF: 7,
+//   ERROR_VAN: 8,
+//   ERROR_POS: 9,
+//   NETWORK_ERROR: 10,
+//   ERROR: 11,
+// };
 
-function getCardErrorPubCode(error) {
-  const code =
-    error?.response?.data?.code ||
-    error?.response?.data?.response_code ||
-    error?.response?.data?.status ||
-    error?.code;
+// function getCardErrorPubCode(error) {
+//   const code =
+//     error?.response?.data?.code ||
+//     error?.response?.data?.response_code ||
+//     error?.response?.data?.status ||
+//     error?.code;
 
-  switch (code) {
-    case "0x00": return CARD_ERROR_CODE.SUCCESS;
-    case "0xB0": return CARD_ERROR_CODE.TIMEOUT;
-    case "0xB1": return CARD_ERROR_CODE.CANCEL;
-    case "0xB2": return CARD_ERROR_CODE.NOT_CONDITION;
-    case "0xB3": return CARD_ERROR_CODE.FORMAT_ERROR;
-    case "0xB4": return CARD_ERROR_CODE.CAT_RUNNING;
-    case "0xB5": return CARD_ERROR_CODE.ERROR_RF;
-    case "0xB6": return CARD_ERROR_CODE.ERROR_VAN;
-    case "0xC0": return CARD_ERROR_CODE.ERROR_POS;
-    case "0xC1":
-    case "ECONNABORTED":
-    case "ENOTFOUND":
-    case "ECONNREFUSED":
-      return CARD_ERROR_CODE.NETWORK_ERROR;
-    case "0xFF":
-    default:
-      return CARD_ERROR_CODE.ERROR;
-  }
-}
+//   switch (code) {
+//     case "0x00": return CARD_ERROR_CODE.SUCCESS;
+//     case "0xB0": return CARD_ERROR_CODE.TIMEOUT;
+//     case "0xB1": return CARD_ERROR_CODE.CANCEL;
+//     case "0xB2": return CARD_ERROR_CODE.NOT_CONDITION;
+//     case "0xB3": return CARD_ERROR_CODE.FORMAT_ERROR;
+//     case "0xB4": return CARD_ERROR_CODE.CAT_RUNNING;
+//     case "0xB5": return CARD_ERROR_CODE.ERROR_RF;
+//     case "0xB6": return CARD_ERROR_CODE.ERROR_VAN;
+//     case "0xC0": return CARD_ERROR_CODE.ERROR_POS;
+//     case "0xC1":
+//     case "ECONNABORTED":
+//     case "ENOTFOUND":
+//     case "ECONNREFUSED":
+//       return CARD_ERROR_CODE.NETWORK_ERROR;
+//     case "0xFF":
+//     default:
+//       return CARD_ERROR_CODE.ERROR;
+//   }
+// }
 
 async function sendCardErrorToPNT(errorCode, token, CardMethod, state = "1") {
   try {
@@ -441,6 +441,7 @@ async function init() {
                 // display_message: "SamsungPay Payment"
             }).then((response) => {
                 console.log('Samsung Pay Approval Response:', response.data);
+                
                 if (response.data.status == 'Y') {
                     preAuthNum = response.data.authorization_number;
                     preAuthDate = response.data.authorization_date;
@@ -775,7 +776,7 @@ async function Payments(token, CardMethod) {
                 }
               );
             } catch (error) {
-              const pubCode = getCardErrorPubCode(error);
+              const pubCode = '1'
 
               await sendCardErrorToPNT(
                 pubCode,
@@ -814,7 +815,7 @@ async function Payments(token, CardMethod) {
                 }
               );
             } catch (error) {
-              const pubCode = getCardErrorPubCode(error);
+              const pubCode = '1';
 
               await sendCardErrorToPNT(
                 pubCode,
