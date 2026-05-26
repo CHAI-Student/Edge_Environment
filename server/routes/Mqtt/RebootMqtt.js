@@ -5,10 +5,10 @@ const { getClient, publish } = require("./MqttClient");
 const config = require("../../config/key");
 const { exec } = require("child_process");
 const { ms } = require("zod/locales");
-const envPath = path.resolve(__dirname, "../../.env"); // 실제 .env 파일 경로
+const ENV_FILE_PATH = path.resolve(__dirname, "../../.env"); // 실제 .env 파일 경로
 const { getTrainingStatus, TrainingStore } = require("../RestAPI/TrainingStore");
 const { DeviceInfo } = require("../RestAPI/DeviceInfo");
-const {ProductCollectionHealth, notifyAiTrainingStore} = require("./AckCollect")
+const {notifyAiTrainingStore, fetchCurrentDoorState} = require("./AckCollect")
 const {
   DeadboltStatusAPI,
   LoadcellStatusAPI,
@@ -141,14 +141,9 @@ async function updateEnvModelVersion(newVersion) {
 // ====================================================================
 // 💡 Docker 이미지를 Pull 받아오는 Helper 함수
 // ====================================================================
-function pullDockerImage(modelVersion) {
+function pullDockerImage(username, image_name, tag) {
   return new Promise((resolve, reject) => {
-    // 환경 변수나 설정에서 저장소 및 이미지 이름을 가져옵니다.
-    // 예: DOCKER_IMAGE_NAME="myregistry.com/myusername/mymodel"
-    const imageName = process.env.DOCKER_IMAGE_NAME || "username/image-name";
-    
-    // 가져온 모델 버전을 tag로 사용합니다.
-    const command = `docker pull ${imageName}:${modelVersion}`;
+    const command = `docker pull ${username}/${image_name}:${tag}`;
 
     console.log(`[DOCKER] 모델 다운로드 시작: ${command}`);
 
@@ -369,7 +364,7 @@ async function RebootMqtt() {
                   console.log(`[RebootMqtt(ModelEmbedding)] 모델 업데이트 필요. (기존: ${process.env.MODEL_VERSION} -> 신규: ${modelVersion})`);
                   try {
                     // DockerHub로 엣지 내 임베딩
-                    await pullDockerImage(modelVersion); // [수정] docker pull을 이렇게 해도 되는지 확인
+                    await pullDockerImage("CHAI", "crk-model", modelVersion); // [수정] docker pull을 이렇게 해도 되는지 확인
                     console.log(`[RebootMqtt(ModelEmbedding)] 신규 모델(Docker Pull) 임베딩이 성공적으로 완료되었습니다.`);
                     // [수정] pull된 임베딩 된 docker를 engine 파일로 바꾸는 과정
                     // -> 이거는 먼저 pt 파일이 어디에 임베딩 되는지 확인하고
