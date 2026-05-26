@@ -45,6 +45,10 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
             throw new Error(`[PNT] Dummy image not found: ${dummyImg}`);
         }
 
+        const hasLowConfidence = inferenceResult.products.some(
+            p => Number(p.confidence) < 0.1
+        );
+
         const fileName = path.basename(dummyImg);
         const stat = fs.statSync(dummyImg);
         const productMap = new Map(
@@ -116,7 +120,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
                     approve_card_num: token,
                     approve_card_json: JSON.stringify(paymentResponse),
                     provider: "chai",
-                    state: inferenceResult.status === 'Y' ? '0' : '1',
+                    state: inferenceResult.status === 'success' ? (hasLowConfidence ? '1' : '0') : '1',
                     product_list: inferenceResult.products.map(p => {
                         const master = productMap.get(String(p.productIdx));
 
@@ -171,7 +175,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
                     approve_card_num: paymentResponse.card_info.SERIAL_NUMBER,
                     approve_card_json: JSON.stringify(paymentResponse),
                     provider: "chai",
-                    state: inferenceResult.status === 'Y' ? '0' : '1',
+                    state: inferenceResult.status === 'success' ? (hasLowConfidence ? '1' : '0') : '1',
                     product_list: inferenceResult.products.map(p => {
                         const master = productMap.get(String(p.productIdx));
 

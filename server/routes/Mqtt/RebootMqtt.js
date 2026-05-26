@@ -3,7 +3,7 @@ const fs = require("fs/promises");
 const { v4: uuidv4 } = require("uuid");
 const { getClient, publish } = require("./MqttClient");
 const config = require("../../config/key");
-const { exec } = require("child_process");
+const { exec, spawn } = require("child_process");
 const { ms } = require("zod/locales");
 const ENV_FILE_PATH = path.resolve(__dirname, "../../.env"); // 실제 .env 파일 경로
 const { getTrainingStatus, TrainingStore } = require("../RestAPI/TrainingStore");
@@ -346,6 +346,54 @@ function startCrkModelBuildService() {
   });
 }
 
+function startCrkModelBuildServiceWithLogs() {
+  return new Promise((resolve, reject) => {
+    const serviceName = "crk-model-build.service";
+
+    console.log(`[SYSTEMD] start ${serviceName}`);
+
+    exec(`systemctl start ${serviceName}`, (err, stdout, stderr) => {
+      if (err) {
+        console.error(`[SYSTEMD] ${serviceName} start 실패: ${err.message}`);
+        if (stderr) console.error(stderr);
+        return reject(err);
+      }
+
+      if (stdout) console.log(stdout);
+      if (stderr) console.warn(stderr);
+
+      console.log(`[SYSTEMD] ${serviceName} start 완료`);
+      console.log(`[SYSTEMD] ${serviceName} 로그 출력 시작`);
+
+      const logProcess = spawn(
+        "journalctl",
+        ["-u", serviceName, "-f", "-o", "cat", "-n", "50"],
+        {
+          stdio: "inherit",
+        }
+      );
+
+      // service 로그를 60초 동안 현재 터미널에 보여준 뒤 종료
+      const timeout = setTimeout(() => {
+        logProcess.kill("SIGTERM");
+        console.log(`[SYSTEMD] ${serviceName} 로그 출력 종료`);
+        resolve(true);
+      }, 60000);
+
+      logProcess.on("error", (logErr) => {
+        clearTimeout(timeout);
+        console.error(`[SYSTEMD] journalctl 실행 실패: ${logErr.message}`);
+        resolve(true);
+      });
+
+      logProcess.on("exit", () => {
+        clearTimeout(timeout);
+        resolve(true);
+      });
+    });
+  });
+}
+
 async function ProductCollectionHealth() {
   const [
     CameraStatus,
@@ -583,12 +631,11 @@ async function RebootMqtt() {
                   );
 
                   writeEngineBuildTxt(modelVersion);
+                  await startCrkModelBuildServiceWithLogs();
 
 
                   // 환경변수인 모델 버전 변경
                   await updateEnvModelVersion(modelVersion);
-
-                  await startCrkModelBuildService();
                   console.log(
                     `[RebootMqtt(ModelEmbedding)] crk-model-build.service 실행 완료`
                   );

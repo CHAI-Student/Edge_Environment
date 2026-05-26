@@ -15,7 +15,118 @@ const { ModelBrunchCheck } = require("./ModelBrunchCheck");
 const { exec } = require("child_process");
 const os = require("os");
 
+const { v4: uuidv4 } = require("uuid");
+
+function formatIfDate(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+       + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
 const closedStates = ["LOCK", "LOCKED", "CLOSE", "CLOSED"];
+
+const CARD_ERROR_CODE = {
+  SUCCESS: 1,
+  TIMEOUT: 2,
+  CANCEL: 3,
+  NOT_CONDITION: 4,
+  FORMAT_ERROR: 5,
+  CAT_RUNNING: 6,
+  ERROR_RF: 7,
+  ERROR_VAN: 8,
+  ERROR_POS: 9,
+  NETWORK_ERROR: 10,
+  ERROR: 11,
+};
+
+function getCardErrorPubCode(error) {
+  const code =
+    error?.response?.data?.code ||
+    error?.response?.data?.response_code ||
+    error?.response?.data?.status ||
+    error?.code;
+
+  switch (code) {
+    case "0x00": return CARD_ERROR_CODE.SUCCESS;
+    case "0xB0": return CARD_ERROR_CODE.TIMEOUT;
+    case "0xB1": return CARD_ERROR_CODE.CANCEL;
+    case "0xB2": return CARD_ERROR_CODE.NOT_CONDITION;
+    case "0xB3": return CARD_ERROR_CODE.FORMAT_ERROR;
+    case "0xB4": return CARD_ERROR_CODE.CAT_RUNNING;
+    case "0xB5": return CARD_ERROR_CODE.ERROR_RF;
+    case "0xB6": return CARD_ERROR_CODE.ERROR_VAN;
+    case "0xC0": return CARD_ERROR_CODE.ERROR_POS;
+    case "0xC1":
+    case "ECONNABORTED":
+    case "ENOTFOUND":
+    case "ECONNREFUSED":
+      return CARD_ERROR_CODE.NETWORK_ERROR;
+    case "0xFF":
+    default:
+      return CARD_ERROR_CODE.ERROR;
+  }
+}
+
+async function sendCardErrorToPNT(errorCode, token, CardMethod, state = "1") {
+  try {
+    const external = axios.create({
+      baseURL: config.restApi,
+      timeout: 10000,
+    });
+
+    const payload = {
+      HEADER: {
+        IF_ID: "IF_08",
+        IF_SYSID: uuidv4(),
+        IF_HOST: "CRKPNTCHAI",
+        IF_DATE: formatIfDate(),
+      },
+      DATA: {
+        device_idx: config.deviceIdx,
+        division_idx: config.divisionIdx,
+        token_id: token,
+        payment_at: formatIfDate(),
+        approve_at: '000000',
+        approve_type: CardMethod === "R" ? "2" : CardMethod === "S" ? "1" : "0",
+        approve_result: Number(errorCode),
+        approve_price: 0,
+        approve_no: "",
+        approve_card_issuer: "",
+        approve_card_num: "",
+        approve_card_json: JSON.stringify({
+          error_code: String(errorCode),
+        }),
+        provider: "chai",
+        state, 
+        result_cd: 'F',
+        result_msg: 'Failed in Card Terminal'
+      }
+    };
+
+    const jwtToken = config.jwtToken;
+
+    console.log("[EDGE->PNT] CARD ERROR PAYLOAD", payload);
+
+    const response = await external.post(
+      "/chai/payment/store",
+      payload,
+      {
+        headers: {
+          Authorization: `Bearer ${jwtToken}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 30000,
+      }
+    );
+
+    console.log("[PNT] Card error sent:", response.data);
+    return true;
+  } catch (err) {
+    console.error("[PNT] Card error send failed:", err.response?.data || err.message);
+    return false;
+  }
+}
+
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function playMp3(filePath) {
@@ -643,13 +754,38 @@ async function Payments(token, CardMethod) {
           });
           // 삼성 페이
           if (CardMethod === "S") {
-            paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {
-                    // amount: string(finalAmount),
-                    amount: '5',
-                    authorization_type: "PURCHASE",
-                    items,
-                    // display_message: "SamsungPay Payment"
-                });
+            // paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {
+            //         // amount: string(finalAmount),
+            //         amount: '5',
+            //         authorization_type: "PURCHASE",
+            //         items,
+            //         // display_message: "SamsungPay Payment"
+            // });
+            try {
+              paymentResponse = await axios.post(
+                `${config.cardTerminalApi}/payment/samsung-pay/approve`,
+                {
+                  // amount: string(finalAmount),
+                  amount: '5',
+                  items,
+                  authorization_type: "PURCHASE",
+                },
+                {
+                  timeout: 60000
+                }
+              );
+            } catch (error) {
+              const pubCode = getCardErrorPubCode(error);
+
+              await sendCardErrorToPNT(
+                pubCode,
+                token,
+                CardMethod,
+                "2"
+              );
+
+              return;
+            }
             await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/cancel`,{
                 amount: preAmount,
                 original_authorization_date: preAuthDate,
@@ -661,12 +797,39 @@ async function Payments(token, CardMethod) {
           }
           // 일반 카드
           else if (CardMethod === "N"){
-            paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/token/approve`, {
-                    // amount: String(finalAmount),
-                    amount: '5',
-                    items,
-                    vankey_hash: String(paymentToken || token)
-                });
+            // paymentResponse = await axios.post(`${config.cardTerminalApi}/payment/token/approve`, {
+            //         // amount: String(finalAmount),
+            //         amount: '5',
+            //         items,
+            //         vankey_hash: String(paymentToken || token)
+            // });
+            try {
+              paymentResponse = await axios.post(
+                `${config.cardTerminalApi}/payment/token/approve`,
+                {
+                  // amount: string(finalAmount),
+                  amount: '5',
+                  items,
+                  vankey_hash: String(paymentToken || token)
+                }
+              );
+            } catch (error) {
+              const pubCode = getCardErrorPubCode(error);
+
+              await sendCardErrorToPNT(
+                pubCode,
+                token,
+                CardMethod
+              );
+
+              console.error(
+                "[CARD] Approval failed:",
+                pubCode,
+                error.response?.data || error.message
+              );
+
+              return;
+            }
           }
           // RFID 사원증
           else if (CardMethod === "R"){
@@ -711,6 +874,7 @@ async function Payments(token, CardMethod) {
             )
           } else {
               console.error("[PAYMENT] Failed:", paymentResponse.data);
+
           }
         } else {
           console.log('inferenceResult not found')
