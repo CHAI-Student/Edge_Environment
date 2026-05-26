@@ -350,7 +350,7 @@ async function RebootMqtt() {
 
     if (msg?.DATA?.reboot_mode === "MANUAL"){
       const currentStatus = getTrainingStatus();
-      if (currentStatus === "7") {
+      // if (currentStatus === "7") {
         console.log(`[RebootMqtt(ModelEmbedding)] 수동(MANUAL) 재부팅 조건 충족 (training_status: 7)`);
         try {
             console.log(`[MQTT] IF_13(장비 정보) 조회를 시작합니다...`);
@@ -415,11 +415,11 @@ async function RebootMqtt() {
             console.error(`❌ [IF_13] 장비 정보 조회 중 오류 발생:`, error.message);
             rebooting = false; return; // 에러 시 재부팅 프로세스를 중단
         }
-      } else {
-        console.warn(`[MQTT] 수동(MANUAL) 재부팅 거부: 현재 학습 상태가 7이 아닙니다. (현재: ${currentStatus})`);
-        rebooting = false;
-        return; 
-      }
+      // } else {
+      //   console.warn(`[MQTT] 수동(MANUAL) 재부팅 거부: 현재 학습 상태가 7이 아닙니다. (현재: ${currentStatus})`);
+      //   rebooting = false;
+      //   return; 
+      // }
     }
 
     try {
