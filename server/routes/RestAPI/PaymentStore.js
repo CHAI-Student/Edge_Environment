@@ -46,7 +46,7 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         }
 
         const hasLowConfidence = inferenceResult.products.some(
-            p => Number(p.confidence) < 0.1
+            p => Number(p.confidence) < 0.8
         );
 
         const fileName = path.basename(dummyImg);
