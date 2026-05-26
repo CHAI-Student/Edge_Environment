@@ -643,8 +643,8 @@ async function RebootMqtt() {
                     `[RebootMqtt(ModelEmbedding)] updateEnvModelVersion 완료`
                   );
 
-                  rebooting = false;
-                  return;
+                  // rebooting = false;
+                  // return;
                   }
                   catch (updateError) {
                     console.error(`[RebootMqtt(ModelEmbedding)] 도커 이미지 다운로드 실패로 재부팅을 취소합니다.`);
