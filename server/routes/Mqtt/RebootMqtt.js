@@ -632,12 +632,15 @@ async function RebootMqtt() {
 
                   writeEngineBuildTxt(modelVersion);
                   await startCrkModelBuildServiceWithLogs();
+                  console.log(
+                    `[RebootMqtt(ModelEmbedding)] crk-model-build.service 실행 완료`
+                  );
 
 
                   // 환경변수인 모델 버전 변경
                   await updateEnvModelVersion(modelVersion);
                   console.log(
-                    `[RebootMqtt(ModelEmbedding)] crk-model-build.service 실행 완료`
+                    `[RebootMqtt(ModelEmbedding)] updateEnvModelVersion 완료`
                   );
 
                   rebooting = false;
