@@ -15,6 +15,10 @@ function formatIfDate(d = new Date()) {
  * @param {string} deviceIdx - 장비코드 
  */
 async function DeviceInfo() {
+    const token = process.env.JWT_TOKEN;
+    if (!token) {
+        throw new Error("JWT_TOKEN not set");
+    }
     try {
         // 1. 정의서상 URL 경로 반영 (오타 수정) 
         const targetUrl = `${config.restApi}/chai/device/info`;
@@ -36,7 +40,11 @@ async function DeviceInfo() {
             },
         };
         
-        const response = await axios.post(targetUrl, payload);
+        const response = await external.post("/chai/device/info", payload, {
+            headers: {
+            Authorization: `Bearer ${token}`,
+            },
+        });
 
         // 4. 응답 처리 [cite: 2, 3]
         if (response.status === 200 && response.data) {
