@@ -332,12 +332,82 @@ async function cleanupCachesBeforeModelDownload() {
 async function downloadMinioObject(objectKey, localPath) {
   await fs.mkdir(path.dirname(localPath), { recursive: true });
 
+  const dir = path.dirname(localPath);
+  const baseName = path.basename(localPath);
+  const tempPath = `${localPath}.download`;
+
+  // 1. 이전 실패 임시파일 삭제
+  const files = await fs.readdir(dir).catch(() => []);
+  for (const file of files) {
+    if (
+      file.startsWith(baseName) &&
+      (file.endsWith(".part.minio") || file.endsWith(".download"))
+    ) {
+      const stalePath = path.join(dir, file);
+      console.warn(`[MINIO] remove stale partial file: ${stalePath}`);
+      await fs.unlink(stalePath).catch(() => {});
+    }
+  }
+
+  // 2. MinIO 객체 정보 확인
+  const objectStat = await minioClient.statObject(MINIO_BUCKET, objectKey);
+  const expectedSize = Number(objectStat.size || 0);
+
+  if (!expectedSize || expectedSize <= 0) {
+    throw new Error(`MinIO object size invalid: ${objectKey}, size=${expectedSize}`);
+  }
+
+  // 3. 디스크 공간 확인
+  const availableMB = await getAvailableDiskMB(dir).catch(() => null);
+  const requiredMB = Math.ceil(expectedSize / 1024 / 1024) + 500;
+
+  if (availableMB !== null) {
+    console.log(`[MINIO] available disk: ${availableMB} MB`);
+    console.log(`[MINIO] required disk: ${requiredMB} MB`);
+
+    if (availableMB < requiredMB) {
+      throw new Error(
+        `Not enough disk space. available=${availableMB}MB, required=${requiredMB}MB`
+      );
+    }
+  }
+
   console.log(`[MINIO] download start: ${MINIO_BUCKET}/${objectKey}`);
-  console.log(`[MINIO] save to: ${localPath}`);
+  console.log(`[MINIO] expected size: ${expectedSize}`);
+  console.log(`[MINIO] temp save to: ${tempPath}`);
+  console.log(`[MINIO] final save to: ${localPath}`);
 
-  await minioClient.fGetObject(MINIO_BUCKET, objectKey, localPath);
+  // 4. fGetObject 대신 stream으로 직접 다운로드
+  const objectStream = await minioClient.getObject(MINIO_BUCKET, objectKey);
 
-  console.log(`[MINIO] download complete: ${localPath}`);
+  await pipeline(
+    objectStream,
+    require("fs").createWriteStream(tempPath)
+  );
+
+  // 5. 다운로드 결과 검증
+  const tempStat = await fs.stat(tempPath).catch(() => null);
+
+  if (!tempStat || tempStat.size <= 0) {
+    throw new Error(`Downloaded temp file not found or empty: ${tempPath}`);
+  }
+
+  if (tempStat.size !== expectedSize) {
+    throw new Error(
+      `Downloaded size mismatch: ${tempPath}, expected=${expectedSize}, actual=${tempStat.size}`
+    );
+  }
+
+  // 6. 검증 성공 후 최종 파일명으로 rename
+  await fs.rename(tempPath, localPath);
+
+  const finalStat = await fs.stat(localPath).catch(() => null);
+
+  if (!finalStat || finalStat.size !== expectedSize) {
+    throw new Error(`Final file verification failed: ${localPath}`);
+  }
+
+  console.log(`[MINIO] download complete: ${localPath}, size=${finalStat.size}`);
 }
 
 async function downloadModelFilesFromBrunchFolder(brunchName, modelVersion) {
@@ -710,7 +780,7 @@ async function RebootMqtt() {
                     downloadedFiles
                   );
 
-                  writeEngineBuildTxt(modelVersion);
+                  await writeEngineBuildTxt(modelVersion);
                   await startCrkModelBuildServiceWithLogs();
                   console.log(
                     `[RebootMqtt(ModelEmbedding)] crk-model-build.service 실행 완료`
