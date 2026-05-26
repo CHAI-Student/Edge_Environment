@@ -305,10 +305,10 @@ async function writeEngineBuildTxt(pt_filename) {
     
     // 백틱 내부의 들여쓰기를 제거하여 txt 파일에 불필요한 공백이 들어가지 않도록 합니다.
     const content = `MODEL_DIR=${LOCAL_MODEL_CODES_DIR}
-                    VENV_ACTIVATE=${LOCAL_MODEL_CODES_DIR}/.engine_build_env/bin/activate
-                    MODELS_DIR=${LOCAL_MODEL_DIR}
-                    PT_FILE=${LOCAL_MODEL_DIR}/${pt_filename}.pt
-                    ENGINE_FILE=${LOCAL_MODEL_DIR}/${pt_filename}.engine`;
+VENV_ACTIVATE=${LOCAL_MODEL_CODES_DIR}/.engine_build_env/bin/activate
+MODELS_DIR=${LOCAL_MODEL_DIR}
+PT_FILE=${LOCAL_MODEL_DIR}/${pt_filename}.pt
+ENGINE_FILE=${LOCAL_MODEL_DIR}/${pt_filename}.engine`;
 
     try {
       // 파일을 새로 생성하고 내용을 씁니다 (기존 내용이 있으면 덮어씁니다)
