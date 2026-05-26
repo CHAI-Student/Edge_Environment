@@ -1673,6 +1673,7 @@ module.exports = {
   AckCollect,
   fetchCurrentDoorState,
   ProductCollectionHealth,
+  notifyAiTrainingStore
 };
 
 // const mqtt = require('mqtt');

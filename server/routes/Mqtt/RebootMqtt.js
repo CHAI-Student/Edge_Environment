@@ -8,7 +8,7 @@ const { ms } = require("zod/locales");
 const envPath = path.resolve(__dirname, "../../.env"); // 실제 .env 파일 경로
 const { getTrainingStatus, TrainingStore } = require("../RestAPI/TrainingStore");
 const { DeviceInfo } = require("../RestAPI/DeviceInfo");
-const {ProductCollectionHealth} = require("./AckCollect")
+const {ProductCollectionHealth, notifyAiTrainingStore} = require("./AckCollect")
 const {
   DeadboltStatusAPI,
   LoadcellStatusAPI,
@@ -371,7 +371,7 @@ async function RebootMqtt() {
                     // DockerHub로 엣지 내 임베딩
                     await pullDockerImage(modelVersion); // [수정] docker pull을 이렇게 해도 되는지 확인
                     console.log(`[RebootMqtt(ModelEmbedding)] 신규 모델(Docker Pull) 임베딩이 성공적으로 완료되었습니다.`);
-                    // [수정] pull된 임베딩 된 docker를 engine 파일로 바꾸는 광
+                    // [수정] pull된 임베딩 된 docker를 engine 파일로 바꾸는 과정
                     // -> 이거는 먼저 pt 파일이 어디에 임베딩 되는지 확인하고
                     // -> 그걸 기반으로 기존에 만들었던 sh 파일로 engine 파일로 바꾸면 될듯
                     
@@ -398,7 +398,7 @@ async function RebootMqtt() {
                     resultMsg: "This Division Model Version is SAME"
                   });
                   rebooting = false; // 진행 상태 초기화
-                  return; // ⛔ 더 이상 아래로 내려가지 않고 중단 (실제 재부팅 X)
+                  return; // 더 이상 아래로 내려가지 않고 중단 (실제 재부팅 X)
                 }
             } else {
                 console.warn(`⚠️ [IF_13] 장비 정보를 성공적으로 가져왔으나 조회된 데이터가 없습니다. (비활성화 상태 등)`);
@@ -466,10 +466,30 @@ async function RebootMqtt() {
       console.log("[RebootMqtt] 재부팅 플래그 발견. 자가 진단을 시작합니다.");
       // 1. 자가 진단 실행 (서비스 상태, JWT 토큰, MQTT 송수신 테스트)
       const isSystemHealthy = await runStartupDiagnostics(client, deviceIdx);
-      await publishRebootAckOnce(deviceIdx, divisionIdx);
-    } else {
-        console.warn("[경고] 재부팅 후 일부 자가 진단에 실패했습니다. 시스템 상태를 점검하세요.");
+      if (isSystemHealthy) {
+        try {
+              const notifyResult = await notifyAiTrainingStore({
+                productIdx: "", // [수정] 여기 어떻게 해야할지 모르겠음
+                productEngName: "", // [수정] 여기 어떻게 해야할지 모르겠음
+                trainingStatus: "1",
+              });
+              const resultCd = notifyResult?.result_cd || notifyResult?.DATA?.result_cd || "S";
+              
+              if (resultCd === "S") {
+                console.log(`✅ [IF_07] 배포 완료 전송 성공`);
+              } else {
+                console.error(`❌ [IF_07] 배포 완료 전송 실패`);
+              }
+            } catch (notifyErr) {
+              console.error(`❌ [IF_07] 배포 중 에러:`, notifyErr.message);
+            }
+        await publishRebootAckOnce(deviceIdx, divisionIdx);
+      } else {
+        console.warn("[isAfterReboot] 재부팅 후 일부 자가 진단에 실패했습니다. 시스템 상태를 점검하세요.");
       }
+    } else {
+      console.warn("[isAfterReboot] 재부팅이 안되었습니다.");
+    }
 
     console.log("[MQTT] subscribing...", rebootSub);
 
