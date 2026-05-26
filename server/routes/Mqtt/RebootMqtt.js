@@ -299,20 +299,23 @@ async function downloadModelFilesFromBrunchFolder(brunchName, modelVersion) {
   };
 }
 
-function writeEngineBuildTxt(pt_filename){
-  const filePath = '/home/chai/Desktop/crk-model-build.txt';
-  const content = `MODEL_DIR=${LOCAL_MODEL_CODES_DIR}
-                  VENV_ACTIVATE=${LOCAL_MODEL_CODES_DIR}/.engine_build_env/bin/activate
-                  MODELS_DIR=${LOCAL_MODEL_DIR}
-                  PT_FILE=${LOCAL_MODEL_DIR}/${pt_filename}.pt
-                  ENGINE_FILE=${LOCAL_MODEL_DIR}/siyeon_best.engine`;
+// 함수 앞에 async 키워드를 반드시 추가해야 내부에서 await를 쓸 수 있습니다.
+async function writeEngineBuildTxt(pt_filename) {
+    const filePath = '/home/chai/Desktop/crk-model-build.txt';
+    
+    // 백틱 내부의 들여쓰기를 제거하여 txt 파일에 불필요한 공백이 들어가지 않도록 합니다.
+    const content = `MODEL_DIR=${LOCAL_MODEL_CODES_DIR}
+                    VENV_ACTIVATE=${LOCAL_MODEL_CODES_DIR}/.engine_build_env/bin/activate
+                    MODELS_DIR=${LOCAL_MODEL_DIR}
+                    PT_FILE=${LOCAL_MODEL_DIR}/${pt_filename}.pt
+                    ENGINE_FILE=${LOCAL_MODEL_DIR}/siyeon_best.engine`;
 
     try {
-        // 파일을 새로 생성하고 내용을 씁니다 (기존 내용이 있으면 덮어씁니다)
-        await fs.writeFile(filePath, content, 'utf8');
-        console.log('📄 파일 쓰기 성공!');
+      // 파일을 새로 생성하고 내용을 씁니다 (기존 내용이 있으면 덮어씁니다)
+      await fs.writeFile(filePath, content, 'utf8');
+      console.log('📄 파일 쓰기 성공!');
     } catch (error) {
-        console.error('❌ 파일 쓰기 중 에러 발생:', error);
+      console.error('❌ 파일 쓰기 중 에러 발생:', error);
     }
 }
 
