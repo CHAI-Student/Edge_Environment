@@ -672,19 +672,19 @@ async function notifyAiTrainingStore(product) {
     JSON.stringify(product, null, 2)
   );
   if (typeof aiNotifyService.notifyTrainingStore === "function") {
-    console.log(
-      '[notifyAiTrainingStore] input:',
-      JSON.stringify(product, null, 2)
-    );
-    console.log(
-      "[aiNotifyService keys]",
-      Object.keys(aiNotifyService)
-    );
+    // console.log(
+    //   '[notifyAiTrainingStore] input:',
+    //   JSON.stringify(product, null, 2)
+    // );
+    // console.log(
+    //   "[aiNotifyService keys]",
+    //   Object.keys(aiNotifyService)
+    // );
 
-    console.log(
-      "[aiNotifyService.notifyTrainingStore source]",
-      aiNotifyService.notifyTrainingStore.toString()
-    );
+    // console.log(
+    //   "[aiNotifyService.notifyTrainingStore source]",
+    //   aiNotifyService.notifyTrainingStore.toString()
+    // );
 
     const payload = {
       productIdx: product.productIdx,

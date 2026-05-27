@@ -777,6 +777,7 @@ async function Payments(token, CardMethod) {
               );
             } catch (error) {
               const pubCode = '1'
+              console.log('samsung-pay error::::', error)
 
               await sendCardErrorToPNT(
                 pubCode,
