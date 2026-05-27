@@ -771,9 +771,9 @@ async function Payments(token, CardMethod) {
                   items,
                   authorization_type: "PURCHASE",
                 },
-                {
-                  timeout: 60000
-                }
+                // {
+                //   timeout: 60000
+                // }
               );
             } catch (error) {
               const pubCode = '1'
