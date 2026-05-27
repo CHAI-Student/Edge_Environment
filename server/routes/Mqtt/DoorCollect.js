@@ -416,7 +416,7 @@ async function DoorCollect() {
         const formattedDate = makeIFDate(now)
         const sysidDate = now.toISOString().replace(/[-:T]/g, "").slice(0, 8);
         const sysidTime = now.toISOString().replace(/[-:T]/g, "").slice(8, 14);
-        const aiStorageType = latestCollectOption.storageType == 'COLD' ? 'True' : 'False';
+        const aiStorageType = (latestCollectOption.storageType == 'C' ? 'True' : 'False');
     
         const payload = {
             HEADER: {
