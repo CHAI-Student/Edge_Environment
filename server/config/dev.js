@@ -19,15 +19,15 @@ module.exports = {
     // 매장 고유번호
     // divisionIdx: 'DI17647205538493077',
     // 테스트용
-    // divisionIdx: 'DI17790813642907755', // 학습용
-    divisionIdx: 'DI17647205538493077',
+    divisionIdx: 'DI17790813642907755', // 학습용
+    // divisionIdx: 'DI17647205538493077',
     // divisionIdx: 'DI17798460900133031', // 통테
     
     // 장비 고유번호
     // deviceIdx: 'DE17560868094789999',
-    deviceIdx: 'DE17683631997086480',
+    // deviceIdx: 'DE17683631997086480',
     // 테스트용
-    // deviceIdx: 'DE17790815108130388', // 학습용
+    deviceIdx: 'DE17790815108130388', // 학습용
     // deviceIdx: 'DE17798461293792881', // 통테
 
     // divisionIdx: 'DI17790813642907755',

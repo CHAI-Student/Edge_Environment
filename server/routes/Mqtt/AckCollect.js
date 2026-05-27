@@ -1365,18 +1365,6 @@ async function handleEndCollect(reqData, reqSysid) {
     console.error("[AnnotationLabel] sync failed:", err);
   }
 
-  /**
-   * AI 서버 notify
-   */
-  const notifyResult =
-    await notifyAiTrainingStore({
-      productIdx: product_idx,
-      productEngName: product_eng_name,
-      trainingStatus: "2",
-    });
-
-  console.log('[AckCollect] sending to PNT:', notifyResult)
-
   // console.log('[PNT DOOR REQ] status of doorState: ', doorState)
   // if (doorState === 'CLOSE') {
   //   const aiServer = `${config.aiServerApi}/v1/events/product/created`
@@ -1444,6 +1432,18 @@ async function handleEndCollect(reqData, reqSysid) {
       },
     })
   );
+
+  /**
+   * AI 서버 notify
+   */
+  const notifyResult =
+    await notifyAiTrainingStore({
+      productIdx: product_idx,
+      productEngName: product_eng_name,
+      trainingStatus: "2",
+    });
+
+  console.log('[AckCollect] sending to PNT:', notifyResult)
 
   // publishAck(
   //   makeAckPayload({
