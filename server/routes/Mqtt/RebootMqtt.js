@@ -5,6 +5,7 @@ const { getClient, publish } = require("./MqttClient");
 const config = require("../../config/key");
 const { exec, spawn } = require("child_process");
 const { ms } = require("zod/locales");
+const { pipeline } = require("stream/promises");
 const ENV_FILE_PATH = path.resolve(__dirname, "../../.env"); // 실제 .env 파일 경로
 const { getTrainingStatus, TrainingStore } = require("../RestAPI/TrainingStore");
 const { DeviceInfo } = require("../RestAPI/DeviceInfo");
@@ -771,33 +772,33 @@ async function RebootMqtt() {
                     await cleanupCachesBeforeModelDownload();
 
                     const downloadedFiles = await downloadModelFilesFromBrunchFolder(
-                    targetFolderName,
-                    modelVersion
-                  );
+                      targetFolderName,
+                      modelVersion
+                    );
 
-                  console.log(
-                    `[RebootMqtt(ModelEmbedding)] 모델 파일 다운로드 완료:`,
-                    downloadedFiles
-                  );
+                    console.log(
+                      `[RebootMqtt(ModelEmbedding)] 모델 파일 다운로드 완료:`,
+                      downloadedFiles
+                    );
 
-                  await writeEngineBuildTxt(modelVersion);
-                  await startCrkModelBuildServiceWithLogs();
-                  console.log(
-                    `[RebootMqtt(ModelEmbedding)] crk-model-build.service 실행 완료`
-                  );
+                    await writeEngineBuildTxt(modelVersion);
+                    await startCrkModelBuildServiceWithLogs();
+                    console.log(
+                      `[RebootMqtt(ModelEmbedding)] crk-model-build.service 실행 완료`
+                    );
 
 
-                  // 환경변수인 모델 버전 변경
-                  await updateEnvModelVersion(modelVersion);
-                  console.log(
-                    `[RebootMqtt(ModelEmbedding)] updateEnvModelVersion 완료`
-                  );
+                    // 환경변수인 모델 버전 변경
+                    await updateEnvModelVersion(modelVersion);
+                    console.log(
+                      `[RebootMqtt(ModelEmbedding)] updateEnvModelVersion 완료`
+                    );
 
                   // rebooting = false;
                   // return;
                   }
                   catch (updateError) {
-                    console.error(`[RebootMqtt(ModelEmbedding)] 도커 이미지 다운로드 실패로 재부팅을 취소합니다.`);
+                    console.error(`[RebootMqtt(ModelEmbedding)] 도커 이미지 다운로드 실패로 재부팅을 취소합니다.`, updateError);
                     await publishRebootAck({
                       deviceIdx, divisionIdx, ifSysId,
                       rebootState: "FAILED", resultCd: "F", resultMsg: "Model Image Pull Failed"
