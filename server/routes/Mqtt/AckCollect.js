@@ -515,6 +515,51 @@ async function syncProductMetadata({
 }) {
   await ensureMongoConnected();
 
+  // 1. productIdx만 같은 기존 상품 있는지 먼저 확인
+  const existingByProductIdx = await ProductUpload.findOne({ productIdx }).lean();
+
+  // const existingByProductIdx = await ProductUpload.findOne(
+  //   { productIdx },
+  //   { _id: 1, productIdx: 1, productEngName: 1, eventPromotion: 1, trainProductIdx: 1 }
+  // ).lean();
+
+  // 2. productIdx는 같고 productEngName이 다르면 eventPromotion에 추가
+  if (
+    existingByProductIdx &&
+    existingByProductIdx.productEngName !== productEngName
+  ) {
+    const now = new Date();
+
+    await ProductUpload.updateOne(
+      { _id: existingByProductIdx._id },
+      {
+        $addToSet: {
+          eventPromotion: {
+            productIdx,
+            productEngName,
+            categoryIdx: categoryIdx ?? "null",
+            isNew,
+            trainingStatus: "2",
+            storageType,
+            productLoadcellWeight,
+            foldername,
+            folderpath,
+            filelength: Number(filelength || 0),
+            createDate: now,
+            updateDate: now,
+          },
+        },
+        $set: {
+          updateDate: now,
+        },
+      }
+    );
+
+    console.log(`[MongoDB] Product added to eventPromotion: ${productIdx}`);
+
+    return ProductUpload.findOne({ _id: existingByProductIdx._id }).lean();
+  }
+
   const existing = await ProductUpload.findOne(
     { productIdx, productEngName },
     { trainProductIdx: 1 }
