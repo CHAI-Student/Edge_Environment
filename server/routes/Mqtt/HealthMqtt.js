@@ -17,10 +17,10 @@ async function CardTerminalStatusAPI() {
 
     // POST 요청 전송
     const response = await axios.get(`${config.cardTerminalApi}/status`, {
-      timeout: 30000 // 5초 안에 응답 없으면 에러 처리
+      timeout: 30000 // 30초 안에 응답 없으면 에러 처리
 
     });
-    // console.log(response.data)
+    console.log(response.data)
 
     // API 응답 확인
     const CatResCode = response.data.response_code;
