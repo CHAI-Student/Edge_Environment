@@ -12,7 +12,7 @@ function formatIfDate(d = new Date()) {
 
 async function CardTerminalStatusAPI() {
   let CardTerminalState = '30'
-  console.log(`[CARD-DEVICE] test:: ${config.cardTerminalApi}`);
+  // console.log(`[CARD-DEVICE] test:: ${config.cardTerminalApi}`);
   try {
     console.log(`[CARD-DEVICE] Sending Request to ${config.cardTerminalApi}`);
 
@@ -247,8 +247,8 @@ async function HealthMqtt() {
     // const CardTerminalStatus = '39'
 
     const publishOnce = async () => {
-      // const CardTerminalStatus = await CardTerminalStatusAPI();
-      const CardTerminalStatus = '39'
+      const CardTerminalStatus = await CardTerminalStatusAPI();
+      // const CardTerminalStatus = '39'
       const DeadboltStatus = await DeadboltStatusAPI();
       const LoadcellStatus = await LoadcellStatusAPI();
       const CameraStatus = await CameraStatusAPI();
