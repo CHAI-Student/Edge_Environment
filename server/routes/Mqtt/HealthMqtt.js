@@ -12,6 +12,7 @@ function formatIfDate(d = new Date()) {
 
 async function CardTerminalStatusAPI() {
   let CardTerminalState = '30'
+  console.log(`[CARD-DEVICE] test:: ${config.cardTerminalApi}`);
   try {
     console.log(`[CARD-DEVICE] Sending Request to ${config.cardTerminalApi}`);
 
