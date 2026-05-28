@@ -3,11 +3,71 @@ const { getClient, subscribe } = require("./MqttClient");
 const { v4: uuidv4 } = require("uuid");
 const axios = require("axios"); // ✅ API 통신을 위한 라이브러리
 const { devAutoLogin } = require("../../routes/auth");
+const { exec } = require("child_process");
+const os = require("os");
 
 function formatIfDate(d = new Date()) {
     const pad = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`
          + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+function playMp3(filePath) {
+  const platform = os.platform(); // 'darwin', 'linux', 'win32'
+  let cmd;
+  // macOS
+  if (platform === "darwin") {cmd = `afplay "${filePath}"`;}
+  else if (platform === "linux") {
+    cmd = `mpg123 -f 26214 "${filePath}"`; // 80%
+  }
+  else {
+    console.warn("[AUDIO] Unsupported OS:", platform);
+    return;
+  }
+  exec(cmd, (err) => {
+    if (err) {
+      console.error("[AUDIO] play failed:", err.message);
+    }
+  });
+}
+
+let sensorErrorVoiceInterval = null;
+
+function playSensorErrorVoice() {
+    const audioPath = path.resolve(__dirname, '../Sounds/sensor_error.mp3');
+    playMp3(audioPath);
+    console.log("[VOICE] sensor error. (play audio)");
+}
+
+async function DiskStatusAPI() {
+  return new Promise((resolve) => {
+    // sd카드 루트 저장 공간 체크 : /dev/nvme0n1p2
+    exec("df -h /", (error, stdout, stderr) => {
+      if (error) {
+        console.error(`[DISK] command error: ${error.message}`);
+        return resolve("40"); // 디스크 체크 실패
+      }
+      if (stderr) {
+        console.error(`[DISK] stderr: ${stderr}`);
+        return resolve("40");
+      }
+      const lines = stdout.trim().split("\n");
+      if (lines.length < 2) return resolve("40");
+
+      const infoLine = lines[1].replace(/\s+/g, " ");
+      const usePercentageStr = infoLine.split(" ")[4];
+      const usePercentage = parseInt(usePercentageStr.replace("%", ""), 10);
+
+      if (Number.isNaN(usePercentage)) return resolve("40");
+
+      if (usePercentage >= 80) {
+        console.error(`[DISK] Not enough disk space. usage=${usePercentage}%`);
+        return resolve("40"); // 디스크 부족
+      }
+      console.log(`[DISK] OK. usage=${usePercentage}%`);
+      return resolve("49"); // 정상
+    });
+  });
 }
 
 async function CardTerminalStatusAPI(CatResCodePayment) {
@@ -185,30 +245,39 @@ async function CameraStatusAPI() {
 
 async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
   //edgepc status check
-  let edgeStatus = '49';
-  let network = false;
+  let edgeStatus = '00';
   let ModelRes = null;
+  let aiServercheck = null;
 
   try {
     // console.log(`[NETWORK] Network status`);
+
+    // 1. ai server health-check
+    console.log(`[AI SERVER-EDGEPC] Sending Request to ${config.aiServerApi}`);
+    aiServercheck = await axios.get(`${config.aiServerApi}/health`, { timeout: 5000 });
+    console.log('[AI SERVER] AIServerCheck:', aiServercheck.data);
+    const AiServerState = aiServercheck.data.ok
 
     // 2. 모델 서버 상태 확인
     console.log(`[MODEL-EDGEPC] Sending Request to ${config.modelApi}`);
     ModelRes = await axios.get(`${config.modelApi}/api/health`, { timeout: 5000 });
     console.log('[MODEL] ModelRes:', ModelRes.data);
 
+    const DiskStatus = await DiskStatusAPI();
+
     // 3. 상태 판단
-    if (LoadcellState == '29' && DeadboltState == '19' && network && ModelRes.data.status == 'ok') {
+    if (LoadcellState == '29' && DeadboltState == '19' && ModelRes.data.status && AiServerState == true) {
       // console.log('[EDGEPC] All systems healthy')
       edgeStatus = '49'
     } else if (LoadcellState != '29' && DeadboltState != '19') {
       edgeStatus = '41'
       // console.log('[EDGEPC] IO Board unconnected')
-    } 
-    // else if (ModelRes.data.model == 'UNHEALTHY') {
-    //   edgeStatus = '42'
-    //   // console.log('[EDGEPC] Model server unconnected')
-    // }
+    } else if (aiServercheck.data.ok == false) {
+      edgeStatus = '43'
+    } else if (DiskStatus == "40") {
+      // 40 = 디스크 부족/체크 실패
+      edgeStatus = DiskStatus;
+    }
     return edgeStatus
 
   } catch (error) {
@@ -223,7 +292,7 @@ async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
     } else {
       edgeStatus = "42"
       // console.error(`[EDGEPC] Error: ${error.message}`);
-    }
+    } 
     return edgeStatus
   }
 }
@@ -236,11 +305,6 @@ async function HealthMqtt() {
 
   // publish
   const healthCheck = `chai/device/${deviceIdx}/health` // healthcare
-
-  // ai server health-check
-  console.log(`[AI SERVER-EDGEPC] Sending Request to ${config.aiServerApi}`);
-  const AIServerCheck = await axios.get(`${config.aiServerApi}/health`, { timeout: 5000 });
-  console.log('[AI SERVER] AIServerCheck:', AIServerCheck.data);
 
 
   const client = getClient(); // 연결 시작
@@ -258,11 +322,21 @@ async function HealthMqtt() {
       const LoadcellStatus = await LoadcellStatusAPI();
       const CameraStatus = await CameraStatusAPI();
       const EdgePCStatus = await EdgePCStatusAPI(DeadboltStatus, LoadcellStatus);
-      // const [CardTerminalStatus, DeadboltStatus, LoadcellStatus,] = await Promise.all([
-      //   CardTerminalStatusAPI(),
-      //   DeadboltStatusAPI(),
-      //   LoadcellStatusAPI(),
-      // ]);
+
+      // 센서 에러나면 20초에 한번씩 소리 나게
+      if (CardTerminalStatus == '30' || LoadcellStatus == '20' || CameraStatus == '00') {
+        if (!sensorErrorVoiceInterval) {
+          playSensorErrorVoice();
+          sensorErrorVoiceInterval = setInterval(() => {
+            playSensorErrorVoice();
+          }, 30000);
+        }
+      } else {
+        if (sensorErrorVoiceInterval) {
+          clearInterval(sensorErrorVoiceInterval);
+          sensorErrorVoiceInterval = null;
+        }
+      }
 
       const header = {
         IF_ID: "IF_02",

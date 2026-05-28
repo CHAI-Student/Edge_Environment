@@ -1,5 +1,7 @@
 const mqtt = require("mqtt");
 const config = require("../../config/key");
+const { exec } = require("child_process");
+const os = require("os");
 
 let client = null;
 
@@ -7,6 +9,31 @@ function createMqttClient() {
   if (!config.mqttURL) throw new Error("Missing config.mqttURL");
   if (!config.mqttID) throw new Error("Missing config.mqttID");
   if (!config.mqttPW) throw new Error("Missing config.mqttPW");
+
+  function playMp3(filePath) {
+    const platform = os.platform(); // 'darwin', 'linux', 'win32'
+    let cmd;
+    // macOS
+    if (platform === "darwin") {cmd = `afplay "${filePath}"`;}
+    else if (platform === "linux") {
+      cmd = `mpg123 -f 26214 "${filePath}"`; // 80%
+    }
+    else {
+      console.warn("[AUDIO] Unsupported OS:", platform);
+      return;
+    }
+    exec(cmd, (err) => {
+      if (err) {
+        console.error("[AUDIO] play failed:", err.message);
+      }
+    });
+  }
+
+  function playInternetErrorVoice() {
+    const audioPath = path.resolve(__dirname, '../Sounds/internet_error.mp3');
+    playMp3(audioPath);
+    console.log("[VOICE] Edge internet error (play audio)");
+  }
 
   const deviceIdx = config.deviceIdx
 
@@ -30,14 +57,29 @@ function createMqttClient() {
 
   client = mqtt.connect(config.mqttURL, options);
 
+  let internetErrorVoiceInterval = null;
+
   client.on("connect", () => {
+    if (internetErrorVoiceInterval) {
+      clearInterval(internetErrorVoiceInterval);
+      internetErrorVoiceInterval = null;
+    }
     console.log(`[MQTT] connected (${config.mqttURL}) clientId=${clientId}`);
   });
   client.on("reconnect", () => console.log("[MQTT] reconnecting..."));
   client.on("offline", () => console.log("[MQTT] offline"));
   client.on("close", () => console.log("[MQTT] close"));
   client.on("end", () => console.log("[MQTT] end"));
-  client.on("error", (err) => console.error("[MQTT] error:", err?.message || err));
+  // client.on("error", (err) => console.error("[MQTT] error:", err?.message || err));
+  client.on("error", (err) => { console.error("[MQTT] error:", err?.message || err);
+    if (!internetErrorVoiceInterval) {
+      playInternetErrorVoice();
+
+      internetErrorVoiceInterval = setInterval(() => {
+        playInternetErrorVoice();
+      }, 20000); // 20초마다 반복
+    }
+  });
 
   // 공통 수신 로깅(원하면 여기서 topic 라우팅도 가능)
   client.on("message", (topic, payload) => {

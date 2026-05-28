@@ -134,7 +134,9 @@ function playMp3(filePath) {
   let cmd;
   // macOS
   if (platform === "darwin") {cmd = `afplay "${filePath}"`;}
-  else if (platform === "linux") {cmd = `mpg123 "${filePath}"`;}
+  else if (platform === "linux") {
+    cmd = `mpg123 -f 26214 "${filePath}"`; // 80%
+  }
   else {
     console.warn("[AUDIO] Unsupported OS:", platform);
     return;
@@ -533,6 +535,16 @@ async function startProcess(token, CardMethod) {
           }
       } else {
           console.error('[PAYMENT] Health status is bad. Cannot run.');
+          if (samsungpayToken || token) {
+            await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/cancel`,{
+                amount: preAmount,
+                original_authorization_date: preAuthDate,
+                original_authorization_number: preAuthNum,
+                vankey: samsungpayToken
+            }).then((response) => {
+              console.log('canceled samsung-pay : ', response.data)
+            })
+          }
           return;
       }
     } catch (error) {
