@@ -266,7 +266,10 @@ async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
     const DiskStatus = await DiskStatusAPI();
 
     // 3. 상태 판단
-    if (LoadcellState == '29' && DeadboltState == '19' && ModelRes.data.status && AiServerState == true) {
+    if (DiskStatus == "40") {
+      edgeStatus = "40";
+      console.log('[DiskStatus] :', edgeStatus, '---', DiskStatus);
+    } else if (LoadcellState == '29' && DeadboltState == '19' && ModelRes.data.status && AiServerState == true) {
       // console.log('[EDGEPC] All systems healthy')
       edgeStatus = '49'
     } else if (LoadcellState != '29' && DeadboltState != '19') {
@@ -274,10 +277,6 @@ async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
       // console.log('[EDGEPC] IO Board unconnected')
     } else if (aiServercheck.data.ok == false) {
       edgeStatus = '43'
-    } else if (DiskStatus == "40") {
-      // 40 = 디스크 부족/체크 실패
-      edgeStatus = DiskStatus;
-      console.log('[DiskStatus] :', edgeStatus, '---', DiskStatus)
     }
     return edgeStatus
 
