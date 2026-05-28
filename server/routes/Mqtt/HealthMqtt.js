@@ -10,11 +10,16 @@ function formatIfDate(d = new Date()) {
          + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
-async function CardTerminalStatusAPI() {
+async function CardTerminalStatusAPI(CatResCodePayment) {
   let CardTerminalState = '30'
   // console.log(`[CARD-DEVICE] test:: ${config.cardTerminalApi}`);
   try {
     console.log(`[CARD-DEVICE] Sending Request to ${config.cardTerminalApi}`);
+
+    if (CatResCodePayment == "178") { // payment에서 보내는 단말기에서 토큰 생성 취소
+      CardTerminalState = '34'
+      // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
+    }
 
     // POST 요청 전송
     const response = await axios.get(`${config.cardTerminalApi}/status`, {

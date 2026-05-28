@@ -450,6 +450,9 @@ async function init() {
                     CardMethod = 'S'
                     console.log('[Samsungpay-Token] Token received:', samsungpayToken);
                     startProcess(samsungpayToken, CardMethod); 
+                } else if (response.data.status == 'N') {
+                  console.log('[Samsungpay-Token] Token received:', response.data.response_code)
+                  CardTerminalStatusAPI(response.data.response_code)
                 }
             }).catch((error) => {
                 console.error('Samsung Pay Approval Error:', error);
@@ -516,8 +519,8 @@ async function startProcess(token, CardMethod) {
     setProcessing(true);
     try {
       const CameraStatus = await CameraStatusAPI()
-      // const CardTerminalStatus = await CardTerminalStatusAPI()
-      const CardTerminalStatus = '39'
+      const CardTerminalStatus = await CardTerminalStatusAPI()
+      // const CardTerminalStatus = '39'
       const DeadboltStatus = await DeadboltStatusAPI()
       const LoadcellStatus = await LoadcellStatusAPI()
 
