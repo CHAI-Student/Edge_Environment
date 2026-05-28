@@ -18,7 +18,7 @@ function createMqttClient() {
     // macOS
     if (platform === "darwin") {cmd = `afplay "${filePath}"`;}
     else if (platform === "linux") {
-      cmd = `mpg123 -f 26214 "${filePath}"`; // 80%
+      cmd = `mpg123 -f 32768 "${filePath}"`; // 100%
     }
     else {
       console.warn("[AUDIO] Unsupported OS:", platform);
