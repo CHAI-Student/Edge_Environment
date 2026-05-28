@@ -277,6 +277,7 @@ async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
     } else if (DiskStatus == "40") {
       // 40 = 디스크 부족/체크 실패
       edgeStatus = DiskStatus;
+      console.log('[DiskStatus] :', edgeStatus, '---', DiskStatus)
     }
     return edgeStatus
 
