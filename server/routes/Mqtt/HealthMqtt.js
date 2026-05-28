@@ -80,7 +80,7 @@ async function DeadboltStatusAPI() {
   try {
     console.log(`[IO-BOARD/DEADBOLT] Sending Request to ${config.ioboardApi}`);
     IOBoardRes = await axios.get(`${config.ioboardApi}/health`, { timeout: 5000 });
-    // console.log(IOBoardRes.data)
+    console.log(IOBoardRes.data)
     if (IOBoardRes.data.deadbolt == 'HEALTHY') {
       DeadboltState = '19'
       // console.log(`[DEADBOLT] deadbolt is ${IOBoardRes.data.deadbolt}`)
