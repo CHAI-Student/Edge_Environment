@@ -5,6 +5,8 @@ const axios = require("axios"); // ✅ API 통신을 위한 라이브러리
 const { devAutoLogin } = require("../../routes/auth");
 const { exec } = require("child_process");
 const os = require("os");
+const path = require("path");
+const fs = require("fs");
 
 function formatIfDate(d = new Date()) {
     const pad = (n) => String(n).padStart(2, '0');

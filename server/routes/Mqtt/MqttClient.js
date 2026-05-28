@@ -2,6 +2,8 @@ const mqtt = require("mqtt");
 const config = require("../../config/key");
 const { exec } = require("child_process");
 const os = require("os");
+const path = require("path");
+const fs = require("fs");
 
 let client = null;
 
