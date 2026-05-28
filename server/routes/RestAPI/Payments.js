@@ -581,7 +581,7 @@ async function Payments(token, CardMethod) {
     // 상품 정보 추출
     let productData = []
     if (productList) { productData = productList.DATA.product_list }
-    // console.log(productData)
+    console.log(productData)
     // 2. API 스펙(ProductInfo)에 맞춰 매핑 (Mapping)
     const formattedProducts = productData.map((item) => {
       return {

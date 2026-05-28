@@ -60,7 +60,8 @@ async function DiskStatusAPI() {
 
       if (Number.isNaN(usePercentage)) return resolve("40");
 
-      if (usePercentage >= 80) {
+      // 80% 이상 시 저장공간 부족 띄우기
+      if (usePercentage >= 99) {
         console.error(`[DISK] Not enough disk space. usage=${usePercentage}%`);
         return resolve("40"); // 디스크 부족
       }
