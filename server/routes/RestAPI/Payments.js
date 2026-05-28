@@ -3,7 +3,7 @@ const axios = require("axios");
 const config = require("../../config/key");
 const express = require("express");
 const router = express.Router();
-const { CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI, CameraStatusAPI } = require('../Mqtt/HealthMqtt')
+const { CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI, CameraStatusAPI, CardTerminalErrorState } = require('../Mqtt/HealthMqtt')
 const { ProductList } = require("./ProductList");
 const fs = require("fs");
 const path = require("path");
@@ -422,6 +422,7 @@ async function init() {
             startProcess(paymentToken, CardMethod); 
         } catch (err) {
             console.error('[CardToken] Error parsing token:', err);
+            setCardTerminalErrorState("30");
         }
     });
 
@@ -433,34 +434,69 @@ async function init() {
     }
      */
     // 삼성페이 토큰 수신
-    TokenHandler.addEventListener('samsung_pay_init', (event) => {
-        console.log('samsungpay::::', event.data); // {} -> 처음 태그 시
-        if (event.data) {
-            axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {
-                amount: "5",
-                authorization_type: "PRE_AUTH", // 후결제: PURCHASE
-                items: null,
-                // display_message: "SamsungPay Payment"
-            }).then((response) => {
-                console.log('Samsung Pay Approval Response:', response.data);
-                
-                if (response.data.status == 'Y') {
-                    preAuthNum = response.data.authorization_number;
-                    preAuthDate = response.data.authorization_date;
-                    samsungpayToken = response.data.vankey;
-                    preAmount = '5';
-                    CardMethod = 'S'
-                    console.log('[Samsungpay-Token] Token received:', samsungpayToken);
-                    startProcess(samsungpayToken, CardMethod); 
-                } else if (response.data.status == 'N') {
-                  console.log('[Samsungpay-Token] Token received:', response.data.response_code)
-                  CardTerminalStatusAPI(response.data.response_code)
-                }
-            }).catch((error) => {
-                console.error('Samsung Pay Approval Error:', error);
-            });
-        } 
+    TokenHandler.addEventListener('samsung_pay_init', async (event) => {
+      console.log('samsungpay::::', event.data);
+      if (event.data) {
+        try {
+          const response = await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`,
+            {
+              amount: "5",
+              authorization_type: "PRE_AUTH",
+              items: null,
+            }
+          );
+          console.log('Samsung Pay Approval Response:', response.data);
+
+          if (response.data.status == 'Y') {
+            preAuthNum = response.data.authorization_number;
+            preAuthDate = response.data.authorization_date;
+            samsungpayToken = response.data.vankey;
+            preAmount = '5';
+            CardMethod = 'S';
+
+            console.log('[Samsungpay-Token] Token received:', samsungpayToken);
+            startProcess(samsungpayToken, CardMethod);
+
+          } else if (response.data.status == 'N') {
+            console.log('[Samsungpay-Token] Failed response_code:', response.data.response_code);
+            const cardState = await CardTerminalStatusAPI(response.data.response_code);
+            CardTerminalErrorState(cardState);
+          }
+        } catch (error) {
+          console.error('Samsung Pay Approval Error:', error);
+          CardTerminalErrorState("30");
+        }
+      }
     });
+    // TokenHandler.addEventListener('samsung_pay_init',  (event) => {
+    //     console.log('samsungpay::::', event.data); // {} -> 처음 태그 시
+    //     if (event.data) {
+    //         axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {
+    //             amount: "5",
+    //             authorization_type: "PRE_AUTH", // 후결제: PURCHASE
+    //             items: null,
+    //             // display_message: "SamsungPay Payment"
+    //         }).then((response) => {
+    //             console.log('Samsung Pay Approval Response:', response.data);
+                
+    //             if (response.data.status == 'Y') {
+    //                 preAuthNum = response.data.authorization_number;
+    //                 preAuthDate = response.data.authorization_date;
+    //                 samsungpayToken = response.data.vankey;
+    //                 preAmount = '5';
+    //                 CardMethod = 'S'
+    //                 console.log('[Samsungpay-Token] Token received:', samsungpayToken);
+    //                 startProcess(samsungpayToken, CardMethod); 
+    //             } else if (response.data.status == 'N') {
+    //               console.log('[Samsungpay-Token] Token received:', response.data.response_code)
+    //               const cardState = await CardTerminalStatusAPI(response.data.response_code);
+    //               CardTerminalErrorState(cardState);
+    //             }
+    //         }).catch((error) => {
+    //             console.error('Samsung Pay Approval Error:', error);
+    //         });
+    //     } 
+    // });
 
     // rfid:::: {"data": "1763193013"}
     // 사원증 토큰 수신
@@ -569,11 +605,13 @@ let inferenceResult = null;
 // --- 3. 결제 및 제어 로직 ---
 async function Payments(token, CardMethod) {
     const divisionIdx = config.divisionIdx;
+    const deviceIdx = config.deviceIdx;
 
     // [3] 상품정보 조회
     const productList = await ProductList({
         division_idx: divisionIdx,
-        device_idx: null
+        // device_idx: null
+        device_idx: deviceIdx, /// 성능평가용 장비 한정 테스트
     });
     // console.log("[ProductList] Data Loading Complete:", productList);
 

@@ -73,15 +73,32 @@ async function DiskStatusAPI() {
   });
 }
 
+let CardErrorState = null;
+
+function CardTerminalErrorState(code) {
+  CardErrorState = code;
+  console.log("[CARD-HEALTH] set:", code);
+}
+
 async function CardTerminalStatusAPI(CatResCodePayment) {
   let CardTerminalState = '30'
   // console.log(`[CARD-DEVICE] test:: ${config.cardTerminalApi}`);
   try {
     console.log(`[CARD-DEVICE] Sending Request to ${config.cardTerminalApi}`);
 
-    if (CatResCodePayment == "178") { // payment에서 보내는 단말기에서 토큰 생성 취소
-      CardTerminalState = '34'
-      // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
+    if (CatResCodePayment == "178") { // payment에서 보내는 단말기 에러
+      switch (String(CatResCodePayment)) {
+        case "176": return "32";
+        case "177": return "33";
+        case "178": return "34";
+        case "179": return "35";
+        case "180": return "36";
+        case "181": return "37";
+        case "182": return "31";
+        case "192":
+        case "193": return "30";
+        case "255": return "38";
+      }
     }
 
     // POST 요청 전송
@@ -319,7 +336,10 @@ async function HealthMqtt() {
     // const CardTerminalStatus = '39'
 
     const publishOnce = async () => {
-      const CardTerminalStatus = await CardTerminalStatusAPI();
+      let CardTerminalStatus = await CardTerminalStatusAPI();
+      if (CardErrorState) {
+        CardTerminalStatus = CardErrorState;
+      }
       // const CardTerminalStatus = '39'
       const DeadboltStatus = await DeadboltStatusAPI();
       const LoadcellStatus = await LoadcellStatusAPI();
@@ -371,4 +391,4 @@ async function HealthMqtt() {
   });
 }
 
-module.exports = { HealthMqtt, CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI, CameraStatusAPI, EdgePCStatusAPI };
+module.exports = { HealthMqtt, CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI, CameraStatusAPI, EdgePCStatusAPI, CardTerminalErrorState };
