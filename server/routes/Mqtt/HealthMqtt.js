@@ -11,7 +11,7 @@ function formatIfDate(d = new Date()) {
 }
 
 async function CardTerminalStatusAPI() {
-  let CardTerminalState = '39'
+  let CardTerminalState = '30'
   try {
     console.log(`[CARD-DEVICE] Sending Request to ${config.cardTerminalApi}`);
 
@@ -76,7 +76,7 @@ let IOBoardRes = null; // 전역 변수로 선언하여 LoadcellStatusAPI에서 
 
 async function DeadboltStatusAPI() {
   // deadbolt status check
-  let DeadboltState = '19'
+  let DeadboltState = '10'
   try {
     console.log(`[IO-BOARD/DEADBOLT] Sending Request to ${config.ioboardApi}`);
     IOBoardRes = await axios.get(`${config.ioboardApi}/health`, { timeout: 5000 });
@@ -108,7 +108,7 @@ async function DeadboltStatusAPI() {
 
 async function LoadcellStatusAPI() {
   // loadcell status check
-  let LoadcellState = '29'
+  let LoadcellState = '20'
   try {
     // IOBoardRes는 DeadboltStatusAPI()에서 이미 호출되었으므로 사용
     if (!IOBoardRes || !IOBoardRes.data) {
@@ -144,7 +144,7 @@ async function LoadcellStatusAPI() {
 
 async function CameraStatusAPI() {
   //camera status check
-  let CameraState = ''
+  let CameraState = '00'
   try {
     console.log(`[CAMERA] Sending Request to ${config.cameraApi}`);
     const CameraRes = await axios.get(`${config.cameraApi}/health`, { timeout: 5000 });
