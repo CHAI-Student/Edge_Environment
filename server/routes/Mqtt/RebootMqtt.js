@@ -496,7 +496,7 @@ function startCrkModelBuildService() {
 
 function startCrkModelBuildServiceWithLogs() {
   return new Promise((resolve, reject) => {
-    const serviceName = "/etc/systemd/system/crk-model-build.service";
+    const serviceName = "crk-model-build.service";
 
     console.log(`[SYSTEMD] start ${serviceName}`);
 
