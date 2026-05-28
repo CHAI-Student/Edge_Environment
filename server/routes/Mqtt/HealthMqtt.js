@@ -20,7 +20,7 @@ async function CardTerminalStatusAPI() {
       timeout: 30000 // 30초 안에 응답 없으면 에러 처리
 
     });
-    console.log(response.data)
+    console.log('[CARD-DEVICE]', response.data)
 
     // API 응답 확인
     const CatResCode = response.data.response_code;
@@ -55,6 +55,9 @@ async function CardTerminalStatusAPI() {
     } else if (CatResCode == "255" || CatStatus == 'ERROR') { // 기타 오류
       CardTerminalState = '38'
       // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
+    } else if (response.data.status == 504) { // timeout error
+      CardTerminalState = '30'
+      console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
     } return CardTerminalState
   } catch (error) {
     // 카드 단말기에서 return이 없는 경우 -- timeout
