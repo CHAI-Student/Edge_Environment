@@ -141,8 +141,8 @@ function publishAck(payload) {
 
 function makeAckPayload({
   reqSysid,
-  deviceIdx,
-  divisionIdx,
+  device_idx,
+  division_idx,
   collectState,
   productIdx,
   productEngName,
@@ -164,8 +164,8 @@ function makeAckPayload({
 
     DATA: {
       device_idx: deviceIdx,
-      division_idx: divisionIdx,
-      product_idx: productIdx,
+      division_idx: division_idx,
+      product_idx: product_idx,
       collect_state: collectState,
       product_eng_name: productEngName,
       category_idx: categoryIdx,
@@ -1146,8 +1146,8 @@ async function handleStartCollect(reqData, reqSysid) {
   publishAck(
     makeAckPayload({
       reqSysid: reqSysid,
-      deviceIdx: device_idx,
-      divisionIdx: division_idx,
+      device_idx: device_idx,
+      division_idx: division_idx,
       collectState: collect_state,
       productIdx: product_idx,
       productEngName: product_eng_name,
@@ -1299,6 +1299,7 @@ async function handleEndCollect(reqData, reqSysid) {
       has_loadcell,
   } = reqData;
 
+  // 학습 대상 : device_idx / division_idx
   console.log("[AckCollect] END collect:", product_idx);
   console.log('[COLLECT] end: ', reqData)
 
@@ -1471,8 +1472,8 @@ async function handleEndCollect(reqData, reqSysid) {
   publishAck(
     makeAckPayload({
       reqSysid: reqSysid,
-      deviceIdx: reqData.device_idx,
-      divisionIdx: reqData.division_idx,
+      device_idx: reqData.device_idx,
+      division_idx: reqData.division_idx,
       collectState: collect_state,
       productIdx: product_idx,
       productEngName: product_eng_name,
@@ -1549,21 +1550,21 @@ async function handleCollectMessage(message) {
 
     console.log("[AckCollect] Request DATA:", reqData);
 
-    if (String(config.deviceIdx) !== String(device_idx)) {
-      console.warn("[AckCollect] device_idx mismatch:", {
-        configDeviceIdx: config.deviceIdx,
-        requestDeviceIdx: device_idx,
-      });
-      return;
-    }
+    // if (String(config.deviceIdx) !== String(device_idx)) {
+    //   console.warn("[AckCollect] device_idx mismatch:", {
+    //     configDeviceIdx: config.deviceIdx,
+    //     requestDeviceIdx: device_idx,
+    //   });
+    //   return;
+    // }
 
-    if (String(config.divisionIdx) !== String(division_idx)) {
-      console.warn("[AckCollect] division_idx mismatch:", {
-        configDivisionIdx: config.divisionIdx,
-        requestDivisionIdx: division_idx,
-      });
-      return;
-    }
+    // if (String(config.divisionIdx) !== String(division_idx)) {
+    //   console.warn("[AckCollect] division_idx mismatch:", {
+    //     configDivisionIdx: config.divisionIdx,
+    //     requestDivisionIdx: division_idx,
+    //   });
+    //   return;
+    // }
 
     if (collect_state === "START") {
       await handleStartCollect(reqData, reqSysid);
@@ -1585,8 +1586,8 @@ async function handleCollectMessage(message) {
     publishAck(
       makeAckPayload({
         reqSysid: reqSysid,
-        deviceIdx: reqData.device_idx,
-        divisionIdx: reqData.division_idx,
+        device_idx: reqData.device_idx,
+        division_idx: reqData.division_idx,
         collectState: reqData.collect_state,
         productIdx: reqData.product_idx,
         productEngName: reqData.product_eng_name,
