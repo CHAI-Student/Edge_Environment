@@ -17,6 +17,7 @@ const {
   CameraStatusAPI,
 } = require("./HealthMqtt");
 const { callApiToControlDeadbolt } = require("./DeadboltApiService");
+const { ProductList } = require("../RestAPI/ProductList");
 
 const { ProductUpload } = require("../../model/ProductUpload");
 const { DivisionUpload } = require("../../model/DivisionUpload");
@@ -801,10 +802,23 @@ async function syncDivisionAndDeviceTypeMapping({
       .map((x) => x?.product?.productIdx)
       .filter(Boolean);
 
+  // ProductList에서 해당 매장 상품 전체 product_idx를 받아서 DeviceTypeUpload 업데이트
+  const productListResp = await ProductList({
+    division_idx: divisionIdx,
+    device_idx: deviceIdx,
+  });
+
+  const storeProductIdxList =
+    (productListResp?.DATA?.product_list || [])
+      .map(p => String(p.product_idx))
+      .filter(Boolean);
+
+
   const mergedProductIdxList = Array.from(
     new Set([
       ...existingProductIdxList,
       ...currentProductIdxList,
+      ...storeProductIdxList,
     ].filter(Boolean))
   );
 

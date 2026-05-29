@@ -339,6 +339,7 @@ async function HealthMqtt() {
       let CardTerminalStatus = await CardTerminalStatusAPI();
       if (CardErrorState) {
         CardTerminalStatus = CardErrorState;
+        CardErrorState = null; // 여기서 1회 전송 후 초기화
       }
       // const CardTerminalStatus = '39'
       const DeadboltStatus = await DeadboltStatusAPI();
