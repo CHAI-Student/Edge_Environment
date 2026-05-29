@@ -155,9 +155,16 @@ function playDoorOpenVoice() {
     console.log("[VOICE] Door is still open over 1 minute. (play audio)");
 }
 
-// 
+// 장비가 동작중일 때 음성 출력
 function playDeviceRunningVoice() {
     const audioPath = path.resolve(__dirname, '../Sounds/device_is_running.mp3');
+    playMp3(audioPath);
+    // console.log("[VOICE] Door is still open over 1 minute. (play audio)");
+}
+
+// 사원증 결제 완료 시 음성 출력
+function playRFIDVoice() {
+    const audioPath = path.resolve(__dirname, '../Sounds/RFID_payment.mp3');
     playMp3(audioPath);
     // console.log("[VOICE] Door is still open over 1 minute. (play audio)");
 }
@@ -918,6 +925,7 @@ async function Payments(token, CardMethod) {
             // RFID 결제 정보 전송
             const paymentAt = new Date().toISOString().replace("Z", "");
             console.log("[PAYMENT] Success:", paymentResponse);
+            playRFIDVoice()
             await sendToPNT(
               paymentResponse,
               inferenceResult,
