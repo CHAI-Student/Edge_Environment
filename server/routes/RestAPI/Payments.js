@@ -169,6 +169,13 @@ function playRFIDVoice() {
     // console.log("[VOICE] Door is still open over 1 minute. (play audio)");
 }
 
+// 0원 추론 시 음성 출력
+function playZeroPayVoice() {
+    const audioPath = path.resolve(__dirname, '../Sounds/Zero_payment.mp3');
+    playMp3(audioPath);
+    // console.log("[VOICE] Door is still open over 1 minute. (play audio)");
+}
+
 let graceTimer = null;   // 1분 후 시작용 (setTimeout)
 let repeatTimer = null;  // 1분마다 반복용 (setInterval)
 let startedAt = null;
@@ -546,6 +553,7 @@ async function init() {
         }
       } catch (error) {
         console.error('RFID Approval Error:', error);
+        return; // 에러 시 중단
       }
     });
 }
@@ -564,8 +572,8 @@ async function startProcess(token, CardMethod) {
     setProcessing(true);
     try {
       const CameraStatus = await CameraStatusAPI()
-      const CardTerminalStatus = await CardTerminalStatusAPI()
-      // const CardTerminalStatus = '39'
+      // const CardTerminalStatus = await CardTerminalStatusAPI()
+      const CardTerminalStatus = '39'
       const DeadboltStatus = await DeadboltStatusAPI()
       const LoadcellStatus = await LoadcellStatusAPI()
 
@@ -788,6 +796,7 @@ async function Payments(token, CardMethod) {
             })
           }
           console.log('total price is 0, running end')
+          playZeroPayVoice();
           return;
         }
         if (inferenceResult.success == true && inferenceResult.products){

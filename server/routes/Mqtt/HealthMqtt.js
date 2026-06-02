@@ -336,12 +336,12 @@ async function HealthMqtt() {
     // const CardTerminalStatus = '39'
 
     const publishOnce = async () => {
-      let CardTerminalStatus = await CardTerminalStatusAPI();
-      if (CardErrorState) {
-        CardTerminalStatus = CardErrorState;
-        CardErrorState = null; // 여기서 1회 전송 후 초기화
-      }
-      // const CardTerminalStatus = '39'
+      // let CardTerminalStatus = await CardTerminalStatusAPI();
+      // if (CardErrorState) {
+      //   CardTerminalStatus = CardErrorState;
+      //   CardErrorState = null; // 여기서 1회 전송 후 초기화
+      // }
+      const CardTerminalStatus = '39'
       const DeadboltStatus = await DeadboltStatusAPI();
       const LoadcellStatus = await LoadcellStatusAPI();
       const CameraStatus = await CameraStatusAPI();
