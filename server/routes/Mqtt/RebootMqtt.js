@@ -500,7 +500,7 @@ function startCrkModelBuildServiceWithLogs() {
 
     console.log(`[SYSTEMD] start ${serviceName}`);
 
-    exec(`systemctl start ${serviceName}`, (err, stdout, stderr) => {
+    exec(`sudo systemctl start ${serviceName}`, (err, stdout, stderr) => {
       if (err) {
         console.error(`[SYSTEMD] ${serviceName} start 실패: ${err.message}`);
         if (stderr) console.error(stderr);
