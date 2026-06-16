@@ -5,6 +5,8 @@ const config = require("../../config/key");
 const API_HOST = config.ioboardApi; // 기본값 설정
 const API_ENDPOINT = "/deadbolt"; // 상세 경로
 
+const { DeadboltTerminalErrorState } = require("./HealthMqtt");
+
 /**
  * API 서버에 도어 제어 요청을 보냅니다.
  * Python 서버의 스펙: POST /deadbolt, Body: { "state": "OPEN" | "CLOSE" }
@@ -27,6 +29,15 @@ async function callApiToControlDeadbolt(targetState) {
     // API 응답 확인
     const finalState = response.data.state;
     console.log(`[API] Response Received. Final State: ${finalState}`);
+
+    // 데드볼트 작동 불량인 경우 --> 요청한 값에서 변화가 없는 경우 error 처리
+    if (finalState !== targetState) {
+      DeadboltTerminalErrorState("11");
+      throw new Error(
+        `Deadbolt operation failed. target=${targetState}, final=${finalState}`
+      );}
+
+return finalState;
     
     return finalState;
 

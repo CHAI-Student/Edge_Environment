@@ -95,7 +95,7 @@ async function CardTerminalStatusAPI(CatResCodePayment) {
         case "180": return "36";
         case "181": return "37";
         case "182": return "31";
-        case "192":
+        case "192": return "30";
         case "193": return "30";
         case "255": return "38";
       }
@@ -163,6 +163,13 @@ async function CardTerminalStatusAPI(CatResCodePayment) {
 
 let IOBoardRes = null; // 전역 변수로 선언하여 LoadcellStatusAPI에서 사용
 
+let DeadboltErrorState = null;
+
+function DeadboltTerminalErrorState(code) {
+  DeadboltErrorState = code;
+  console.log("[DEADBOLT-HEALTH] set:", code);
+}
+
 async function DeadboltStatusAPI() {
   // deadbolt status check
   let DeadboltState = '10'
@@ -170,12 +177,13 @@ async function DeadboltStatusAPI() {
     console.log(`[IO-BOARD/DEADBOLT] Sending Request to ${config.ioboardApi}`);
     IOBoardRes = await axios.get(`${config.ioboardApi}/health`, { timeout: 5000 });
     console.log(IOBoardRes.data)
-    if (IOBoardRes.data.deadbolt == 'HEALTHY') {
-      DeadboltState = '19'
-      // console.log(`[DEADBOLT] deadbolt is ${IOBoardRes.data.deadbolt}`)
-    } else if (IOBoardRes.data.deadbolt != 'HEALTHY') {
-      DeadboltState = '10'
-      // console.log(`[DEADBOLT] deadbolt is ${IOBoardRes.data.deadbolt}`)
+    if (IOBoardRes.data.door !== 'HEALTHY') {
+      // 3분 이상 문이 열려있는 경우
+      DeadboltState = '12';
+    } else if (IOBoardRes.data.deadbolt == 'HEALTHY') {
+      DeadboltState = '19';
+      // 연결 불량이거나 도어와 데드볼트 상태가 상이할 때
+      DeadboltState = '10';
     }
     return DeadboltState
   } catch (error) {
@@ -343,6 +351,10 @@ async function HealthMqtt() {
       // }
       const CardTerminalStatus = '39'
       const DeadboltStatus = await DeadboltStatusAPI();
+      if (DeadboltErrorState) {
+        DeadboltStatus = DeadboltErrorState;
+        DeadboltErrorState = null; // 1회 전송 후 초기화
+      }
       const LoadcellStatus = await LoadcellStatusAPI();
       const CameraStatus = await CameraStatusAPI();
       const EdgePCStatus = await EdgePCStatusAPI(DeadboltStatus, LoadcellStatus);
@@ -392,4 +404,4 @@ async function HealthMqtt() {
   });
 }
 
-module.exports = { HealthMqtt, CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI, CameraStatusAPI, EdgePCStatusAPI, CardTerminalErrorState };
+module.exports = { HealthMqtt, CardTerminalStatusAPI, DeadboltStatusAPI, LoadcellStatusAPI, CameraStatusAPI, EdgePCStatusAPI, CardTerminalErrorState, DeadboltTerminalErrorState };
