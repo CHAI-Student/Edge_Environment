@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 
-const dummyImg = path.join(__dirname, "../../log/dummyTestImg.png");
+// const dummyImg = path.join(__dirname, "../../log/dummyTestImg.png");
 
 function formatIfDate(d = new Date()) {
     const pad = (n) => String(n).padStart(2, '0');
@@ -40,17 +40,32 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         // const fileName = path.basename(fullPath);
         // const stat = fs.statSync(fullPath);
 
-        // 더미 이미지로 전송
-        if (!fs.existsSync(dummyImg)) {
-            throw new Error(`[PNT] Dummy image not found: ${dummyImg}`);
+        // 영상
+        const camFolderPath = path.join(folderPath, "archival", "cam_0");
+        const files = fs.readdirSync(camFolderPath);
+        const mp4 = files.find(f => f.toLowerCase().endsWith(".mp4"));
+
+        if (!mp4) {
+        throw new Error("No mp4 file found in cam_0 folder");
         }
+
+        const fullPath = path.join(camFolderPath, mp4);
+        const fileName = path.basename(fullPath);
+        const stat = fs.statSync(fullPath);
+
+
+        // 더미 이미지로 전송
+        // if (!fs.existsSync(dummyImg)) {
+        //     throw new Error(`[PNT] Dummy image not found: ${dummyImg}`);
+        // }
+
+        // const fileName = path.basename(dummyImg);
+        // const stat = fs.statSync(dummyImg);
 
         const hasLowConfidence = inferenceResult.products.some(
             p => Number(p.confidence) < 0.2
         );
 
-        const fileName = path.basename(dummyImg);
-        const stat = fs.statSync(dummyImg);
         const productMap = new Map(
             productData.map(p => [String(p.product_idx), p])
         );
@@ -140,11 +155,19 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
                     }),
                     // product_idx: inferenceResult.products.map(p => p.productId).join(","),
                     // product_count: inferenceResult.products.map(p => p.count).join(","),
+                    // 이미지
+                    // payment_file_list: [{
+                    //     file_name: fileName,
+                    //     file_ext: 'png',
+                    //     file_size: stat.size,
+                    // }],
+                    // 영상
                     payment_file_list: [{
                         file_name: fileName,
-                        file_ext: 'png',
+                        file_ext: 'mp4',
                         file_size: stat.size,
                     }],
+
                     // file_name: fileName,
                     // // file_ext: 'mp4',
                     // file_ext: 'png',
@@ -195,15 +218,18 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
                     }),
                     // product_idx: inferenceResult.products.map(p => p.productId).join(","),
                     // product_count: inferenceResult.products.map(p => p.count).join(","),
+                    // 이미지
+                    // payment_file_list: [{
+                    //     file_name: fileName,
+                    //     file_ext: 'png',
+                    //     file_size: stat.size,
+                    // }],
+                    // 영상
                     payment_file_list: [{
                         file_name: fileName,
-                        file_ext: 'png',
+                        file_ext: 'mp4',
                         file_size: stat.size,
                     }],
-                    // file_name: fileName,
-                    // // file_ext: 'mp4',
-                    // file_ext: 'png',
-                    // file_size: stat.size,
                 }
             }
         }
@@ -212,11 +238,17 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         form.append("payload", JSON.stringify(payload), {
            contentType: "application/json"  // 추가
         });
-        form.append("payment_file", fs.createReadStream(dummyImg), {
+        // 이미지
+        // form.append("payment_file", fs.createReadStream(dummyImg), {
+        //     filename: fileName,
+        //     contentType: "image/png",
+        // });
+        // 영상
+        form.append("payment_file", fs.createReadStream(fullPath), {
             filename: fileName,
-            // contentType: "video/mp4",
-            contentType: "image/png",
+            contentType: "video/mp4",
         });
+
 
         const jwtToken = config.jwtToken
         console.log('[EDGE->PNT] REQUEST PAYLOAD', payload)
