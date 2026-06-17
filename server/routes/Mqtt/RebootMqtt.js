@@ -11,6 +11,7 @@ const config = require("../../config/key");
 
 const { DeviceInfo } = require("../RestAPI/DeviceInfo");
 const { ProductList } = require("../RestAPI/ProductList");
+const { TrainingStore } = require("../RestAPI/TrainingStore");
 
 const {
   notifyAiTrainingStore,
@@ -396,6 +397,7 @@ async function runStartupDiagnostics(
  */
 async function notifyDeployCompleteForAllProducts() {
   const products = await ProductList();
+  console.log(`[ProductList in RebootMqtt] products: ${products}`)
 
   if (
     !Array.isArray(products) ||
@@ -432,11 +434,11 @@ async function notifyDeployCompleteForAllProducts() {
     }
 
     const result =
-      await notifyAiTrainingStore({
+      await TrainingStore(
         productIdx,
         productEngName,
-        trainingStatus: "1",
-      });
+        "1",
+      );
 
     results.push({
       productIdx,
