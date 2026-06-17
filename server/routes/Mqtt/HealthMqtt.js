@@ -97,6 +97,7 @@ async function CardTerminalStatusAPI(CatResCodePayment) {
         case "182": return "31";
         case "192": return "30";
         case "193": return "30";
+        case "194": return "30";
         case "255": return "38";
       }
     }
@@ -135,7 +136,8 @@ async function CardTerminalStatusAPI(CatResCodePayment) {
     } else if (CatResCode == "182" || CatStatus == 'ERROR_VAN') { // 카드 단말기 네트워크 이상
       CardTerminalState = '31'
       // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
-    } else if (CatResCode == "192" || CatResCode == "193" || CatStatus == 'ERROR_POS' || CatStatus == 'NETWORK_ERROR') { // 카드 단말기 통신 불량
+    } else if (CatResCode == "192" || CatResCode == "193" || CatStatus == 'ERROR_POS' || CatStatus == 'NETWORK_ERROR' || CatResCode == "194" || CatStatus == "NOCHK_NETWORK") { 
+      // 카드 단말기 통신 불량
       CardTerminalState = '30'
       // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
     } else if (CatResCode == "255" || CatStatus == 'ERROR') { // 기타 오류
