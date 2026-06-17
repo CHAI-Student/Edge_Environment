@@ -182,6 +182,7 @@ async function DeadboltStatusAPI() {
       DeadboltState = '12';
     } else if (IOBoardRes.data.deadbolt == 'HEALTHY') {
       DeadboltState = '19';
+    } else {
       // 연결 불량이거나 도어와 데드볼트 상태가 상이할 때
       DeadboltState = '10';
     }
