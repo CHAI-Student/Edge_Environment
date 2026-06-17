@@ -34,8 +34,8 @@ module.exports = {
     
     // PNT RestAPI 연결
     restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
-    userId: 'chaitest',   
-    // userId: 'chaitest2',   
+    userId: 'chaitest',   // 냉장용
+    // userId: 'chaitest2',   // 냉동용
     userPassword: 'iljin123!',
     get jwtToken() {
         return process.env.JWT_TOKEN;
