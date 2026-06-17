@@ -572,8 +572,8 @@ async function startProcess(token, CardMethod) {
     setProcessing(true);
     try {
       const CameraStatus = await CameraStatusAPI()
-      // const CardTerminalStatus = await CardTerminalStatusAPI()
-      const CardTerminalStatus = '39'
+      const CardTerminalStatus = await CardTerminalStatusAPI()
+      // const CardTerminalStatus = '39'
       const DeadboltStatus = await DeadboltStatusAPI()
       const LoadcellStatus = await LoadcellStatusAPI()
 

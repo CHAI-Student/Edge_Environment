@@ -167,11 +167,6 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
                         file_ext: 'mp4',
                         file_size: stat.size,
                     }],
-
-                    // file_name: fileName,
-                    // // file_ext: 'mp4',
-                    // file_ext: 'png',
-                    // file_size: stat.size,
                 }
             }
         } else {
@@ -216,8 +211,6 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
                             sale_price: Number(master.sale_price),
                         };
                     }),
-                    // product_idx: inferenceResult.products.map(p => p.productId).join(","),
-                    // product_count: inferenceResult.products.map(p => p.count).join(","),
                     // 이미지
                     // payment_file_list: [{
                     //     file_name: fileName,
