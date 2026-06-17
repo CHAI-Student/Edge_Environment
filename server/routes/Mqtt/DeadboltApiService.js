@@ -31,10 +31,11 @@ async function callApiToControlDeadbolt(targetState) {
     console.log(`[API] Response Received. Final State: ${finalState}`);
 
     // 데드볼트 작동 불량인 경우 --> 요청한 값에서 변화가 없는 경우 error 처리
-    if (finalState !== targetState) {
+    const expectedState = targetState === "OPEN" ? "UNLOCK" : "LOCK";
+    if (finalState !== expectedState) {
       DeadboltTerminalErrorState("11");
       throw new Error(
-        `Deadbolt operation failed. target=${targetState}, final=${finalState}`
+        `Deadbolt operation failed. target=${targetState}, final=${expectedState}`
       );}
 
 return finalState;
