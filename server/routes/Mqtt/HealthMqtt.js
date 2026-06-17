@@ -274,7 +274,7 @@ async function CameraStatusAPI() {
 
 async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
   //edgepc status check
-  let edgeStatus = '00';
+  let edgeStatus = '40';
   let ModelRes = null;
   let aiServercheck = null;
 
@@ -351,7 +351,7 @@ async function HealthMqtt() {
         CardErrorState = null; // 여기서 1회 전송 후 초기화
       }
       // const CardTerminalStatus = '39'
-      const DeadboltStatus = await DeadboltStatusAPI();
+      let DeadboltStatus = await DeadboltStatusAPI();
       if (DeadboltErrorState) {
         DeadboltStatus = DeadboltErrorState;
         DeadboltErrorState = null; // 1회 전송 후 초기화

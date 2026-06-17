@@ -572,9 +572,9 @@ async function startProcess(token, CardMethod) {
     setProcessing(true);
     try {
       const CameraStatus = await CameraStatusAPI()
-      const CardTerminalStatus = await CardTerminalStatusAPI()
+      let CardTerminalStatus = await CardTerminalStatusAPI()
       // const CardTerminalStatus = '39'
-      const DeadboltStatus = await DeadboltStatusAPI()
+      let DeadboltStatus = await DeadboltStatusAPI()
       const LoadcellStatus = await LoadcellStatusAPI()
 
       if (CardTerminalStatus == '39' && DeadboltStatus == '19' && LoadcellStatus == '29' && CameraStatus == '09') {
@@ -586,6 +586,7 @@ async function startProcess(token, CardMethod) {
           }
       } else {
           console.error('[PAYMENT] Health status is bad. Cannot run.');
+          let samsungpayToken = null;
           if (samsungpayToken || token) {
             await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/cancel`,{
                 amount: preAmount,
