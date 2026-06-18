@@ -848,14 +848,14 @@ async function Payments(token, CardMethod) {
                 // }
               );
             } catch (error) {
-              const pubCode = '1'
+              const pubCode = 'payment error'
               console.log('samsung-pay error::::', error)
 
               await sendCardErrorToPNT(
                 pubCode,
                 token,
                 CardMethod,
-                "2"
+                "1"
               );
 
               return;
