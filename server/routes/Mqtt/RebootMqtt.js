@@ -49,9 +49,12 @@ const minioClient = new Minio.Client({
   secretKey: config.minioSecretKey,
 });
 
-/**
- * 파일 존재 여부 확인
- */
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 async function fileExists(filePath) {
   try {
     await fs.stat(filePath);
@@ -59,6 +62,97 @@ async function fileExists(filePath) {
   } catch {
     return false;
   }
+}
+
+async function reloadJwtTokenFromEnvFile() {
+  try {
+    if (!(await fileExists(ENV_FILE_PATH))) {
+      return null;
+    }
+
+    const envContent = await fs.readFile(
+      ENV_FILE_PATH,
+      "utf-8"
+    );
+
+    const match = envContent.match(
+      /^JWT_TOKEN=(.*)$/m
+    );
+
+    if (!match) {
+      return null;
+    }
+
+    const token = String(match[1] || "")
+      .trim()
+      .replace(/^["']|["']$/g, "");
+
+    if (token.length > 10) {
+      process.env.JWT_TOKEN = token;
+      return token;
+    }
+
+    return null;
+  } catch (error) {
+    console.warn(
+      "[JWT] .env reload failed:",
+      error.message
+    );
+
+    return null;
+  }
+}
+
+async function waitForJwtToken({
+  timeoutMs = 120000,
+  intervalMs = 3000,
+} = {}) {
+  const startedAt = Date.now();
+  let attempt = 0;
+
+  while (
+    Date.now() - startedAt < timeoutMs
+  ) {
+    attempt += 1;
+    
+    let token = process.env.JWT_TOKEN;
+
+    if (
+      !token ||
+      typeof token !== "string" ||
+      token.length <= 10
+    ) {
+      token =
+        await reloadJwtTokenFromEnvFile();
+    }
+
+    if (
+      token &&
+      typeof token === "string" &&
+      token.length > 10
+    ) {
+      console.log(
+        `[JWT] Access Token 확인 완료. ` +
+        `attempt=${attempt}`
+      );
+
+      return true;
+    }
+
+    console.log(
+      `[JWT] Access Token 발급 대기 중... ` +
+      `attempt=${attempt}`
+    );
+
+    await sleep(intervalMs);
+  }
+
+  console.error(
+    `[JWT] Access Token 대기 시간 초과: ` +
+    `${timeoutMs}ms`
+  );
+
+  return false;
 }
 
 /**
@@ -370,12 +464,24 @@ async function runStartupDiagnostics(
     `(${serviceResult.msg})`
   );
 
-  const jwtOk = checkJwtToken();
+  const jwtOk =
+    await waitForJwtToken({
+      timeoutMs: 120000,
+      intervalMs: 3000,
+    });
 
   console.log(
     `[Diagnostic] 2. JWT Access Token: ` +
     `${jwtOk ? "OK" : "FAIL"}`
   );
+
+  if (!jwtOk) {
+    console.log(
+      "==========================================\n"
+    );
+
+    return false;
+  }
 
   const mqttOk =
     await checkMqttPubSub(client, deviceIdx);
