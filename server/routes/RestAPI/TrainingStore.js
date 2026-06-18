@@ -33,6 +33,8 @@ async function TrainingStore(productMap, trainingStatus) {
     */
     const productList = Array.from(productMap.values()).map(
             (product) => ({
+                division_idx: config.divisionIdx,
+                device_idx: config.deviceIdx,
                 product_idx: String(product.product_idx),
                 product_eng_name:product.product_eng_name,
                 training_status:normalizedTrainingStatus,
@@ -60,8 +62,6 @@ async function TrainingStore(productMap, trainingStatus) {
                 IF_DATE : formattedDate
             },
             DATA: {
-                division_idx: config.divisionIdx,
-                device_idx: config.deviceIdx,
                 product_list: productList,
                 // product_list: [{
                 //     product_idx: String(productIdx),
