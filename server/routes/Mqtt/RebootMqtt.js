@@ -498,32 +498,56 @@ async function runStartupDiagnostics(
   return serviceResult.ok && jwtOk && mqttOk;
 }
 
-/**
- * IF07 배포 완료 상태 전송
- */
-async function notifyDeployCompleteForAllProducts() {
-  const products = await ProductList();
-  console.log(`[ProductList in RebootMqtt] products: ${products}`)
+async function notifyDeployCompleteForAllProducts(
+  divisionIdx,
+  deviceIdx
+) {
+  /*
+   * IF11 상품 목록 조회
+   */
+  const productResponse = await ProductList({
+    division_idx: divisionIdx,
+    device_idx: deviceIdx,
+  });
+
+  console.log(
+    "[ProductList in RebootMqtt] response:",
+    JSON.stringify(productResponse, null, 2)
+  );
+
+  /*
+   * ProductList 응답 구조:
+   *
+   * {
+   *   DATA: {
+   *     product_list: [...]
+   *   }
+   * }
+   */
+  const products =
+    productResponse?.DATA?.product_list;
 
   if (
     !Array.isArray(products) ||
     products.length === 0
   ) {
     throw new Error(
-      "IF11 product_list is empty"
+      "IF11 DATA.product_list is empty"
     );
   }
+
+  console.log(
+    `[IF07] 전송 대상 상품 수: ${products.length}`
+  );
 
   const results = [];
 
   for (const product of products) {
     const productIdx =
-      product.product_idx ??
-      product.productIdx;
+      product.product_idx;
 
     const productEngName =
-      product.product_eng_name ??
-      product.productEngName;
+      product.product_eng_name;
 
     if (
       productIdx === undefined ||
@@ -531,20 +555,39 @@ async function notifyDeployCompleteForAllProducts() {
       !productEngName
     ) {
       console.warn(
-        "[IF07] skip product: " +
-        "missing product_idx/product_eng_name",
-        product
+        "[IF07] 상품 정보 누락으로 전송 제외:",
+        {
+          product_idx: productIdx,
+          product_eng_name: productEngName,
+        }
       );
 
       continue;
     }
 
-    const result =
-      await TrainingStore(
+    console.log(
+      "[IF07] 배포 완료 전송 시작:",
+      {
         productIdx,
         productEngName,
-        "1",
-      );
+        trainingStatus: "1",
+      }
+    );
+
+    const result = await TrainingStore(
+      productIdx,
+      productEngName,
+      "1"
+    );
+
+    console.log(
+      "[IF07] 배포 완료 전송 결과:",
+      {
+        productIdx,
+        productEngName,
+        result,
+      }
+    );
 
     results.push({
       productIdx,
@@ -561,6 +604,7 @@ async function notifyDeployCompleteForAllProducts() {
 
   return results;
 }
+
 
 /**
  * .env MODEL_VERSION 변경
@@ -1808,7 +1852,10 @@ async function RebootMqtt() {
 
     try {
       const results =
-        await notifyDeployCompleteForAllProducts();
+        await notifyDeployCompleteForAllProducts(
+          divisionIdx,
+          deviceIdx
+        );
 
       const hasFailure =
         results.some((item) => {
