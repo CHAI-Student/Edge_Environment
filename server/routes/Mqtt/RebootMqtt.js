@@ -524,8 +524,7 @@ async function notifyDeployCompleteForAllProducts(
    *   }
    * }
    */
-  const products =
-    productResponse?.DATA?.product_list;
+  const products = productResponse.DATA.product_list;
 
   if (
     !Array.isArray(products) ||
@@ -536,82 +535,80 @@ async function notifyDeployCompleteForAllProducts(
     );
   }
 
-  console.log(
-    `[IF07] 전송 대상 상품 수: ${products.length}`
+  /*
+  * product_idx를 Key로 하는 Map 생성
+  *
+  * Key   : String(product_idx)
+  * Value : 원본 상품 정보
+  */
+  const productMap = new Map(
+    products
+      .filter((product) => {
+        const productIdx = product?.product_idx;
+        const productEngName = product?.product_eng_name;
+
+        const isValid =
+          productIdx !== undefined &&
+          productIdx !== null &&
+          Boolean(productEngName);
+
+        if (!isValid) {
+          console.warn(
+            "[IF07] 상품 정보 누락으로 제외:",
+            {
+              product_idx: productIdx,
+              product_eng_name: productEngName,
+            }
+          );
+        }
+
+        return isValid;
+      })
+      .map((product) => [
+        String(product.product_idx),
+        {
+          product_idx: String(product.product_idx),
+          product_eng_name: product.product_eng_name,
+        },
+      ])
   );
 
-  const results = [];
-
-  for (const product of products) {
-    const productIdx =
-      product.product_idx;
-
-    const productEngName =
-      product.product_eng_name;
-
-    if (
-      productIdx === undefined ||
-      productIdx === null ||
-      !productEngName
-    ) {
-      console.warn(
-        "[IF07] 상품 정보 누락으로 전송 제외:",
-        {
-          product_idx: productIdx,
-          product_eng_name: productEngName,
-        }
-      );
-
-      continue;
-    }
-
-    console.log(
-      "[IF07] 배포 완료 전송 시작:",
-      {
-        productIdx,
-        productEngName,
-        trainingStatus: "1",
-      }
-    );
-
-    const result = await TrainingStore(
-      productIdx,
-      productEngName,
-      "1"
-    );
-
-    console.log(
-      "[IF07] 배포 완료 전송 결과:",
-      {
-        productIdx,
-        productEngName,
-        result,
-      }
-    );
-
-    results.push({
-      productIdx,
-      productEngName,
-      result,
-    });
-  }
-
-  if (results.length === 0) {
+  if (productMap.size === 0) {
     throw new Error(
       "IF07 전송 가능한 상품이 없습니다."
     );
   }
 
-  return results;
-}
+  console.log(
+    `[IF07] 전송 대상 상품 수: ${productMap.size}`
+  );
 
+  console.log(
+    "[IF07] 전송 대상 상품:",
+    Array.from(productMap.values())
+  );
+
+  /*
+  * 상품 전체를 한 번의 IF07 요청으로 전달
+  */
+  const result = await TrainingStore(
+    productMap,
+    "1"
+  );
+
+  console.log(
+    "[IF07] 배포 완료 전송 결과:",
+    result
+  );
+
+  return result;
+}
 
 /**
  * .env MODEL_VERSION 변경
  */
 async function updateEnvModelVersion(newVersion) {
-  const normalizedVersion =
-    String(newVersion || "").trim();
+  const normalizedVersion = String(newVersion || "").trim();
 
   if (!normalizedVersion) {
     throw new Error(

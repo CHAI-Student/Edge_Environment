@@ -1,6 +1,7 @@
 const axios = require("axios");
 const config = require("../../config/dev");
 const { v4: uuidv4 } = require("uuid");
+const { divisionIdx } = require("../../config/prod");
 
 let currentTrainingStatus = null;
 
@@ -17,16 +18,26 @@ const external = axios.create({
 /**
  * [IF_07] 학습 진행 상태 전달
  */
-async function TrainingStore(productIdx, product_eng_name, training_status) {
+async function TrainingStore(productMap, trainingStatus) {
     console.log(
         "MAKE TRAINING STORE FOR IF07::::",
-        productIdx,
-        product_eng_name,
-        training_status
+        productMap, trainingStatus
     );
     // console.log(`MAKE TRAINING STORE FOR IF07:::: ${productIdx}, ${product_eng_name}, ${training_status}`)
 
-    currentTrainingStatus = String(training_status);
+    const normalizedTrainingStatus = String(trainingStatus);
+
+    /*
+    * Map은 JSON으로 직접 전송할 수 없으므로
+    * product_list 배열로 변환합니다.
+    */
+    const productList = Array.from(productMap.values()).map(
+            (product) => ({
+                product_idx: String(product.product_idx),
+                product_eng_name:product.product_eng_name,
+                training_status:normalizedTrainingStatus,
+            })
+        );
 
     try {
         const token = process.env.JWT_TOKEN;
@@ -48,23 +59,15 @@ async function TrainingStore(productIdx, product_eng_name, training_status) {
                 IF_HOST : "CRKPNTCHAI",
                 IF_DATE : formattedDate
             },
-            // DATA: {
-            //     division_idx: config.divisionIdx,
-            //     device_idx: config.deviceIdx,
-            //     product_idx: productIdx,
-            //     product_eng_name: product_eng_name,
-            //     training_status: training_status,
-            //     result_cd: 'S',
-            //     result_msg: `${product_eng_name} training data update is successful`
-            // },
             DATA: {
-                product_list: [{
-                    division_idx: config.divisionIdx,
-                    device_idx: config.deviceIdx,
-                    product_idx: String(productIdx),
-                    product_eng_name: product_eng_name,
-                    training_status: String(training_status)
-                }],
+                division_idx: config.divisionIdx,
+                device_idx: config.deviceIdx,
+                product_list: productList,
+                // product_list: [{
+                //     product_idx: String(productIdx),
+                //     product_eng_name: product_eng_name,
+                //     training_status: String(training_status)
+                // }],
             }
         };
         
