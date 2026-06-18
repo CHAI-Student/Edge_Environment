@@ -591,7 +591,7 @@ async function startProcess(token, CardMethod) {
             if (samsungpayToken || token) {
               await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/cancel`,{
                   amount: preAmount,
-                  original_authorization_date: preAuthDate,
+                  original_authorization_date: preAuthDate.substring(0, 6),
                   original_authorization_number: preAuthNum,
                   vankey: samsungpayToken
               }).then((response) => {
@@ -791,7 +791,7 @@ async function Payments(token, CardMethod) {
           if (CardMethod === "S") {
             await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/cancel`,{
                 amount: preAmount,
-                original_authorization_date: preAuthDate,
+                original_authorization_date: preAuthDate.substring(0, 6),
                 original_authorization_number: preAuthNum,
                 vankey: samsungpayToken
             }).then((response) => {
@@ -862,7 +862,7 @@ async function Payments(token, CardMethod) {
             }
             await axios.post(`${config.cardTerminalApi}/payment/samsung-pay/cancel`,{
                 amount: preAmount,
-                original_authorization_date: preAuthDate,
+                original_authorization_date: preAuthDate.substring(0, 6),
                 original_authorization_number: preAuthNum,
                 vankey: samsungpayToken
             }).then((response) => {

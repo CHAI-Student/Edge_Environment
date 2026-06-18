@@ -116,7 +116,7 @@ function Repayment() {
         cancelPayload = {
           // amount: String(reqData.approve_price),
           amount: '5',
-          original_authorization_date: reqData.approve_at,
+          original_authorization_date: reqData.approve_at.substring(0, 6),
           original_authorization_number: reqData.approve_no,
           vankey: reqData.token_id,
         };
@@ -125,7 +125,7 @@ function Repayment() {
         cancelPayload = {
           // amount: String(reqData.approve_price),
           amount: '5',
-          original_authorization_date: reqData.approve_at,
+          original_authorization_date: reqData.approve_at.substring(0, 6),
           original_authorization_number: reqData.approve_no,
           vankey_hash: reqData.token_id,
         };
@@ -301,7 +301,7 @@ function Repayment() {
       //승인 후 취소 방식 채택
       if (reqData.payment_mode === "CARD") {
         const oldToken = reqData.org_token_id || reqData.token_id;
-        const oldApproveAt = reqData.approve_at;
+        const oldApproveAt = reqData.approve_at.substring(0, 6);
         // 나중에 reqData.org_approve_at 로 바꾸기
         const oldApprovePrice = reqData.org_approve_price || reqData.approve_price;
         const oldApproveNo = reqData.org_approve_no || reqData.approve_no;
@@ -344,7 +344,7 @@ function Repayment() {
             {
               // amount: String(oldApprovePrice),
               amount: '5',
-              original_authorization_date: oldApproveAt,
+              original_authorization_date: oldApproveAt.substring(0, 6),
               original_authorization_number: oldApproveNo,
               vankey_hash: oldToken,
             }
