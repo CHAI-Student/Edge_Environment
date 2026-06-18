@@ -97,7 +97,7 @@ async function CardTerminalStatusAPI(CatResCodePayment) {
         case "182": return "31";
         case "192": return "30";
         case "193": return "30";
-        case "194": return "30";
+        case "194": return "39";
         case "255": return "38";
       }
     }
@@ -136,7 +136,7 @@ async function CardTerminalStatusAPI(CatResCodePayment) {
     } else if (CatResCode == "182" || CatStatus == 'ERROR_VAN') { // 카드 단말기 네트워크 이상
       CardTerminalState = '31'
       // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
-    } else if (CatResCode == "192" || CatResCode == "193" || CatStatus == 'ERROR_POS' || CatStatus == 'NETWORK_ERROR' || CatResCode == "194" || CatStatus == "NOCHK_NETWORK") { 
+    } else if (CatResCode == "192" || CatResCode == "193" || CatStatus == 'ERROR_POS' || CatStatus == 'NETWORK_ERROR') { 
       // 카드 단말기 통신 불량
       CardTerminalState = '30'
       // console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
@@ -146,7 +146,10 @@ async function CardTerminalStatusAPI(CatResCodePayment) {
     } else if (response.data.status == 504) { // timeout error
       CardTerminalState = '30'
       console.log(`[CARD-DEVICE]: ${CardTerminalState} / ${CatStatus}`);
-    } return CardTerminalState
+    } else if (CatResCode == "194" || CatStatus == "NOCHK_NETWORK") {
+      // ping 설정 안 한 거 --> 에러 아님
+      CardTerminalState = '39'
+    }return CardTerminalState
   } catch (error) {
     // 카드 단말기에서 return이 없는 경우 -- timeout
     if (error.code === "ECONNREFUSED" || error.code === 'EHOSTUNREACH') {
