@@ -105,9 +105,9 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
         String(now.getFullYear()).slice(2) +
         String(now.getMonth() + 1).padStart(2, "0") +
         String(now.getDate()).padStart(2, "0");
-        // String(now.getHours()).padStart(2, "0") +
-        // String(now.getMinutes()).padStart(2, "0") +
-        // String(now.getSeconds()).padStart(2, "0");
+        String(now.getHours()).padStart(2, "0") +
+        String(now.getMinutes()).padStart(2, "0") +
+        String(now.getSeconds()).padStart(2, "0");
         console.log(rfidTime);
 
         let payload = {}
@@ -183,8 +183,8 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
                     division_idx: config.divisionIdx,
                     token_id: CardMethod === 'N' ? token : paymentResponse.vankey,
                     // token_id: token || paymentResponse.vankey_hash || paymentResponse.vankey,
-                    payment_at: formattedDate,
-                    approve_at: paymentResponse.authorization_date,
+                    payment_at: formattedDate, // 픽앤탁으로 전송하는 시간
+                    approve_at: paymentResponse.authorization_date, // 카드결제가 이루어진 시간
                     approve_type: CardMethod === 'R' ? '2' : (CardMethod === 'S' ? '1' : '0'), // 0=일반카드, 1=삼성페이, 2=RFID
                     approve_result: (paymentResponse === "Y")? 0 : 1,
                     approve_price: inferenceResult.totalPrice,
