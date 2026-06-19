@@ -14,11 +14,14 @@ async function notifyTrainingStore({
   //   training_status: trainingStatus,
   // });
 
-  const res = await TrainingStore(
-    productIdx,
-    productEngName,
-    trainingStatus
-  );
+  const productMap = new Map();
+
+  productMap.set(String(productIdx), {
+    product_idx: productIdx,
+    product_eng_name: productEngName,
+  });
+
+  const res = await TrainingStore(productMap, trainingStatus);
 
   console.log('CHECK IF07 res::::', res)
 

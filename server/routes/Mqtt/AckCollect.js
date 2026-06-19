@@ -1496,14 +1496,24 @@ async function handleEndCollect(reqData, reqSysid) {
   /**
    * AI 서버 notify
    */
-  const notifyResult =
-    await notifyAiTrainingStore({
+  // const notifyResult =
+  //   await notifyAiTrainingStore({
+  //     productIdx: product_idx,
+  //     productEngName: product_eng_name,
+  //     trainingStatus: "2",
+  //   });
+
+  try {
+  const notifyResult = await notifyAiTrainingStore({
       productIdx: product_idx,
       productEngName: product_eng_name,
       trainingStatus: "2",
     });
 
-  console.log('[AckCollect] sending to PNT:', notifyResult)
+    console.log("[AckCollect] sending to PNT:", notifyResult);
+  } catch (err) {
+    console.error("[IF07] notify failed:", err.message);
+  }
 
   // publishAck(
   //   makeAckPayload({
