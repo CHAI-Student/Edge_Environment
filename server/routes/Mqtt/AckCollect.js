@@ -163,9 +163,9 @@ function makeAckPayload({
     },
 
     DATA: {
-      device_idx: deviceIdx,
+      device_idx: device_idx,
       division_idx: division_idx,
-      product_idx: product_idx,
+      product_idx: productIdx,
       collect_state: collectState,
       product_eng_name: productEngName,
       category_idx: categoryIdx,
