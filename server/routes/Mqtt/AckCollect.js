@@ -1543,7 +1543,7 @@ async function handleCollectMessage(message) {
       product_idx,
       collect_state,
       product_eng_name,
-      categoryIdx,
+      category_idx,
       is_new,
       product_loadcell_weight,
     } = reqData;
