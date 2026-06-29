@@ -20,8 +20,8 @@ module.exports = {
     // divisionIdx: 'DI17647205538493077',
     // 테스트용
     // divisionIdx: 'DI17790813642907755', // 냉장 학습용 (여의도점)
-    divisionIdx: 'DI17798460900133031', // 냉장 통테용 (부산점)
-    // divisionIdx: 'DI17790813642907755', // 냉동 테스트용
+    // divisionIdx: 'DI17798460900133031', // 냉장 통테용 (부산점)
+    divisionIdx: 'DI17790813642907755', // 냉동 테스트용
     
     
     // 냉장 장비 고유번호
@@ -29,13 +29,13 @@ module.exports = {
     // deviceIdx: 'DE17683631997086480',
     // 테스트용
     // deviceIdx: 'DE17790815108130388', // 냉장 학습용
-    deviceIdx: 'DE17798461293792881', // 냉장 통테용
-    // deviceIdx: 'DE17815818605453073', // 냉동 테스트용 
+    // deviceIdx: 'DE17798461293792881', // 냉장 통테용
+    deviceIdx: 'DE17815818605453073', // 냉동 테스트용 
     
     // PNT RestAPI 연결
     restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
-    userId: 'chaitest',   // 냉장용
-    // userId: 'chaitest2',   // 냉동용
+    // userId: 'chaitest',   // 냉장용
+    userId: 'chaitest2',   // 냉동용
     userPassword: 'iljin123!',
     get jwtToken() {
         return process.env.JWT_TOKEN;
