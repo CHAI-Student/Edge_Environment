@@ -309,7 +309,7 @@ async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
     } else if (LoadcellState != '29' && DeadboltState != '19') {
       edgeStatus = '41'
       // console.log('[EDGEPC] IO Board unconnected')
-    } else if (aiServercheck.data.ok == false) {
+    } else if (AiServerState == false) {
       edgeStatus = '43'
     }
     return edgeStatus
