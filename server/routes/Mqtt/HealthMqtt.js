@@ -291,6 +291,8 @@ async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
     aiServercheck = await axios.get(`${config.aiServerApi}/health`, { timeout: 5000 });
     console.log('[AI SERVER] AIServerCheck:', aiServercheck.data);
     const AiServerState = aiServercheck.data.ok
+    console.log('[AI SERVER]AiServerState = ', aiServercheck.data.ok)
+    console.log('type =', typeof aiServercheck.data.ok);
 
     // 2. 모델 서버 상태 확인
     console.log(`[MODEL-EDGEPC] Sending Request to ${config.modelApi}`);
