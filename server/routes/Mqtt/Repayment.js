@@ -92,6 +92,7 @@ function Repayment() {
             division_idx: payload.division_idx,
             payment_idx: payload.payment_idx,
             token_id: payload.token_id,
+            payment_mode: payload.payment_mode,
             request_type: "CANCEL",
             result_cd: "F",
             result_msg: "[결제 취소] 현재 카드단말기가 이용중입니다. 잠시 후 다시 시도해주세요",
@@ -147,6 +148,7 @@ function Repayment() {
             division_idx: reqData.division_idx,
             payment_idx: reqData.payment_idx,
             token_id: reqData.token_id,
+            payment_mode: reqData.payment_mode,
             request_type: "CANCEL",
             result_cd: "F",
             result_msg: "[결제 취소] Unknown Payment Method (token_id prefix)",
@@ -180,6 +182,7 @@ function Repayment() {
             division_idx: reqData.division_idx,
             payment_idx: reqData.payment_idx,
             token_id: reqData.token_id,
+            payment_mode: reqData.payment_mode,
             request_type: "CANCEL",
             result_cd: "F",
             result_msg: `[결제 취소] 취소 요청 실패: ${err.message}`,
@@ -218,6 +221,7 @@ function Repayment() {
             request_type: "CANCEL",
             payment_at: formatIfDate(),
             approve_at: reqData.approve_at,
+            payment_mode: reqData.payment_mode,
             approve_price: parseInt(0),
             approve_no: reqData.approve_no,
             org_approve_at: "null",
@@ -249,6 +253,7 @@ function Repayment() {
             division_idx: reqData.division_idx,
             payment_idx: reqData.payment_idx,
             token_id: reqData.token_id,
+            payment_mode: reqData.payment_mode,
             request_type: "CANCEL",
             result_cd: "F",
             result_msg: "[결제 취소] 취소 실패(단말 응답 오류)",
@@ -283,6 +288,7 @@ function Repayment() {
             division_idx: reqData.division_idx,
             payment_idx: reqData.payment_idx,
             token_id: reqData.org_token_id,
+            payment_mode: reqData.payment_mode,
             request_type: "REPAY",
             result_cd: "F",
             result_msg: "[재결제] 현재 카드단말기가 이용중입니다. 잠시 후 다시 시도해주세요",
@@ -300,11 +306,10 @@ function Repayment() {
       // const cardMethod = getCardMethod(reqData.token_id);
       //승인 후 취소 방식 채택
       if (reqData.payment_mode === "CARD") {
-        const oldToken = reqData.org_token_id || reqData.token_id;
+        const oldToken = reqData.org_token_id
         const oldApproveAt = reqData.approve_at.substring(0, 6);
-        // 나중에 reqData.org_approve_at 로 바꾸기
-        const oldApprovePrice = reqData.org_approve_price || reqData.approve_price;
-        const oldApproveNo = reqData.org_approve_no || reqData.approve_no;
+        const oldApprovePrice = reqData.org_approve_price
+        const oldApproveNo = reqData.org_approve_no
 
         const newApprovePrice = reqData.approve_price;
 
@@ -344,7 +349,7 @@ function Repayment() {
             {
               // amount: String(oldApprovePrice),
               amount: '5',
-              original_authorization_date: oldApproveAt.substring(0, 6),
+              original_authorization_date: oldApproveAt,
               original_authorization_number: oldApproveNo,
               vankey_hash: oldToken,
             }
@@ -375,6 +380,7 @@ function Repayment() {
               org_token_id: oldToken,
               payment_at: paymentAt,
               request_type: "REPAY",
+              payment_mode: reqData.payment_mode,
               approve_at: newApproveAt,
               approve_price: parseInt(newApprovePrice),
               approve_no: newApproveNo,
@@ -409,6 +415,7 @@ function Repayment() {
               org_token_id: oldToken,
               payment_at: null,
               request_type: "REPAY",
+              payment_mode: reqData.payment_mode,
               approve_at: null,
               approve_price: null,
               approve_no: null,
