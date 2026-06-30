@@ -321,7 +321,7 @@ async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
     } else if (LoadcellState != '29' && DeadboltState != '19') {
       edgeStatus = '41'
       // console.log('[EDGEPC] IO Board unconnected')
-    } else if (AiServerState == false) {
+    } else if (AiServerState == false || !modelStatus) {
       edgeStatus = '43'
     }
     return edgeStatus
@@ -384,7 +384,7 @@ async function HealthMqtt() {
       const EdgePCStatus = await EdgePCStatusAPI(DeadboltStatus, LoadcellStatus);
 
       // 센서 에러나면 20초에 한번씩 소리 나게
-      if (CardTerminalStatus == '30' || LoadcellStatus == '20' || CameraStatus == '00') {
+      if (CardTerminalStatus == '30' || LoadcellStatus == '20' || CameraStatus == '00' || EdgePCStatus == '43') {
         if (!sensorErrorVoiceInterval) {
           playSensorErrorVoice();
           sensorErrorVoiceInterval = setInterval(() => {
