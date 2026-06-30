@@ -301,6 +301,16 @@ async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
 
     const DiskStatus = await DiskStatusAPI();
 
+    console.log('[CHECK]', {
+      DiskStatus,
+      LoadcellState,
+      DeadboltState,
+      modelStatus: ModelRes?.data?.status,
+      modelStatusType: typeof ModelRes?.data?.status,
+      AiServerState,
+      AiServerStateType: typeof AiServerState,
+    });
+
     // 3. 상태 판단
     if (DiskStatus == "40") {
       edgeStatus = "40";
@@ -320,6 +330,12 @@ async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
     // 예외 처리
     if (error.code === "ECONNREFUSED") {
       edgeStatus = "43"
+        console.error('[EDGEPC CATCH]', {
+          code: error.code,
+          message: error.message,
+          status: error.response?.status,
+          data: error.response?.data,
+        });
       // console.log(`[EDGEPC] Connect ECONNREFUSED: ${edgeStatus}`);
     } else if (error.response) {
       // 서버가 4xx, 5xx 에러를 보낸 경우
