@@ -98,10 +98,18 @@ async function sendCardErrorToPNT(errorCode, token, CardMethod, state = "1") {
         }),
         provider: "chai",
         state, 
+        product_list: {},
+        payment_file_list: [],
         result_cd: 'F',
         result_msg: 'Failed in Card Terminal'
       }
     };
+
+    // 3) FormData 구성 (payload + paymentFile)
+    const form = new FormData();
+    form.append("payload", JSON.stringify(payload), {
+        contentType: "application/json"  // 추가
+    });
 
     const jwtToken = config.jwtToken;
 
@@ -112,15 +120,19 @@ async function sendCardErrorToPNT(errorCode, token, CardMethod, state = "1") {
       payload,
       {
         headers: {
+          ...form.getHeaders(),
           Authorization: `Bearer ${jwtToken}`,
-          "Content-Type": "application/json",
+          // "Content-Type": "application/json",
         },
         timeout: 30000,
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
       }
     );
-
-    console.log("[PNT] Card error sent:", response.data);
-    return true;
+    if (response.status === 200) {
+      console.log("[PNT] Card error sent:", response.data);
+      return true;
+    }
   } catch (err) {
     console.error("[PNT] Card error send failed:", err.response?.data || err.message);
     return false;
@@ -274,13 +286,17 @@ async function modelPooling(productData, opts = {}) {
           const res = await axios.post(`${config.modelApi}/api/judge/multi-zone`, productData, { timeout: 3000 });
           
           if (res.data.status === 400) {
-              throw new Error("400 Bad Request");
+              // throw new Error("400 Bad Request");
+              console.log("400 Bad Request")
+              return;
           }
           return true; // 통과
       } catch (error) {
           // 400 에러면 명확하게 에러 던짐
           if (error.response && error.response.status === 400) {
-              throw new Error("BLOCK_400");
+              // throw new Error("BLOCK_400");
+              console.log("400 Bad Request")
+              return;
           }
           // 통신 에러 등은 일단 경고만 하고 통과시킬지, 막을지 정책 결정 (여기선 false 리턴)
           console.warn("[Validation] Network Error (Ignored):", error.message);
@@ -290,7 +306,11 @@ async function modelPooling(productData, opts = {}) {
 
   // [모드 2] 반복 추론 모드 (기존 로직)
   while (true) {
-    if (Date.now() - started > timeoutMs) throw new Error("Model inference timeout");
+    // if (Date.now() - started > timeoutMs) throw new Error("Model inference timeout");
+    if (Date.now() - started > timeoutMs) {
+      console.warn("[Model] timeout. stop modelPooling only");
+      return;
+    }
 
     try {
       const res = await axios.post(`${config.modelApi}/api/judge/multi-zone`, productData, { timeout: 30_000 });
@@ -302,7 +322,9 @@ async function modelPooling(productData, opts = {}) {
       }
       // 반복 중 400이 뜨면 중단
       if (data.status === 400) { 
-           throw new Error("Model rejected request (Status 400)");
+          // throw new Error("Model rejected request (Status 400)");
+          console.log("Model rejected request (Status 400)")
+          return;
       }
     } catch (e) {
       console.error("[Model] Request failed (Network/System):", e?.message || e);
@@ -848,7 +870,7 @@ async function Payments(token, CardMethod) {
                 // }
               );
             } catch (error) {
-              const pubCode = 'payment error'
+              const pubCode = 1
               console.log('samsung-pay error::::', error)
 
               await sendCardErrorToPNT(
@@ -888,7 +910,7 @@ async function Payments(token, CardMethod) {
                 }
               );
             } catch (error) {
-              const pubCode = '1';
+              const pubCode = 1;
 
               await sendCardErrorToPNT(
                 pubCode,
