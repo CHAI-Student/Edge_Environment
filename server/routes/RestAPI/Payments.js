@@ -236,6 +236,42 @@ function MakeCameraFolder() {
   return { folderName, folderPath };
 }
 
+/**
+ * 엣지 워터마크 (CRK-model-HG issue #8): 문 닫힘 시점에 이 세션에서 생성된
+ * 존별 녹화 디렉토리 수를 센다 — CLOSE payload의 expected_triggers로 보내면
+ * 모델 서버가 "그 수만큼 /trigger가 도착할 때까지" 확정을 보류한다.
+ * (카메라 AVI 업로드가 CLOSE보다 늦어 0원 확정 + event rejected로 매출이
+ * 누락되던 레이스의 인과적 해결 — 모델 쪽 시간 유예 3s 휴리스틱을 대체)
+ *
+ * 디렉토리 계약: <folderPath>/inference/zone_<N>/<timestamp>/{top,side}.avi
+ * 녹화 시작 시점에 <timestamp> 디렉토리가 생기므로, 문이 닫힌 순간 존재하는
+ * 디렉토리 수 = 이 세션의 트리거 총수 (아직 파일을 쓰는 중이어도 포함해야 함
+ * — 그 트리거가 곧 도착한다는 것이 워터마크의 존재 이유).
+ *
+ * @param {string} folderPath 이 세션의 녹화 루트 (MakeCameraFolder 산출)
+ * @returns {Object|null} {"4": 2, "5": 1} 형태. 녹화가 없거나 읽기 실패면
+ *   null — 필드를 생략하면 모델이 시간 유예(MODEL__CLOSE__GRACE_S)로 폴백.
+ */
+function countZoneRecordings(folderPath) {
+  try {
+    const inferenceDir = path.join(folderPath, "inference");
+    const counts = {};
+    for (const entry of fs.readdirSync(inferenceDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const m = /^zone_(\d+)$/.exec(entry.name);
+      if (!m) continue;
+      const recordings = fs
+        .readdirSync(path.join(inferenceDir, entry.name), { withFileTypes: true })
+        .filter((e) => e.isDirectory()).length;
+      if (recordings > 0) counts[m[1]] = recordings;
+    }
+    return Object.keys(counts).length > 0 ? counts : null;
+  } catch (e) {
+    // inference 디렉토리 없음(트리거 0건) 또는 읽기 실패 — 워터마크 생략(모델 유예 폴백)
+    return null;
+  }
+}
+
 
 // let stopPolling = true;
 
@@ -750,6 +786,16 @@ async function Payments(token, CardMethod) {
       // console.log('ddddddddddd', closeEventData)
       const state = closeEventData.state;
       if (state && closedStates.includes(state)) {
+          // 엣지 워터마크 (CRK-model-HG issue #8): 문 닫힌 순간의 존별 녹화 수를
+          // CLOSE payload에 실어 모델이 late trigger를 인과적으로 기다리게 한다.
+          // 주의: 폴러(modelPooling)가 requestPayload 공유 객체를 매 주기 읽으므로
+          // session_id='CLOSE'보다 반드시 먼저 설정해야 첫 CLOSE에 실린다 —
+          // 모델은 최초 CLOSE(ACTIVE→PENDING_CLOSE)에서만 이 필드를 읽는다.
+          const expectedTriggers = countZoneRecordings(folderPath);
+          if (expectedTriggers) {
+            requestPayload.expected_triggers = expectedTriggers;
+            console.log("[WATERMARK] expected_triggers:", expectedTriggers);
+          }
           requestPayload.session_id = 'CLOSE';
           // stopPolling = true;
           stopDoorOpenMonitor("deadbolt closed");
