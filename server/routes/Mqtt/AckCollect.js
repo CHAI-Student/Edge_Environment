@@ -1256,7 +1256,7 @@ async function handleStartCollect(reqData, reqSysid) {
     await cameraStartSampling(productFolder, [camera_idx]);
     console.log(`[Collect] ${camera_idx}번 수집 시작`);
 
-    const health = await ProductCollectionHealth();
+    // const health = await ProductCollectionHealth();
 
     publishAck(
     makeAckPayload({
