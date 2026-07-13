@@ -426,7 +426,7 @@ async function DoorCollect() {
                 IF_DATE : formattedDate
             },
             DATA: {
-                division_idx: config.divisionIdx,
+                division_idx: reqData.divisionIdx,
                 // True: 냉장(Cold) / False: 냉동(Frozen)
                 is_cold: aiStorageType
             },
