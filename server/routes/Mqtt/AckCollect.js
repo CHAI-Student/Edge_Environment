@@ -1440,12 +1440,6 @@ async function handleEndCollect(reqData, reqSysid) {
   const storageType = session.storageType;
   const finalStorageType = normalizeStorageType(storageType);
 
-  if (session.phase !== "CAMERA_0_RECORDING") {
-    throw new Error(
-      `Invalid collection phase for END: ${session.phase}. Expected CAMERA_0_RECORDING.`
-    );
-  }
-
   // END 메시지는 두 번째 단계인 0번 카메라 수집을 종료한다.
   await cameraStopSampling();
   session.phase = "CAMERA_0_COMPLETED";
