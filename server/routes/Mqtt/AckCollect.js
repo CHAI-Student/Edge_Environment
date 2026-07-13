@@ -282,6 +282,28 @@ async function cameraStartSampling(savePath, cameraIndices = [0, 2]) {
   throw new Error(`[Sampling] Start unexpected response: ${JSON.stringify(response.data)}`);
 }
 
+async function cameraStartSampling(savePath, cameraIndices = [0, 2]) {
+  // 폴더 먼저 생성
+  fs.mkdirSync(savePath, { recursive: true });
+  const url = `${config.cameraApi}/sampling/start`;
+
+  const body = {
+    save_path: savePath,
+    cameras: cameraIndices,
+  };
+
+  console.log(`[Sampling] Starting... Path: ${savePath}`);
+
+  const response = await axios.post(url, body);
+
+  if (response.status === 200 && response.data?.status === "recording started") {
+    console.log("[Sampling] Successfully started");
+    return response.data;
+  }
+
+  throw new Error(`[Sampling] Start unexpected response: ${JSON.stringify(response.data)}`);
+}
+
 async function cameraStopSampling() {
   const url = `${config.cameraApi}/sampling/stop`;
 
@@ -1039,6 +1061,50 @@ async function syncDivisionAndDeviceTypeMapping({
 //   );
 // }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 문이 닫힐 때까지 계속 확인한다.
+ *
+ * 수집 도중 사용자가 문을 닫는 시간은 제한하지 않는다.
+ * 따라서 전체 타임아웃을 두지 않고 CLOSE 상태가 확인될 때까지 대기한다.
+ */
+async function waitUntilDoorClosed({ intervalMs = 500 } = {}) {
+  while (true) {
+    const state = await fetchCurrentDoorState();
+
+    if (state === "CLOSE") {
+      return;
+    }
+
+    await delay(intervalMs);
+  }
+}
+
+/**
+ * 지정된 시간 동안 문이 열렸는지 확인한다.
+ *
+ * 이 함수는 최초 2번 카메라 수집 전에 문을 OPEN 상태로 만드는 용도로만 사용한다.
+ * 2번 카메라에서 0번 카메라로 전환할 때는 사용하지 않는다.
+ */
+async function waitUntilDoorOpen({ timeoutMs = 10000, intervalMs = 500 } = {}) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const state = await fetchCurrentDoorState();
+
+    if (state === "OPEN") {
+      return true;
+    }
+
+    await delay(intervalMs);
+  }
+
+  return false;
+}
+
 async function handleStartCollect(reqData, reqSysid) {
   const {
     device_idx,
@@ -1051,10 +1117,12 @@ async function handleStartCollect(reqData, reqSysid) {
     product_loadcell_weight,
   } = reqData;
 
-  const sessionKey = String(product_idx);
+  const sessionKey = makeSessionKey(product_idx);
 
   if (collectSessions.has(sessionKey)) {
-    throw new Error(`Collect session already exists for product_idx=${product_idx}`);
+    throw new Error(
+      `Collect session already exists for product_idx=${product_idx}`
+    );
   }
 
   const option = getLatestCollectOption();
@@ -1071,11 +1139,18 @@ async function handleStartCollect(reqData, reqSysid) {
 
   const healthBefore = await ProductCollectionHealth();
 
-  // 첫 번째 수집을 시작하기 전에 문을 연 상태로 만든다.
+  /*
+   * 1단계 수집은 문이 열린 상태에서 시작해야 한다.
+   * 문이 닫혀 있으면 데드볼트를 열고 실제 OPEN 상태를 확인한 뒤 진행한다.
+   */
   if (healthBefore.CurrentDoorState !== "OPEN") {
     await callApiToControlDeadbolt("OPEN");
 
-    const opened = await waitUntilDoorOpen({ timeoutMs: 10000 });
+    const opened = await waitUntilDoorOpen({
+      timeoutMs: 10000,
+      intervalMs: 500,
+    });
+
     if (!opened) {
       throw new Error("Door open timeout before camera 2 collection.");
     }
@@ -1102,22 +1177,23 @@ async function handleStartCollect(reqData, reqSysid) {
   }
 
   const timestamp = makeTimestampFolderName();
-  const foldername = `${safe(trainProductIdx)}_${safe(product_eng_name)}_${timestamp}`;
+  const foldername =
+    `${safe(trainProductIdx)}_${safe(product_eng_name)}_${timestamp}`;
 
   const baseProductPath = path.resolve(process.cwd(), "productImg");
   const productFolder = path.join(baseProductPath, foldername);
 
-  // 두 카메라의 결과를 물리적으로 분리된 두 폴더에 저장한다.
-  const camera2Folder = path.join(productFolder, "camera_2");
-  const camera0Folder = path.join(productFolder, "camera_0");
+  // 카메라별 결과가 섞이지 않도록 서로 다른 하위 폴더에 저장한다.
+  // const camera2Folder = path.join(productFolder, "camera_2");
+  // const camera0Folder = path.join(productFolder, "camera_0");
 
   const session = {
     timestamp,
     foldername,
     trainProductIdx,
     productFolder,
-    camera2Folder,
-    camera0Folder,
+    // camera2Folder,
+    // camera0Folder,
     productIdx: product_idx,
     productEngName: product_eng_name,
     categoryIdx: category_idx,
@@ -1127,115 +1203,99 @@ async function handleStartCollect(reqData, reqSysid) {
     deviceIdx: device_idx,
     divisionIdx: division_idx,
     productLoadcellWeight: product_loadcell_weight,
-    phase: "INITIALIZING",
   };
 
   collectSessions.set(sessionKey, session);
 
   try {
-    // 1단계: 문이 열린 상태에서 2번 카메라만 수집한다.
-    await cameraStartSampling(camera2Folder, [2]);
-    session.phase = "CAMERA_2_RECORDING";
-    console.log(`[CollectPhase] camera 2 recording started: ${camera2Folder}`);
+    /*
+     * 1단계
+     * 문이 열린 상태에서 2번 카메라만 촬영한다.
+     */
+    let camera_idx = 2
+    await cameraStartSampling(productFolder, [camera_idx]);
+    console.log(`[Collect] ${camera_idx}번 수집 시작`);
 
-    if (useLoadcell) {
-      await startLoadcellRecording();
-      session.loadcellRecording = true;
-    }
+    const testLoadcellWeight = await startLoadcellRecording();
+    console.log('testLoadcellWeight', testLoadcellWeight)
 
     const health = await ProductCollectionHealth();
 
-    // START ACK는 2번 카메라 수집이 실제로 시작된 뒤 발행한다.
     publishAck(
-      makeAckPayload({
-        reqSysid,
-        device_idx,
-        division_idx,
-        collectState: collect_state,
-        productIdx: product_idx,
-        productEngName: product_eng_name,
-        categoryIdx: category_idx,
-        isNew: is_new,
-        productLoadcellWeight: null,
-        resultCd: health.isSuccess ? "S" : "F",
-        resultMsg: health.resultMsg,
-        health,
-        extraData: {
-          collection_timestamp: timestamp,
-          collection_phase: session.phase,
-          camera_2_local_path: camera2Folder,
-          camera_0_local_path: camera0Folder,
-        },
-      })
-    );
+    makeAckPayload({
+      reqSysid: reqSysid,
+      device_idx: device_idx,
+      division_idx: division_idx,
+      collectState: collect_state,
+      productIdx: product_idx,
+      productEngName: product_eng_name,
+      categoryIdx: category_idx,
+      isNew: is_new,
+      productLoadcellWeight: 'null',
+      resultCd: health.isSuccess ? "S" : "F",
+      resultMsg: health.resultMsg,
+      health,
+      extraData: {
+        collection_timestamp: timestamp,
+        local_path: productFolder,
+      },
+    })
+  );
 
-    // 사용자가 문을 닫아 데드볼트가 내려갈 때까지 2번 카메라 수집을 유지한다.
-    const firstDoorClosed = await waitUntilDoorClosed({
-      timeoutMs: Number(process.env.COLLECT_FIRST_CLOSE_TIMEOUT_MS || 300000),
-      intervalMs: 500,
-    });
+    /*
+     * 사용자가 문을 닫아 데드볼트가 내려갈 때까지 2번 카메라 촬영을 유지한다.
+     * 사용자가 상품을 배치하는 시간을 제한하지 않기 위해 타임아웃을 두지 않는다.
+     */
+    await waitUntilDoorClosed({ intervalMs: 500 });
 
-    if (!firstDoorClosed) {
-      throw new Error("First door close timeout during camera 2 collection.");
-    }
-
-    // 첫 번째 문 닫힘이 감지되면 2번 카메라 수집을 종료한다.
     await cameraStopSampling();
-    session.phase = "CAMERA_2_COMPLETED";
-    console.log("[CollectPhase] camera 2 recording stopped after first door close");
 
-    // 2단계 수집을 위해 데드볼트를 다시 열고 실제 OPEN 상태를 확인한다.
     await callApiToControlDeadbolt("OPEN");
 
-    const reopened = await waitUntilDoorOpen({ timeoutMs: 10000 });
-    if (!reopened) {
-      throw new Error("Door reopen timeout before camera 0 collection.");
-    }
+    camera_idx = 0
+    await cameraStartSampling(productFolder, [camera_idx]);
+    console.log(`[Collect] ${camera_idx}번 수집 시작`);
 
-    // 2단계: 다시 열린 문에서 0번 카메라만 수집한다.
-    await cameraStartSampling(camera0Folder, [0]);
-    session.phase = "CAMERA_0_RECORDING";
-    console.log(`[CollectPhase] camera 0 recording started: ${camera0Folder}`);
+    const health = await ProductCollectionHealth();
+
+    publishAck(
+    makeAckPayload({
+      reqSysid: reqSysid,
+      device_idx: device_idx,
+      division_idx: division_idx,
+      collectState: collect_state,
+      productIdx: product_idx,
+      productEngName: product_eng_name,
+      categoryIdx: category_idx,
+      isNew: is_new,
+      productLoadcellWeight: 'null',
+      resultCd: health.isSuccess ? "S" : "F",
+      resultMsg: health.resultMsg,
+      health,
+      extraData: {
+        collection_timestamp: timestamp,
+        local_path: productFolder,
+      },
+    })
+  );
+
+  await waitUntilDoorClosed({ intervalMs: 500 });
+
+  await cameraStopSampling();
+
   } catch (error) {
-    // 시작 또는 단계 전환 실패 시 남아 있는 장치 동작을 가능한 범위에서 정리한다.
+    // 단계 전환 실패 시 남아 있는 장치 동작을 가능한 범위에서 정리한다.
     await cameraStopSampling().catch(() => {});
 
     if (session.loadcellRecording) {
       await stopLoadcellRecording().catch(() => {});
+      session.loadcellRecording = false;
     }
 
-    session.phase = "FAILED";
     collectSessions.delete(sessionKey);
+
     throw error;
   }
-}
-
-async function waitUntilDoorClosed({ timeoutMs = 60000, intervalMs = 500 } = {}) {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    const state = await fetchCurrentDoorState();
-
-    if (state === "CLOSE") return true;
-
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-
-  return false;
-}
-
-async function waitUntilDoorOpen({ timeoutMs = 10000, intervalMs = 500 } = {}) {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    const state = await fetchCurrentDoorState();
-
-    if (state === "OPEN") return true;
-
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-
-  return false;
 }
 
 // async function handleEndCollect(reqData) {
@@ -1390,11 +1450,8 @@ async function handleEndCollect(reqData, reqSysid) {
   await cameraStopSampling();
   session.phase = "CAMERA_0_COMPLETED";
 
-  const closed = await waitUntilDoorClosed();
-
-  if (!closed) {
-    throw new Error("Door close timeout. Product collection cannot be finalized.");
-  }
+  // 문이 닫힐 때까지 타임아웃 없이 대기한다.
+  await waitUntilDoorClosed({ intervalMs: 500 });
 
   const useLoadcell = session.hasLoadcell === "Y";
   console.log('session.has_loadcell', session.hasLoadcell)
