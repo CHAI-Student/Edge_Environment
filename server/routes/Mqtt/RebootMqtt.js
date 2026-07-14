@@ -1145,6 +1145,55 @@ async function downloadModelFilesFromBrunchFolder(
 }
 
 /**
+ * Engine 생성 후 다운로드한 PT, ONNX 파일 삭제
+ */
+async function deleteDownloadedModelFiles(downloadedFiles) {
+  const targets = [
+    {
+      type: "PT",
+      filePath: downloadedFiles?.pt,
+    },
+    {
+      type: "ONNX",
+      filePath: downloadedFiles?.onnx,
+    },
+  ];
+
+  for (const target of targets) {
+    if (!target.filePath) {
+      console.warn(
+        `[CLEANUP] ${target.type} 파일 경로가 없습니다.`
+      );
+      continue;
+    }
+
+    try {
+      await fs.unlink(target.filePath);
+
+      console.log(
+        `[CLEANUP] ${target.type} 파일 삭제 완료: ` +
+        target.filePath
+      );
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        console.warn(
+          `[CLEANUP] ${target.type} 파일이 이미 없습니다: ` +
+          target.filePath
+        );
+        continue;
+      }
+
+      console.error(
+        `[CLEANUP] ${target.type} 파일 삭제 실패: ` +
+        `${target.filePath}, error=${error.message}`
+      );
+
+      throw error;
+    }
+  }
+}
+
+/**
  * Engine 빌드 환경 파일 생성
  */
 async function writeEngineBuildTxt(
@@ -1639,6 +1688,10 @@ async function RebootMqtt() {
             `[ModelEmbedding] Engine 확인 완료: ` +
             `${enginePath}, ` +
             `size=${engineStat.size}`
+          );
+
+          await deleteDownloadedModelFiles(
+            downloadedFiles
           );
 
           await updateEnvModelVersion(
