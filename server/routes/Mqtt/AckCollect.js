@@ -333,8 +333,8 @@ function computeProductWeight(logs) {
   if (!Array.isArray(logs) || logs.length === 0) return 0;
 
   const CHANNEL_INDEX = 2;      // 3번째 로드셀
-  const OFFSET_MS = 4000;       // startLoadcellRecording 이후 5초
-  const WINDOW_MS = 2000;       // 3초 동안
+  const OFFSET_MS = 4000;       // startLoadcellRecording 이후 4초
+  const WINDOW_MS = 3200;       // IO-BOARD 샘플링 0.8s 기준 최소 4샘플 확보
 
   const validLogs = logs
     .filter(snap => snap?.timestamp && Array.isArray(snap?.loadcells))
@@ -375,7 +375,8 @@ function computeProductWeight(logs) {
   //   avg,
   // });
 
-  return Math.round(avg);
+  // 센서 보증 분해능 5g에 정합 (모델 판정 tolerance도 5g 기준)
+  return Math.round(avg / 5) * 5;
 }
 
 function getAllFiles(dirPath, arrayOfFiles = []) {
