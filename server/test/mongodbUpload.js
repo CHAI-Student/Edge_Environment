@@ -1,3 +1,9 @@
+// ============================================================
+// mongodbUpload.js — 수동 실행용 테스트 스크립트
+// 역할: devAutoLogin 후 ProductList API의 상품 목록을 MongoDB ProductsList에
+//       upsert(신규 시 trainProductIdx 발급, snapshot 폴더 placeholder 생성)하는
+//       기본 업로드 흐름을 단독 실행으로 검증한다.
+// ============================================================
 const config = require("../config/key");
 const mongoose = require("mongoose");
 const { ProductUpload } = require("../model/ProductUpload");

@@ -1,3 +1,8 @@
+// ============================================================
+// MqttReboot.js — 수동 실행용 테스트 스크립트 (node server/test/MqttReboot.js)
+// 역할: 서버를 자식 프로세스로 띄운 뒤 MQTT topic(cmd/reboot)을 publish하여
+//       reboot.flag 생성 -> 서버 재시작 -> flag 정리(ack 흐름)까지 E2E 검증한다.
+// ============================================================
 /* eslint-disable no-console */
 const path = require("path");
 const fs = require("fs/promises");

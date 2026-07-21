@@ -1,3 +1,13 @@
+// ============================================================
+// ProductUpload.js
+// 역할: PNT에 등록된 상품 메타를 담는 Mongoose 모델. productIdx(FK),
+//       productEngName, storageType(COLD/FROZEN), productLoadcellWeight,
+//       trainingStatus, snapshot 폴더 정보(foldername/folderpath/filelength),
+//       학습용 순번 trainProductIdx(1부터 증가, unique index) 등을 관리한다.
+//       (productIdx, productEngName) 복합 unique index로 문서를 식별한다.
+// 컬렉션명: ProductsList / 사용처: AckCollect.js, AIServer/Products.js,
+//       ProductMongoSyncService, server/test의 mongodb* 스크립트
+// ============================================================
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 

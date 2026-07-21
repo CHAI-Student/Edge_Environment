@@ -1,3 +1,10 @@
+// ============================================================
+// ProductList.js
+// 역할: 클라우드(PNT/CHAI) REST API IF_11(상품 목록 조회) 호출 모듈.
+//  - /chai/product/list 에 division_idx / device_idx 를 담아 POST 하고
+//    상품 마스터 목록 응답(r.data)을 반환한다.
+//  - 인증은 config.jwtToken(Bearer) 사용.
+// ============================================================
 require("dotenv").config();
 const axios = require("axios");
 const config = require("../../config/key");
@@ -5,6 +12,7 @@ const { v4: uuidv4 } = require("uuid");
 const express = require("express");
 const router = express.Router();
 
+// IF 규격(YYYYMMDDHHMMSS)의 날짜 문자열 생성
 function formatIfDate(d = new Date()) {
     const pad = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`
@@ -18,6 +26,7 @@ const external = axios.create({
 });
 
 // 외부 API 호출 함수
+// [IF_11] 매장(division) 기준 상품 목록을 클라우드에서 조회
 async function ProductList({
   division_idx = config.divisionIdx,
   device_idx = null

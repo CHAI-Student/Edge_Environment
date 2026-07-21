@@ -1,3 +1,9 @@
+// ============================================================
+// mongoDBAnnotationUpload.js — 수동 실행용 테스트 스크립트
+// 역할: MongoDB ProductsList를 기준으로 AnnotationLabel 컬렉션을 동기화
+//       (id=0 hand label 고정 upsert, 상품별 label upsert + 랜덤 색상 배정,
+//       잔여 label 삭제)하는 흐름을 단독 실행으로 검증한다.
+// ============================================================
 const config = require("../config/key");
 const mongoose = require("mongoose");
 require("dotenv").config();

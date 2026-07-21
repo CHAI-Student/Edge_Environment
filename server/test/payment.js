@@ -1,3 +1,9 @@
+// ============================================================
+// payment.js — 수동 실행용 테스트 스크립트 (node server/test/payment.js)
+// 역할: 카드 단말기 응답 mock(status "Y") -> health check mock(card terminal/
+//       deadbolt/loadcell/camera) -> ProductList 호출 -> camera snapshot 폴더
+//       생성까지 payment 시작 흐름을 mock 기반으로 검증한다.
+// ============================================================
 const fs = require("fs");
 const path = require("path");
 

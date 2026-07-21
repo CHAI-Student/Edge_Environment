@@ -1,3 +1,9 @@
+// ============================================================
+// minioUpload.js — 수동 실행용 테스트 스크립트 (node server/test/minioUpload.js)
+// 역할: 로컬 snapshot 이미지 폴더(images/cam_0, cam_2)를 MinIO의
+//       productImg/{productIdx}_{timestamp}/ prefix로 업로드하고 소요 시간 측정,
+//       전체 성공 시 로컬 파일 삭제 및 빈 폴더 정리까지 검증한다.
+// ============================================================
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");

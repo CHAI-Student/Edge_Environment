@@ -1,3 +1,8 @@
+// ============================================================
+// productTest.js — 수동 실행용 테스트 스크립트 (node ./server/test/productTest.js)
+// 역할: devAutoLogin으로 JWT 토큰을 발급받아 env에 세팅한 뒤
+//       ProductList REST API(IF11)를 단독 호출해 상품 목록 응답을 확인한다.
+// ============================================================
 require("dotenv").config();
 const axios = require("axios");
 const config = require("../config/key");

@@ -1,3 +1,12 @@
+// ============================================================
+// ProductCaptureService.js
+// 역할: 상품 snapshot 촬영을 위한 camera 서비스 start/stop optional hook.
+//       config.cameraCaptureStartApi / cameraCaptureStopApi가 정의되어 있으면
+//       해당 API를 호출하고, 없으면 세션 정보만 반환하도록 설계되었다.
+// 상태: 파일 전체가 주석 처리되어 현재 미사용(비활성) 상태이며,
+//       어디에서도 require되지 않는다. camera 촬영 API 명세 확정 시
+//       주석 해제 후 사용 예정인 참고용 코드.
+// ============================================================
 // require("dotenv").config();
 // const axios = require("axios");
 // const config = require("../../config/key");

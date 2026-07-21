@@ -1,3 +1,8 @@
+// ============================================================
+// index.js
+// 역할: React 클라이언트의 진입점. #root 엘리먼트에 App 컴포넌트를
+//       StrictMode로 렌더링하고 reportWebVitals를 초기화한다. (CRA 기본 구조)
+// ============================================================
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
