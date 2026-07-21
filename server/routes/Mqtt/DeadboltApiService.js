@@ -1,4 +1,11 @@
-// 파일명: DoorApiService.js
+// ============================================================
+// DeadboltApiService.js
+// 역할: IO board Python 서버의 deadbolt 제어 API(POST {ioboardApi}/deadbolt)를
+//   호출하여 door open/close를 수행하고, 응답 상태를 정규화·검증한다.
+//   요청한 상태로 전환되지 않으면 health check용 deadbolt 오류 코드("11")를
+//   설정(DeadboltTerminalErrorState)하고 에러를 throw한다.
+// 사용처: DoorCollect.js, ManualDeadbolt.js
+// ============================================================
 const axios = require("axios");
 const config = require("../../config/key");
 
@@ -7,6 +14,7 @@ const API_ENDPOINT = "/deadbolt"; // 상세 경로
 
 const { DeadboltTerminalErrorState } = require("./HealthMqtt");
 
+// 다양한 표기의 deadbolt 상태 문자열을 "UNLOCK"/"LOCK"으로 정규화
 function normalizeDeadboltState(state) {
   const s = String(state || "").toUpperCase();
 
