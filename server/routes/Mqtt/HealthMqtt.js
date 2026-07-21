@@ -1,19 +1,30 @@
+// ============================================================
+// HealthMqtt.js
+// 역할: 30초 주기로 장비 전체 health check 상태를 수집하여 MQTT topic
+//   chai/device/{deviceIdx}/health (IF_02)로 publish한다.
+// 연동: card terminal API(/status), IO board API(/health: deadbolt/loadcell),
+//   camera API(/health), AI 서버(/health), model 서버(/api/health),
+//   로컬 disk 사용량(df) 확인.
+// 부가: 센서 오류 시 경고 음성(mp3)을 주기적으로 재생하고,
+//   payment/deadbolt 쪽에서 넘어온 오류 코드를 1회성으로 override하여
+//   health check payload에 반영(CardTerminalErrorState/DeadboltTerminalErrorState).
+// ============================================================
 const config = require("../../config/key");
-const { getClient, subscribe } = require("./MqttClient");
+const { getClient } = require("./MqttClient");
 const { v4: uuidv4 } = require("uuid");
 const axios = require("axios"); // ✅ API 통신을 위한 라이브러리
-const { devAutoLogin } = require("../../routes/auth");
 const { exec } = require("child_process");
 const os = require("os");
 const path = require("path");
-const fs = require("fs");
 
+// IF_DATE 형식(yyyyMMddHHmmss)의 timestamp 문자열 생성
 function formatIfDate(d = new Date()) {
     const pad = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`
          + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
+// OS별 커맨드(afplay/mpg123)로 mp3 파일 재생
 function playMp3(filePath) {
   const platform = os.platform(); // 'darwin', 'linux', 'win32'
   let cmd;
@@ -35,12 +46,14 @@ function playMp3(filePath) {
 
 let sensorErrorVoiceInterval = null;
 
+// 센서 오류 안내 음성(sensor_error.mp3) 재생
 function playSensorErrorVoice() {
     const audioPath = path.resolve(__dirname, '../Sounds/sensor_error.mp3');
     playMp3(audioPath);
     console.log("[VOICE] sensor error. (play audio)");
 }
 
+// 루트 파티션 disk 사용량 확인 ("49": 정상 / "40": disk 부족 또는 확인 실패)
 async function DiskStatusAPI() {
   return new Promise((resolve) => {
     // sd카드 루트 저장 공간 체크 : /dev/nvme0n1p2
@@ -75,11 +88,14 @@ async function DiskStatusAPI() {
 
 let CardErrorState = null;
 
+// payment 처리 중 발생한 card terminal 오류 코드를 저장 (다음 health check 1회에 반영 후 초기화)
 function CardTerminalErrorState(code) {
   CardErrorState = code;
   console.log("[CARD-HEALTH] set:", code);
 }
 
+// card terminal 상태 조회(GET /status) 후 응답 코드를 health check 코드("3x")로 매핑
+// "39": 정상, 그 외("30"~"38")는 오류 유형별 코드
 async function CardTerminalStatusAPI(CatResCodePayment) {
   let CardTerminalState = '30'
   // console.log(`[CARD-DEVICE] test:: ${config.cardTerminalApi}`);
@@ -170,11 +186,13 @@ let IOBoardRes = null; // 전역 변수로 선언하여 LoadcellStatusAPI에서 
 
 let DeadboltErrorState = null;
 
+// deadbolt 제어 중 발생한 오류 코드를 저장 (다음 health check 1회에 반영 후 초기화)
 function DeadboltTerminalErrorState(code) {
   DeadboltErrorState = code;
   console.log("[DEADBOLT-HEALTH] set:", code);
 }
 
+// IO board(/health)에서 deadbolt 상태 조회 ("19": 정상, "12": door 장시간 open, "10": 연결 불량 등)
 async function DeadboltStatusAPI() {
   // deadbolt status check
   let DeadboltState = '10'
@@ -209,6 +227,8 @@ async function DeadboltStatusAPI() {
   }
 }
 
+// loadcell 상태 조회 ("29": 정상, "20": 오류)
+// DeadboltStatusAPI()가 받아 둔 IO board 응답(IOBoardRes)을 재사용한다
 async function LoadcellStatusAPI() {
   // loadcell status check
   let LoadcellState = '20'
@@ -245,6 +265,7 @@ async function LoadcellStatusAPI() {
   }
 }
 
+// camera 서비스(/health) 상태 조회 ("09": 정상, "00": 오류)
 async function CameraStatusAPI() {
   //camera status check
   let CameraState = '00'
@@ -277,6 +298,8 @@ async function CameraStatusAPI() {
   }
 }
 
+// edge PC 종합 상태 판정: AI 서버/model 서버 health check + disk 상태 +
+// deadbolt/loadcell 상태를 종합 ("49": 정상, "40"~"43": 오류 유형별 코드)
 async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
   //edgepc status check
   let edgeStatus = '40';
@@ -332,6 +355,8 @@ async function EdgePCStatusAPI(DeadboltState, LoadcellState) {
 }
 
 
+// health check 진입점: MQTT 연결 후 30초 주기로 각 장치 상태를 수집해
+// health topic으로 publish하고, 센서 오류 시 경고 음성을 반복 재생
 async function HealthMqtt() {
   // divisionIdx 기준으로 토픽 네이밍 예시
   const deviceIdx = config.deviceIdx

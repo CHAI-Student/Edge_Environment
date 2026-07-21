@@ -1,17 +1,27 @@
+// ============================================================
+// MqttClient.js
+// 역할: 클라우드(PNT/CHAI) MQTT broker 연결을 담당하는 공용 client 모듈.
+//   단일 client 인스턴스를 생성하여 모든 핸들러가 공유(getClient)하고,
+//   subscribe/publish/disconnect 유틸 함수를 제공한다.
+// 부가: MQTT 연결 오류(인터넷 장애) 시 경고 음성(internet_error.mp3)을
+//   20초 간격으로 반복 재생하고, 재연결 성공 시 중단한다.
+// ============================================================
 const mqtt = require("mqtt");
 const config = require("../../config/key");
 const { exec } = require("child_process");
 const os = require("os");
 const path = require("path");
-const fs = require("fs");
 
 let client = null;
 
+// MQTT client 생성 및 연결: 접속 옵션 설정, 연결/재연결/오류 이벤트 로깅,
+// 연결 오류 시 인터넷 장애 안내 음성 반복 재생
 function createMqttClient() {
   if (!config.mqttURL) throw new Error("Missing config.mqttURL");
   if (!config.mqttID) throw new Error("Missing config.mqttID");
   if (!config.mqttPW) throw new Error("Missing config.mqttPW");
 
+  // OS별 커맨드(afplay/mpg123)로 mp3 파일 재생
   function playMp3(filePath) {
     const platform = os.platform(); // 'darwin', 'linux', 'win32'
     let cmd;
@@ -31,6 +41,7 @@ function createMqttClient() {
     });
   }
 
+  // 인터넷(MQTT 연결) 오류 안내 음성 재생
   function playInternetErrorVoice() {
     const audioPath = path.resolve(__dirname, '../Sounds/internet_error.mp3');
     playMp3(audioPath);
@@ -91,11 +102,13 @@ function createMqttClient() {
   return client;
 }
 
+// 공유 MQTT client 반환 (없으면 새로 생성 - singleton 패턴)
 function getClient() {
   if (!client) return createMqttClient();
   return client;
 }
 
+// MQTT 연결 완료를 대기 (timeout 시 reject)
 function waitForConnect(c, timeoutMs = 8000) {
   if (c.connected) return Promise.resolve(true);
 
@@ -113,6 +126,7 @@ function waitForConnect(c, timeoutMs = 8000) {
   });
 }
 
+// 연결 보장 후 MQTT topic(단일/배열) subscribe (QoS 1 고정)
 async function subscribe(topics, qos = 0) {
   const c = getClient();
   const list = Array.isArray(topics) ? topics : [topics];
@@ -129,6 +143,7 @@ async function subscribe(topics, qos = 0) {
   });
 }
 
+// MQTT topic으로 payload publish (객체는 JSON 문자열로 변환, QoS 1)
 function publish(topic, payload, opts = {}) {
   const c = getClient();
   const message = typeof payload === "string" ? payload : JSON.stringify(payload);
@@ -147,6 +162,7 @@ function publish(topic, payload, opts = {}) {
   });
 }
 
+// MQTT 연결 종료 및 client 인스턴스 해제
 function disconnect() {
   if (!client) return Promise.resolve(true);
 

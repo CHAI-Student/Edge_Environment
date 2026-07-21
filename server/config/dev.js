@@ -1,6 +1,12 @@
-const { deviceIdx, divisionIdx } = require("./prod");
-
-// 외부 API 접근에 쓰는 값들
+// ============================================================
+// dev.js
+// 역할: 개발 환경(NODE_ENV !== 'production')용 설정값.
+//  - MongoDB / MinIO / MQTT 브로커 접속 정보
+//  - 매장(divisionIdx) / 장비(deviceIdx) 식별자
+//  - 클라우드 REST API 및 로컬 서비스 API 주소
+//    (ioboardApi, cameraApi, cardTerminalApi, modelApi, aiServerApi)
+// 주의: prod.js와 키 이름을 동일하게 유지할 것 (config/key.js에서 분기)
+// ============================================================
 module.exports = {
     mongoURI: 'mongodb://admin:%40crkchai2025@139.150.81.182:27017/CHAI?authSource=admin', // MongoDB로 연결
     //MINIO 연결
@@ -61,5 +67,11 @@ module.exports = {
     // storageType: "C",
     // hasLoadcell: "Y",
     aiServerApi: 'http://139.150.8.82:2140',
-    
+
+    // RebootMqtt: 모델 코드/모델 저장 경로 및 engine 빌드 env 파일 경로
+    // (env 미설정 시 기존 하드코딩 경로를 기본값으로 사용 -> 동작 불변)
+    modelCodesDir: process.env.MODEL_CODES_DIR || '/home/chai/Desktop/Codes/CRK-model',
+    modelDir: process.env.MODEL_DIR || '/home/chai/Desktop/Codes/CRK-model/models',
+    engineBuildEnvFile: process.env.ENGINE_BUILD_ENV_FILE || '/home/chai/Desktop/crk-model-build.txt',
+
 }
