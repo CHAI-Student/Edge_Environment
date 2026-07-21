@@ -1,3 +1,12 @@
+// ============================================================
+// PaymentStore.js
+// 역할: 클라우드(PNT) REST API IF_08(결제 정보 저장) 전송 모듈.
+//  - 결제 승인 결과(paymentResponse), model 추론 결과(inferenceResult),
+//    camera 촬영 영상(mp4)을 FormData 로 묶어 /chai/payment/store 에 업로드한다.
+//  - CardMethod 에 따라 payload 분기: 'R'=RFID, 'S'=삼성페이, 그 외=일반 카드.
+//  - 상품 단가는 IF_11 상품 마스터(productData)에서 조회하며,
+//    인증은 config.jwtToken(Bearer) 사용.
+// ============================================================
 const FormData = require('form-data');
 const config = require("../../config/dev");
 const { v4: uuidv4 } = require("uuid");
@@ -7,12 +16,14 @@ const axios = require("axios");
 
 // const dummyImg = path.join(__dirname, "../../log/dummyTestImg.png");
 
+// IF 규격(YYYYMMDDHHMMSS)의 날짜 문자열 생성
 function formatIfDate(d = new Date()) {
     const pad = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`
          + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
+// IF 규격(YYYYMMDDHHMMSS)의 날짜 문자열 생성 (formatIfDate 와 동일 기능)
 function makeIFDate(d = new Date()) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -23,6 +34,9 @@ function makeIFDate(d = new Date()) {
   return `${yyyy}${mm}${dd}${HH}${MM}${SS}`;
 }
 
+// [IF_08] 결제 결과 + 결제 영상(mp4)을 PNT 클라우드로 전송한다.
+// snapshot 폴더(folderPath/archival/cam_0)의 mp4 를 찾아 payment_file 로 첨부하며,
+// 전송 성공 시 true, 실패 시 false 를 반환한다.
 async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt, CardMethod, productData, token) {
     console.log("[PNT] Preparing IF_08 data transfer...");
     console.log('paymentResponse', paymentResponse)
@@ -101,10 +115,13 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
 
         const now = new Date();
         const formattedDate = makeIFDate(now)
+        // RFID 경로 approve_at: 카드/삼성 경로(단말 authorization_date)와 동일한
+        // 12자리 YYMMDDHHmmss 포맷 (기존엔 getDate() 뒤 세미콜론 오타로 시분초가
+        // 버려져 YYMMDD 6자리만 저장되던 버그 — PAYMENT-ISSUES.md §2-2)
         const rfidTime =
         String(now.getFullYear()).slice(2) +
         String(now.getMonth() + 1).padStart(2, "0") +
-        String(now.getDate()).padStart(2, "0");
+        String(now.getDate()).padStart(2, "0") +
         String(now.getHours()).padStart(2, "0") +
         String(now.getMinutes()).padStart(2, "0") +
         String(now.getSeconds()).padStart(2, "0");
@@ -186,7 +203,9 @@ async function sendToPNT(paymentResponse, inferenceResult, folderPath, paymentAt
                     payment_at: formattedDate, // 픽앤탁으로 전송하는 시간
                     approve_at: paymentResponse.authorization_date, // 카드결제가 이루어진 시간
                     approve_type: CardMethod === 'R' ? '2' : (CardMethod === 'S' ? '1' : '0'), // 0=일반카드, 1=삼성페이, 2=RFID
-                    approve_result: (paymentResponse === "Y")? 0 : 1,
+                    // 단말 서버 응답은 {status:"Y"/"N", ...} 객체 — 최상위 status로 판정
+                    // (기존엔 객체 === "Y" 비교라 항상 1(실패)로 기록되던 버그 — PAYMENT-ISSUES.md §2-1)
+                    approve_result: (paymentResponse.status === "Y") ? 0 : 1,
                     approve_price: inferenceResult.totalPrice,
                     approve_no: paymentResponse.authorization_number,
                     approve_card_issuer: paymentResponse.card_info.ISSUER_NAME,
