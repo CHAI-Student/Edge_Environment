@@ -17,6 +17,62 @@ let latestCollectOption = {
   doorState: null
 };
 
+/**
+ * IF06에서 받은 학습 대상 장비 정보
+ *
+ * IF04 장비 정보와 구분하기 위해 별도로 저장한다.
+ */
+let latestTrainingTarget = null;
+
+function setLatestTrainingTarget({
+  productIdx,
+  divisionIdx,
+  deviceIdx,
+  storageType,
+}) {
+  if (!divisionIdx) {
+    throw new Error(
+      "[DoorCollect] Training target divisionIdx is required"
+    );
+  }
+
+  latestTrainingTarget = {
+    productIdx: productIdx != null
+      ? String(productIdx)
+      : null,
+
+    divisionIdx: String(divisionIdx),
+
+    deviceIdx: deviceIdx != null
+      ? String(deviceIdx)
+      : null,
+
+    storageType,
+
+    updatedAt: new Date(),
+  };
+
+  console.log(
+    "[DoorCollect] Training target saved:",
+    latestTrainingTarget
+  );
+
+  return latestTrainingTarget;
+}
+
+function getLatestTrainingTarget() {
+  return latestTrainingTarget;
+}
+
+function clearLatestTrainingTarget() {
+  console.log(
+    "[DoorCollect] Training target cleared:",
+    latestTrainingTarget
+  );
+
+  latestTrainingTarget = null;
+}
+
 function getLatestCollectOption() {
   return latestCollectOption;
 }
@@ -411,6 +467,7 @@ async function DoorCollect() {
 
       console.log('[PNT DOOR REQ] status of doorState: ', latestCollectOption.doorState)
       if (latestCollectOption.doorState === 'CLOSE') {
+        const trainingTarget = getLatestTrainingTarget();
         const aiServer = `${config.aiServerApi}/v1/events/product/created`
         const now = new Date();
         const formattedDate = makeIFDate(now)
@@ -426,7 +483,11 @@ async function DoorCollect() {
                 IF_DATE : formattedDate
             },
             DATA: {
-                division_idx: reqData.division_idx,
+                /*
+                * IF04의 reqData.division_idx가 아니라
+                * IF06에서 미리 저장한 학습 대상 division_idx
+                */
+                division_idx: trainingTarget.divisionIdx,
                 // True: 냉장(Cold) / False: 냉동(Frozen)
                 is_cold: aiStorageType
             },
@@ -444,6 +505,11 @@ async function DoorCollect() {
           });
     
           console.log("[EDGE->AI] response:", response.data);
+          /*
+          * AI 요청이 성공한 경우에만 삭제한다.
+          * 실패하면 다음 CLOSE 요청에서 재시도 가능하다.
+          */
+          clearLatestTrainingTarget();
         } catch (err) {
           console.error("[EDGE->AI] status:", err.response?.status);
           console.error("[EDGE->AI] data:", err.response?.data);
@@ -493,4 +559,8 @@ module.exports = {
   DoorCollect,
   fetchCurrentDoorState,
   getLatestCollectOption,
+
+  setLatestTrainingTarget,
+  getLatestTrainingTarget,
+  clearLatestTrainingTarget,
 };

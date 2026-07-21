@@ -23,7 +23,7 @@ const { ProductUpload } = require("../../model/ProductUpload");
 const { DivisionUpload } = require("../../model/DivisionUpload");
 const { DeviceTypeUpload } = require("../../model/DeviceTypeUpload");
 
-const { getLatestCollectOption } = require("./DoorCollect");
+const { getLatestCollectOption, setLatestTrainingTarget } = require("./DoorCollect");
 const { syncAnnotationLabels } = require("../Services/AnnotationLabelSyncService");
 const aiNotifyService = require("../Services/AiTrainingNotifyService");
 
@@ -1200,12 +1200,24 @@ async function handleStartCollect(reqData, reqSysid) {
     isNew: is_new,
     hasLoadcell,
     storageType: normalizedStorageType,
+    // IF06에서 받은 학습 장비 정보
     deviceIdx: device_idx,
     divisionIdx: division_idx,
     productLoadcellWeight: product_loadcell_weight,
   };
 
   collectSessions.set(sessionKey, session);
+
+  /**
+   * DoorCollect.js가 마지막 IF04 CLOSE에서 사용할 수 있도록
+   * IF06 학습 대상 장비 정보를 미리 저장한다.
+   */
+  setLatestTrainingTarget({
+    productIdx: product_idx,
+    divisionIdx: division_idx,
+    deviceIdx: device_idx,
+    storageType: normalizedStorageType,
+  });
 
   try {
     /*
