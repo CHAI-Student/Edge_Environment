@@ -1,3 +1,14 @@
+// ============================================================
+// ProductMongoSyncService.js
+// 역할: 클라우드 REST API(ModelBrunchCheck: device 목록, ProductList: 상품
+//       목록)를 호출해 로컬 MongoDB의 DivisionList/ProductsList/
+//       DeviceTypeList 컬렉션을 upsert 동기화하는 서비스.
+//       storageType(C/F -> COLD/FROZEN) 분류, trainProductIdx 시퀀스 발급,
+//       storageType별 brunchName({divisionIdx}_C|F) 구성, 신규/미학습 상품
+//       (isNew=0 & trainingStatus 0|1) 필터링을 담당한다.
+// 사용처: 현재 어디에서도 require되지 않음(미사용). 유사 로직의 테스트
+//       스크립트가 server/test/mongodbDataUpload.js 등에 존재한다.
+// ============================================================
 require("dotenv").config();
 const config = require("../../config/key");
 
@@ -8,6 +19,7 @@ const { ProductUpload } = require("../../model/ProductUpload");
 const { ModelBrunchCheck } = require("../../routes/RestAPI/ModelBrunchCheck");
 const { ProductList } = require("../../routes/RestAPI/ProductList");
 
+// snapshot 폴더명에 쓰는 "YYYYMMDD_HHMMSS" 형식의 timestamp 문자열 생성.
 function makeFolderTimestamp(d = new Date()) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -18,6 +30,8 @@ function makeFolderTimestamp(d = new Date()) {
   return `${yyyy}${mm}${dd}_${HH}${MM}${SS}`;
 }
 
+// API의 storage_type 문자('C'|'F')를 DB 표기('COLD'|'FROZEN')로 변환.
+// 이미 변환된 값은 그대로 통과시키고, 그 외에는 "UNKNOWN"을 반환한다.
 function mapStorageType(storageTypeChar) {
   if (storageTypeChar === "C") return "COLD";
   if (storageTypeChar === "F") return "FROZEN";
@@ -25,12 +39,14 @@ function mapStorageType(storageTypeChar) {
   return "UNKNOWN";
 }
 
+// brunchName 접미사 변환: COLD -> "C", FROZEN -> "F", 그 외 -> "U".
 function brunchSuffixFromStorageType(storageType) {
   if (storageType === "COLD") return "C";
   if (storageType === "FROZEN") return "F";
   return "U";
 }
 
+// 배열에서 key 값이 null/undefined가 아닌 첫 항목의 값을 반환(없으면 null).
 function pickFirstNonNull(arr, key) {
   for (const x of arr) {
     if (x?.[key] != null) return x[key];
@@ -38,6 +54,7 @@ function pickFirstNonNull(arr, key) {
   return null;
 }
 
+// ProductList 응답의 상품 배열 위치가 스펙별로 달라 여러 경로를 순서대로 시도.
 function normalizeProductListResponse(resp) {
   return (
     resp?.DATA?.product_list ||
@@ -47,6 +64,7 @@ function normalizeProductListResponse(resp) {
   );
 }
 
+// ModelBrunchCheck 응답의 device 배열 위치가 스펙별로 달라 여러 경로를 순서대로 시도.
 function normalizeDeviceListResponse(resp) {
   return (
     resp?.DATA?.device_list ||
@@ -56,6 +74,13 @@ function normalizeDeviceListResponse(resp) {
   );
 }
 
+// division 단위 메타데이터 전체 동기화의 메인 함수.
+// 1) ModelBrunchCheck로 device 목록 조회 -> DivisionList upsert
+// 2) ProductList로 상품 조회 -> ProductsList upsert(신규 상품에만 trainProductIdx
+//    시퀀스 발급, isNew=0 & trainingStatus 0|1 상품은 newOrPendingProducts로 수집)
+// 3) storageType(COLD/FROZEN)별로 DeviceTypeList upsert(brunchName, modelVersion,
+//    products 매핑 포함)
+// 반환: { success, divisionIdx, deviceIdx, products, newOrPendingProducts }
 async function syncDivisionProductMetadata({
   divisionIdx = config.divisionIdx,
   deviceIdx = config.deviceIdx,
@@ -235,6 +260,9 @@ async function syncDivisionProductMetadata({
   };
 }
 
+// MinIO 업로드 완료 후 ProductsList 문서에 snapshot 폴더 정보(foldername/
+// folderpath/filelength)와 trainingStatus, updateDate를 반영한다.
+// productEngName이 있으면 (productIdx, productEngName) 복합 키로 매칭한다.
 async function updateProductUploadFolder({
   productIdx,
   productEngName,

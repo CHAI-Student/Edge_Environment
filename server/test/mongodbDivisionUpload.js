@@ -1,3 +1,9 @@
+// ============================================================
+// mongodbDivisionUpload.js — 수동 실행용 테스트 스크립트
+// 역할: ModelBrunchCheck/ProductList API 결과로 DivisionList 1건 upsert와
+//       ProductsList 상품 upsert(trainProductIdx 시퀀스 포함) 후 division의
+//       products 매핑을 갱신하고 populate로 확인하는 흐름을 검증한다.
+// ============================================================
 const config = require("../config/key");
 const mongoose = require("mongoose");
 require("dotenv").config();

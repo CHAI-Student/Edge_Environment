@@ -1,3 +1,14 @@
+// ============================================================
+// Payments.js
+// 역할: 결제(payment) 핵심 흐름 전체를 담당하는 모듈.
+//  - card terminal SSE로 카드/삼성페이/RFID 토큰 수신 → 결제 세션 시작
+//  - health check(card terminal, deadbolt, loadcell, camera) 통과 시
+//    deadbolt OPEN → 카메라 녹화 시작 → 모델 서버 추론(polling)
+//  - deadbolt CLOSE 감지 시 녹화 종료 + 엣지 watermark(expected_triggers)
+//    를 CLOSE payload에 첨부 → 추론 결과 금액으로 카드 승인
+//  - 결제 결과/실패를 PNT 클라우드(IF_08)로 전송 (PaymentStore.sendToPNT)
+// 주의: 이 파일은 결제 핵심 로직이므로 동작 변경 금지.
+// ============================================================
 require("dotenv").config();
 const axios = require("axios");
 const config = require("../../config/key");
@@ -17,56 +28,17 @@ const os = require("os");
 
 const { v4: uuidv4 } = require("uuid");
 
+// PNT 인터페이스용 날짜 문자열 생성 (YYYYMMDDHHmmss)
 function formatIfDate(d = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
        + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
+// deadbolt "닫힘"으로 간주하는 상태값 목록
 const closedStates = ["LOCK", "LOCKED", "CLOSE", "CLOSED"];
 
-// const CARD_ERROR_CODE = {
-//   SUCCESS: 1,
-//   TIMEOUT: 2,
-//   CANCEL: 3,
-//   NOT_CONDITION: 4,
-//   FORMAT_ERROR: 5,
-//   CAT_RUNNING: 6,
-//   ERROR_RF: 7,
-//   ERROR_VAN: 8,
-//   ERROR_POS: 9,
-//   NETWORK_ERROR: 10,
-//   ERROR: 11,
-// };
-
-// function getCardErrorPubCode(error) {
-//   const code =
-//     error?.response?.data?.code ||
-//     error?.response?.data?.response_code ||
-//     error?.response?.data?.status ||
-//     error?.code;
-
-//   switch (code) {
-//     case "0x00": return CARD_ERROR_CODE.SUCCESS;
-//     case "0xB0": return CARD_ERROR_CODE.TIMEOUT;
-//     case "0xB1": return CARD_ERROR_CODE.CANCEL;
-//     case "0xB2": return CARD_ERROR_CODE.NOT_CONDITION;
-//     case "0xB3": return CARD_ERROR_CODE.FORMAT_ERROR;
-//     case "0xB4": return CARD_ERROR_CODE.CAT_RUNNING;
-//     case "0xB5": return CARD_ERROR_CODE.ERROR_RF;
-//     case "0xB6": return CARD_ERROR_CODE.ERROR_VAN;
-//     case "0xC0": return CARD_ERROR_CODE.ERROR_POS;
-//     case "0xC1":
-//     case "ECONNABORTED":
-//     case "ENOTFOUND":
-//     case "ECONNREFUSED":
-//       return CARD_ERROR_CODE.NETWORK_ERROR;
-//     case "0xFF":
-//     default:
-//       return CARD_ERROR_CODE.ERROR;
-//   }
-// }
-
+// 카드 승인 실패 시 PNT 클라우드로 결제 실패(IF_08, result_cd:'F') 전송
 async function sendCardErrorToPNT(errorCode, token, CardMethod, state = "1") {
   try {
     const external = axios.create({
@@ -141,6 +113,7 @@ async function sendCardErrorToPNT(errorCode, token, CardMethod, state = "1") {
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+// OS별 명령으로 mp3 음성 재생 (macOS: afplay, Linux: mpg123)
 function playMp3(filePath) {
   const platform = os.platform(); // 'darwin', 'linux', 'win32'
   let cmd;
@@ -171,27 +144,26 @@ function playDoorOpenVoice() {
 function playDeviceRunningVoice() {
     const audioPath = path.resolve(__dirname, '../Sounds/device_is_running.mp3');
     playMp3(audioPath);
-    // console.log("[VOICE] Door is still open over 1 minute. (play audio)");
 }
 
-// 사원증 결제 완료 시 음성 출력
+// 사원증(RFID) 결제 완료 시 음성 출력
 function playRFIDVoice() {
     const audioPath = path.resolve(__dirname, '../Sounds/RFID_payment.mp3');
     playMp3(audioPath);
-    // console.log("[VOICE] Door is still open over 1 minute. (play audio)");
 }
 
 // 0원 추론 시 음성 출력
 function playZeroPayVoice() {
     const audioPath = path.resolve(__dirname, '../Sounds/Zero_payment.mp3');
     playMp3(audioPath);
-    // console.log("[VOICE] Door is still open over 1 minute. (play audio)");
 }
 
+// 문 열림(door open) 모니터 타이머 상태
 let graceTimer = null;   // 1분 후 시작용 (setTimeout)
 let repeatTimer = null;  // 1분마다 반복용 (setInterval)
 let startedAt = null;
 
+// 문 열림 모니터 중지 (타이머 해제)
 function stopDoorOpenMonitor(reason = "") {
   if (graceTimer) clearTimeout(graceTimer);
   if (repeatTimer) clearInterval(repeatTimer);
@@ -203,6 +175,7 @@ function stopDoorOpenMonitor(reason = "") {
   if (reason) console.log("[DOOR] monitor stopped:", reason);
 }
 
+// 문 열림 모니터 시작: 1분 경과 시부터 1분마다 음성 안내
 function startDoorOpenMonitor(openedAt = Date.now()) {
   // 중복 방지 (OPEN이 연속 호출될 수 있으니)
   stopDoorOpenMonitor("restart");
@@ -217,6 +190,7 @@ function startDoorOpenMonitor(openedAt = Date.now()) {
   }, 60_000);
 }
 
+// 녹화 폴더명용 타임스탬프 생성 (YYYYMMDD_HHMMSS)
 function makeTimestampFolderName(d = new Date()) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -227,10 +201,9 @@ function makeTimestampFolderName(d = new Date()) {
   return `${yyyy}${mm}${dd}_${HH}${MM}${SS}`;
 }
 
+// 결제 세션별 카메라 녹화 루트 폴더 생성 (cwd 하위 타임스탬프 폴더)
 function MakeCameraFolder() {
-//   if (!localRoot) throw new Error("localRoot is required");
   const folderName = makeTimestampFolderName();
-//   const folderPath = path.join(localRoot, folderName);
   const folderPath = path.join(process.cwd(), `${folderName}`)
   fs.mkdirSync(folderPath, { recursive: true });
   return { folderName, folderPath };
@@ -273,13 +246,17 @@ function countZoneRecordings(folderPath) {
 }
 
 
-// let stopPolling = true;
-
+// 모델 서버(/api/judge/multi-zone)에 추론 요청.
+//  - checkOnly=true: 문 열기 전 모델 서버 상태를 1회만 확인 (400이면 BLOCK)
+//  - checkOnly=false: success=true 응답이 올 때까지 intervalMs 주기로 polling
+//  - productData(requestPayload)는 호출부와 공유되는 객체로, 폴링 중
+//    session_id/expected_triggers(watermark)가 갱신되어 다음 요청에 반영된다.
 async function modelPooling(productData, opts = {}) {
   const { intervalMs = 10_000, timeoutMs = 5 * 60_000, checkOnly = false } = opts;
   const started = Date.now();
 
   /**
+   * 모델 서버 요청 스키마 (참고):
    * class MultiZoneRequest(BaseModel):
     """Multi-Zone 판단 요청."""
 
@@ -289,29 +266,6 @@ async function modelPooling(productData, opts = {}) {
         description="상품 목록 (선택, 무게 검증용)",
     )
    */
-
-  // while (true) {
-  //   if (Date.now() - started > timeoutMs) throw new Error("Model inference timeout");
-  //   // console.log('product list', productData)
-
-  //   try {
-  //     const res = await axios.post(`${config.modelApi}/api/judge/multi-zone`, productData, { timeout: 30_000 });
-  //     const data = res.data;
-  //     console.log('[MODEL-RESPONSE]', data)
-
-  //     if (data.success === true) {
-  //       return data;
-  //     }
-  //   } catch (error) {
-  //     if (error.response && error.response.status === 400) {
-  //       // 4. 통신 에러/예외 발생 시: 에러 로그 찍고 null 반환하여 종료
-  //       console.error("[Model] Request failed (Network/System):", e?.message || e);
-  //       return;
-  //     }
-  //   }
-  //   await delay(intervalMs);
-  // }
-
 
   // [모드 1] 검증 모드 (checkOnly: true)
   // 문 열기 전에 1번만 실행해서 400 에러인지 확인하는 용도
@@ -371,9 +325,9 @@ async function modelPooling(productData, opts = {}) {
 }
 
 
+// 카메라 서버에 녹화 시작 요청 (save_path 하위에 영상 저장)
 async function requestTopCameraON({ save_path }) {
   try {
-    // const CameraSaveDirApi =  `${config.cameraApi}/recording/start`;
     const request = await axios.post(`${config.cameraApi}/recording/start`, { save_path: save_path });
     // 성공 시 응답 데이터 반환
     if (request.status === 200) {
@@ -390,10 +344,9 @@ async function requestTopCameraON({ save_path }) {
   }
 }
 
+// 카메라 서버에 녹화 종료 요청 (5초 대기 후 stop — 마지막 프레임 유실 방지)
 async function requestCameraOFF() {
   try {
-    // const CameraStopApi =  `${config.cameraApi}/recording/stop`;
-    // await delay(5000);
     await delay(5000);
     const response = await axios.post(`${config.cameraApi}/recording/stop`);
     if (response && response.status === 200) {;
@@ -413,9 +366,9 @@ async function requestCameraOFF() {
 }
 
 
+// IO board SSE(doors 스트림)를 구독해 deadbolt가 닫힐 때까지 대기
 function waitForDeadboltClose() {
     return new Promise((resolve, reject) => {
-        // [수정] 문서에 명시된 SSE 스트림 엔드포인트 사용
         const deadboltSource = new EventSource(`${config.ioboardApi}/sse?streams=doors`);
 
         const statusHandler = (event) => {
@@ -447,7 +400,7 @@ function waitForDeadboltClose() {
 }
 
 
-// 전역 변수 초기화 함수 (데이터 오염 방지)
+// 결제 세션 전역 변수 초기화 (다음 결제와의 데이터 오염 방지)
 function resetGlobalTokens() {
     paymentToken = null;
     samsungpayToken = null;
@@ -460,19 +413,10 @@ function resetGlobalTokens() {
     inferenceResult = null;
 }
 
-
-// let paymentToken = null
-// let samsungpayToken = null
-// let rfidToken = null
-
-// let preAmount = null;
-// let preAuthNum = null;
-// let preAuthDate = null;
-// let CardMethod = null;
-
 let isProcessing = false;
 
-// 카드 삽입 -- 결제 기능 시작
+// 결제 진입점: card terminal SSE를 구독하고
+// 카드/삼성페이/RFID 토큰 수신 시 startProcess()로 결제 세션 시작
 async function init() {
     // --- 1. 이벤트 리스너 설정 ---
     const TokenHandler = new EventSource(`${config.cardTerminalApi}/sse`);
@@ -540,38 +484,8 @@ async function init() {
         }
       }
     });
-    // TokenHandler.addEventListener('samsung_pay_init',  (event) => {
-    //     console.log('samsungpay::::', event.data); // {} -> 처음 태그 시
-    //     if (event.data) {
-    //         axios.post(`${config.cardTerminalApi}/payment/samsung-pay/approve`, {
-    //             amount: "5",
-    //             authorization_type: "PRE_AUTH", // 후결제: PURCHASE
-    //             items: null,
-    //             // display_message: "SamsungPay Payment"
-    //         }).then((response) => {
-    //             console.log('Samsung Pay Approval Response:', response.data);
-                
-    //             if (response.data.status == 'Y') {
-    //                 preAuthNum = response.data.authorization_number;
-    //                 preAuthDate = response.data.authorization_date;
-    //                 samsungpayToken = response.data.vankey;
-    //                 preAmount = '5';
-    //                 CardMethod = 'S'
-    //                 console.log('[Samsungpay-Token] Token received:', samsungpayToken);
-    //                 startProcess(samsungpayToken, CardMethod); 
-    //             } else if (response.data.status == 'N') {
-    //               console.log('[Samsungpay-Token] Token received:', response.data.response_code)
-    //               const cardState = await CardTerminalStatusAPI(response.data.response_code);
-    //               CardTerminalErrorState(cardState);
-    //             }
-    //         }).catch((error) => {
-    //             console.error('Samsung Pay Approval Error:', error);
-    //         });
-    //     } 
-    // });
 
-    // rfid:::: {"data": "1763193013"}
-    // 사원증 토큰 수신
+    // 사원증(RFID) 토큰 수신 — payload 예: {"data": "1763193013"}
     TokenHandler.addEventListener('rfid_init', async (event) => {
       try {
         const checkRFID = await ModelBrunchCheck({
@@ -617,16 +531,16 @@ async function init() {
 }
 
 // --- 2. 프로세스 시작 및 상태 체크 ---
+// health check(card terminal/deadbolt/loadcell/camera) 통과 시 Payments() 실행.
+// getProcessing/setProcessing으로 동시 결제 진입을 차단(lock)한다.
 async function startProcess(token, CardMethod) {
-    // [수정] 1. 프로세스가 이미 실행 중이면 요청 무시 (Busy Check)
+    // 1. 프로세스가 이미 실행 중이면 요청 무시 (busy check)
     if (getProcessing()) {
         console.warn('[SYSTEM] Device is busy. Ignoring new request');
-        // 필요 시 사용자에게 "사용 중입니다" 음성 안내 추가 가능
         playDeviceRunningVoice()
-        return; 
+        return;
     }
-    // [수정] 2. 프로세스 잠금 (Lock)
-    // isProcessing = true;
+    // 2. 프로세스 잠금 (lock)
     setProcessing(true);
     try {
       const CameraStatus = await CameraStatusAPI()
@@ -662,23 +576,23 @@ async function startProcess(token, CardMethod) {
     } catch (error) {
         console.error("[PAYMENT] Process failed:", error);
       } finally {
-          // [수정] 3. 프로세스 잠금 해제 (Unlock)
-          // 성공하든 실패하든 반드시 실행되어야 함.
-          // isProcessing = false;
+          // 3. 프로세스 잠금 해제 (unlock) — 성공/실패와 무관하게 반드시 실행
           setProcessing(false);
-          
-          // [권장] 다음 결제를 위해 전역 토큰 변수 초기화
-          resetGlobalTokens(); 
-          
+
+          // 다음 결제를 위해 전역 토큰 변수 초기화
+          resetGlobalTokens();
+
           console.log("[SYSTEM] Process finished. Ready for next user.");
       }
 }
 
-// let LoadcellData = null
 let paymentResponse = null;
 let inferenceResult = null;
 
 // --- 3. 결제 및 제어 로직 ---
+// 결제 세션 본체: 상품 조회 → 모델 서버 검증 → deadbolt OPEN → 녹화 시작
+// → 추론 polling → deadbolt CLOSE 감지(watermark 첨부) → 녹화 종료
+// → 추론 금액으로 카드 승인 → PNT로 결제 결과 전송
 async function Payments(token, CardMethod) {
     const divisionIdx = config.divisionIdx;
     const deviceIdx = config.deviceIdx;
@@ -735,42 +649,11 @@ async function Payments(token, CardMethod) {
     const openResult = await callApiToControlDeadbolt("OPEN");
     if (openResult !== "OPEN" && openResult !== 'UNLOCK') throw new Error(`Failed to open door. Status: ${openResult}`) 
 
-    // 모델 서버 요청 (POST)
-    // console.log("[Model] Sending data for inference...", requestPayload);
-    // stopPolling = false;
+    // 모델 서버 추론 polling 시작 (비동기 — 문이 닫힌 뒤 결과를 await)
     const inferencePromise = modelPooling(requestPayload, { intervalMs: 10_000 });
-    // if (inferencePromise == null) return;
 
-    // 문 열림 알림 시작 - 1분간
+    // 문 열림 알림 시작 (1분 경과 시부터 음성 안내)
     startDoorOpenMonitor(Date.now());
-    
-    // // 상품 정보 추출
-    // let productData = []
-    // let closeEventData = ''
-    // if (productList) { productData = productList.DATA.product_list }
-    // // console.log(productData)
-    // // 2. API 스펙(ProductInfo)에 맞춰 매핑 (Mapping)
-    // const formattedProducts = productData.map((item) => {
-    //   return {
-    //     product_idx: item.product_idx,      // 매칭: P17355176366172772
-    //     product_name: item.product_eng_name,    // 매칭: 광동) 제주 삼다수 500ml
-    //     sale_price: parseInt(item.sale_price),        // 매칭: 1500 (Integer)
-    //     product_weight: item.product_loadcell_weight, // 매칭: '530' (String, API 정의와 일치)
-    //     has_loadcell: item.has_loadcell == 'Y' ? "true" : item.has_loadcell == 'N' ? "false" : 'null',
-    //     stock_qty: item.stock_qty
-    //   };
-    // });
-
-    // // 3. 최종 전송 데이터 구성 (MultiZoneRequest)
-    // const requestPayload = {
-    //   session_id: openResult == 'UNLOCK' ? 'OPEN' : closeEventData == 'LOCKED' ? 'CLOSE' : 'NULL',
-    //   products: formattedProducts
-    // };
-    
-    // // 모델 서버 요청 (POST)
-    // console.log("[Model] Sending data for inference...", requestPayload);
-    // // stopPolling = false;
-    // const inferencePromise = modelPooling(requestPayload, { intervalMs: 10_000 });
 
     // [6] 상단 카메라 ON 요청
     await requestTopCameraON({ save_path: folderPath});
@@ -781,9 +664,8 @@ async function Payments(token, CardMethod) {
 
     // [9] 데드볼트 상태 (close) (sensor → node) + (상단 카메라 off + folder snapshot) 저장 (node → camera python)
     try {
-      // 1. 문이 닫히고 로그 경로가 올 때까지 대기
+      // 1. deadbolt가 닫힐 때까지 대기
       const closeEventData = await waitForDeadboltClose();
-      // console.log('ddddddddddd', closeEventData)
       const state = closeEventData.state;
       if (state && closedStates.includes(state)) {
           // 엣지 워터마크 (CRK-model-HG issue #8): 문 닫힌 순간의 존별 녹화 수를
@@ -797,15 +679,14 @@ async function Payments(token, CardMethod) {
             console.log("[WATERMARK] expected_triggers:", expectedTriggers);
           }
           requestPayload.session_id = 'CLOSE';
-          // stopPolling = true;
           stopDoorOpenMonitor("deadbolt closed");
           console.log("[DEADBOLT] Door closed detected:", closeEventData.state);
+        // IO board 측 loadcell 기록 종료 (실패해도 결제 흐름은 계속)
         try {
-          await axios.post(`${config.ioboardApi}/recording/stop`, {}); 
+          await axios.post(`${config.ioboardApi}/recording/stop`, {});
           await delay(5000);
-          // console.log("녹화 종료 성공");
         } catch (error) {
-          // console.error("녹화 종료 실패:", error);
+          // recording stop 실패는 무시 (결제 흐름 지속)
         }
         try {
           await requestCameraOFF();
@@ -820,24 +701,8 @@ async function Payments(token, CardMethod) {
         return; // 에러 시 중단
     }
 
-    // 로드셀 무게 log 불러오기
-    // try {
-    //       const resp = await axios.get(`${config.ioboardApi}/recording/data`, {});
-    //       // Use only the data payload (avoid passing axios response object which contains circular refs)
-    //       LoadcellData = resp.data;
-    //       // console.log('[LoadcellData]', LoadcellData.logs, { depth: null })
-    //       console.log('[LoadcellData] loadcell data responsed')
-    //     } catch (error) {
-    //       if (error.response) {
-    //         console.error("로드셀 데이터 갖고오기 실패:", error.response.data);
-    //       } else {
-    //         console.error("로드셀 데이터 갖고오기 실패:", error.message);
-    //       }
-    //     } // 여기까지는 확인 완료 --> 0129
-    // [10] 모델 서버에 상품 목록 + 카메라 폴더명 + 로드셀 데이터 전송 → 추론 결과 수신
-    // [10] 모델 서버에 상품 목록 → 추론 결과 수신
-    // [Model] request failed: Request failed with status code 422
-    // product_idx 기준 map 생성
+    // [10] 모델 서버 추론 결과 수신 후 결제 승인 처리
+    // product_idx 기준 상품 마스터 map 생성 (승인 items 구성용)
     const productMap = new Map(
         productData.map(p => [
             String(p.product_idx),
@@ -1025,13 +890,7 @@ async function Payments(token, CardMethod) {
     } catch (error) {
         console.error("[MODEL/PAYMENT] Inference Request Failed:", error.message);
         return;
-    } 
-    // finally {
-    //     isProcessing = false;
-    //     resetGlobalTokens(); 
-        
-    //     console.log("[SYSTEM] Process finished. Ready for next user.");
-    // }
+    }
 }
 
 module.exports = { Payments, router, init };

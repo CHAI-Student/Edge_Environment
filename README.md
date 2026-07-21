@@ -275,6 +275,20 @@ req X → 10초 뒤에 카메라 off
 12. 결제정보 → PNT
 ```
 
+### ⚠️ 운영 배포 전 필수 수정 — 결제 금액 하드코딩
+
+현재 카드 승인/취소 요청의 `amount`가 **테스트 값 `'5'`(5원)로 하드코딩**되어
+있다. 운영 단에서 실금액으로 수정 예정이며, 수정 전까지 실기기에서 결제 시
+실제 상품 금액이 아닌 5원이 승인된다.
+
+- `server/routes/RestAPI/Payments.js`: 승인 요청의 `amount: '5'`
+  (실금액은 모델 추론 결과 `total_price` — 주석 처리 상태)
+- `server/routes/Mqtt/Repayment.js`: CANCEL/REPAY의 approve·cancel 요청 4곳
+  `amount: '5'` (실금액 `reqData.approve_price`는 주석 처리 상태)
+
+운영 전환 시 위 4+1곳의 `'5'`를 실금액 변수로 교체하고 결제 e2e 테스트를
+수행할 것.
+
 ### 신규 상품 등록 및 학습 모델 임베딩 기능 로직
 
 ```

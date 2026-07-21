@@ -1,3 +1,9 @@
+// ============================================================
+// mongodbDataUpload.js — 수동 실행용 테스트 스크립트
+// 역할: ModelBrunchCheck/ProductList API 결과로 DivisionList, ProductsList,
+//       DeviceTypeList(storageType COLD/FROZEN별 brunchName 구성)를 upsert하는
+//       전체 동기화 흐름을 단독 실행으로 검증한다. (ProductMongoSyncService의 원형)
+// ============================================================
 const config = require("../config/key");
 const mongoose = require("mongoose");
 require("dotenv").config();

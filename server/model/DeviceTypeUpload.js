@@ -1,6 +1,16 @@
+// ============================================================
+// DeviceTypeUpload.js
+// 역할: 매장(division) x 저장 타입(COLD/FROZEN) 단위의 장비 그룹 메타를 담는
+//       Mongoose 모델. brunchName(모델 배포 브런치, unique index), deviceIdx 배열,
+//       modelVersion, 상품별 training_status 매핑(products), 학습 상태/일자를 관리.
+// 컬렉션명: DeviceTypeList / 사용처: AckCollect.js, ProductMongoSyncService,
+//       server/test/mongodbDataUpload.js
+// ============================================================
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
+// products 배열의 서브 스키마: ProductUpload 문서 참조(ref)와
+// 해당 상품의 training_status(기본 "2")를 함께 보관한다.
 const deviceTypeProductSchema = new Schema(
   {
     product: { type: Schema.Types.ObjectId, ref: "ProductUpload", required: true },

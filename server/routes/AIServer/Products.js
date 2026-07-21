@@ -1,3 +1,11 @@
+// ============================================================
+// Products.js (AIServer)
+// 역할: model 학습용 상품 이미지 업로드 / 메타데이터 저장 라우터.
+//  - POST /uploads/images: multer 로 수신한 이미지들을 MinIO(기본 bucket:
+//    chaiimage)의 productImg/{productIdx}_{rootName}/ 경로에 업로드한다.
+//  - POST /products: 업로드된 폴더 정보와 상품 메타데이터(loadcell weight,
+//    training 상태 등)를 MongoDB(ProductUpload 컬렉션)에 upsert 한다.
+// ============================================================
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
@@ -5,6 +13,7 @@ const { ProductUpload } = require("../../model/ProductUpload");
 const crypto = require("crypto");
 const path = require("path");
 
+// 파일 buffer 의 sha1 해시 계산 (object key 중복 방지용 suffix 로 사용)
 const sha1 = (buffer) => crypto.createHash("sha1").update(buffer).digest("hex");
 
 //=================================
@@ -19,10 +28,12 @@ const upload = multer({
   },
 }).array("files", 2000);
 
+// 파일/폴더명에 사용할 수 없는 문자를 '_' 로 치환
 function safe(s) {
   return String(s || "").replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+// MinIO putObject(callback 방식)를 Promise 로 감싼 helper
 function putObjectAsync(minioClient, bucket, key, buffer, meta) {
   return new Promise((resolve, reject) => {
     minioClient.putObject(bucket, key, buffer, meta, (err, etag) => {
@@ -35,6 +46,8 @@ function putObjectAsync(minioClient, bucket, key, buffer, meta) {
 //=================================
 //       MinIO Image Upload
 //=================================
+// 상품 이미지 다건 업로드: relPaths 기준 경로를 유지하며 MinIO 에 저장하고
+// 업로드된 object key / etag / size 목록을 반환한다.
 router.post("/uploads/images", (req, res) => {
   upload(req, res, async (err) => {
     try {
@@ -135,6 +148,8 @@ router.post("/uploads/images", (req, res) => {
 //=================================
 //      MongoDB Meta Save / Upsert
 //=================================
+// 상품 메타데이터 upsert: productIdx(+productEngName) 기준으로 MongoDB 에
+// 저장하며, 신규 문서에는 createDate / eventPromotion 을 함께 세팅한다.
 router.post("/products", async (req, res) => {
   try {
     const { productIdx, divisionIdx, productEngName, foldername, folderpath } = req.body;

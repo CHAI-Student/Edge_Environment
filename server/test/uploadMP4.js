@@ -1,3 +1,8 @@
+// ============================================================
+// uploadMP4.js — 수동 실행용 테스트 스크립트 (node server/test/uploadMP4.js)
+// 역할: 로컬 폴더의 camera 영상(cam_0.mp4, cam_2.mp4)을 MinIO의
+//       productImg/{productIdx}_{폴더명}/ prefix로 업로드하고 소요 시간을 측정한다.
+// ============================================================
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
