@@ -1,3 +1,16 @@
+// ============================================================
+// RebootMqtt.js
+// 역할: 클라우드(PNT/CHAI)의 재부팅 명령(MANUAL/EMBEDDING)을 MQTT로 수신하여
+//       시스템 재부팅을 수행하는 모듈. EMBEDDING 모드에서는 재부팅 전에
+//       MinIO trained_model/에서 새 모델(.pt/.onnx)을 내려받아 engine을 빌드하고
+//       .env의 MODEL_VERSION을 갱신한다. 재부팅 후에는 reboot.flag를 기반으로
+//       자가 진단(service/JWT/MQTT health check)과 IF07 배포 완료 notify,
+//       COMPLETED ack 발행까지 처리한다.
+// MQTT topic: 구독 chai/device/{deviceIdx}/cmd/reboot
+//             발행 chai/device/{deviceIdx}/ack/reboot (IF_01 ack)
+// 외부 연동: MinIO(trained_model 다운로드), systemctl(재부팅, engine 빌드 서비스),
+//            REST API IF_13(DeviceInfo) / IF_11(ProductList) / IF_07(TrainingStore)
+// ============================================================
 const path = require("path");
 const fs = require("fs/promises");
 const { createWriteStream } = require("fs");
@@ -14,7 +27,6 @@ const { ProductList } = require("../RestAPI/ProductList");
 const { TrainingStore } = require("../RestAPI/TrainingStore");
 
 const {
-  notifyAiTrainingStore,
   fetchCurrentDoorState,
 } = require("./AckCollect");
 
@@ -30,14 +42,13 @@ const REBOOT_FLAG = path.resolve(__dirname, "../../log/reboot.flag");
 const MINIO_BUCKET = config.minioBucket || "chaiimage";
 const TRAINED_MODEL_PREFIX = "trained_model/";
 
-const LOCAL_MODEL_CODES_DIR =
-  "/home/chai/Desktop/Codes/CRK-model";
+// 모델 코드/모델 저장 경로 및 engine 빌드 env 파일 경로 (config에서 주입,
+// env 미설정 시 기존 /home/chai/Desktop/... 경로가 기본값)
+const LOCAL_MODEL_CODES_DIR = config.modelCodesDir;
 
-const LOCAL_MODEL_DIR =
-  "/home/chai/Desktop/Codes/CRK-model/models";
+const LOCAL_MODEL_DIR = config.modelDir;
 
-const ENGINE_BUILD_ENV_FILE =
-  "/home/chai/Desktop/crk-model-build.txt";
+const ENGINE_BUILD_ENV_FILE = config.engineBuildEnvFile;
 
 let rebooting = false;
 
@@ -49,12 +60,14 @@ const minioClient = new Minio.Client({
   secretKey: config.minioSecretKey,
 });
 
+// 지정한 시간(ms)만큼 대기하는 Promise를 반환한다.
 function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
 }
 
+// 파일 존재 여부를 확인한다(stat 실패 시 false).
 async function fileExists(filePath) {
   try {
     await fs.stat(filePath);
@@ -64,6 +77,8 @@ async function fileExists(filePath) {
   }
 }
 
+// .env 파일에서 JWT_TOKEN 값을 다시 읽어 process.env에 반영한다.
+// 유효한 토큰(길이 10 초과)이 없으면 null을 반환한다.
 async function reloadJwtTokenFromEnvFile() {
   try {
     if (!(await fileExists(ENV_FILE_PATH))) {
@@ -103,6 +118,8 @@ async function reloadJwtTokenFromEnvFile() {
   }
 }
 
+// 재부팅 직후 JWT Access Token이 발급될 때까지 polling으로 대기한다.
+// 환경변수에 없으면 .env 재로딩을 시도하고, timeout 시 false를 반환한다.
 async function waitForJwtToken({
   timeoutMs = 120000,
   intervalMs = 3000,
@@ -498,6 +515,9 @@ async function runStartupDiagnostics(
   return serviceResult.ok && jwtOk && mqttOk;
 }
 
+// EMBEDDING 재부팅 후속 처리: IF11(ProductList)로 매장 상품 전체를 조회하여
+// 유효한 상품만 Map으로 구성한 뒤, IF07(TrainingStore)로
+// training_status=1(배포 완료)을 한 번에 전송한다.
 async function notifyDeployCompleteForAllProducts(
   divisionIdx,
   deviceIdx
@@ -1316,9 +1336,10 @@ function startCrkModelBuildServiceWithLogs() {
 }
 
 /**
- * Camera, Deadbolt, Loadcell 상태 확인
+ * Camera, Deadbolt, Loadcell 상태 확인 후 전체 정상 여부(boolean)를 반환
+ * (AckCollect.js의 ProductCollectionHealth와 달리 상태 객체가 아닌 boolean 반환)
  */
-async function ProductCollectionHealth() {
+async function isDeviceSensorsHealthy() {
   const [
     cameraStatus,
     deadboltStatus,
@@ -1615,7 +1636,7 @@ async function RebootMqtt() {
           }
 
           const healthOk =
-            await ProductCollectionHealth();
+            await isDeviceSensorsHealthy();
 
           console.log(
             `[ModelEmbedding] health result: ` +

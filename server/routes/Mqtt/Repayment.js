@@ -1,3 +1,13 @@
+// ============================================================
+// Repayment.js
+// 역할: 클라우드에서 내려오는 payment 취소(CANCEL)/재결제(REPAY) 명령
+//   (MQTT topic: chai/device/{deviceIdx}/cmd/payment)을 수신·처리하고,
+//   결과 ack(IF_09)를 chai/device/{deviceIdx}/ack/payment 로 publish한다.
+// 연동: card terminal API(/payment/token/approve, /payment/token/cancel,
+//   /payment/samsung-pay/cancel), PaymentProcessing(카드 단말기 사용 중 여부 확인).
+// 참고: REPAY는 신규 금액 승인 후 기존 결제를 vankey로 취소하는
+//   "승인 후 취소" 방식이며 신용카드(CARD)만 지원한다.
+// ============================================================
 const axios = require("axios");
 const config = require("../../config/key");
 const { getClient } = require("./MqttClient");
@@ -10,19 +20,16 @@ const { v4: uuidv4 } = require("uuid");
 //   if (tokenId.startsWith("VANKEY")) return "N";  // Credit Card
 // }
 
+// IF_DATE 형식(yyyyMMddHHmmss)의 timestamp 문자열 생성
 function formatIfDate(d = new Date()) {
     const pad = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`
          + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
-function approveDate(d = new Date()) {
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`;
-        //  + `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-}
-
 // 서버 시작 시 1회만 호출해서 구독/처리 루프를 올리는 방식 추천
+// payment 명령 처리 진입점: CANCEL(결제 취소)과 REPAY(재결제) 분기 처리
+// 카드 단말기 사용 중이면 즉시 실패 ack 응답
 function Repayment() {
   const deviceIdx = config.deviceIdx;
   const repaymentSub = `chai/device/${deviceIdx}/cmd/payment`;
@@ -434,106 +441,6 @@ function Repayment() {
           });
         }
       }
-      // if (reqData.payment_mode === "CARD") {
-      //   //새로운 결제 승인
-      //   const oldToken = reqData.org_token_id
-      //   const oldApproveAt = reqData.approve_at
-      //   const oldApprovePrice = reqData.approve_price // 여기에 새로 결제할 가격 정보가 들어오는건지 아니면 old_approve_price로 들어오는 건지 확인 필요 (0213)
-      //   const oldApproveNo = reqData.approve_no
-
-      //   let paymentAt = null;
-      //   let newApproveNo = null;
-      //   let newApproveAt = null;
-      //   let newApprovePrice = null;
-      //   let newToken = null;
-      //   let approveJson = null;
-
-      //   const approveRes = await axios.post(`${config.cardTerminalApi}/payment/token/approve`, {
-      //     amount: String(oldApprovePrice),
-      //     vankey_hash: oldToken,
-
-      //   }).then((response) => {
-      //     if (response.data.status == 'Y' && response.data.response_code == 0) {
-      //       console.log('[REPAY] response success: ', response.data)
-      //       paymentAt = formatIfDate();
-      //       newApproveNo = response.data.authorization_number
-      //       newApproveAt = response.data.authorization_date
-      //       newApprovePrice = String(oldApprovePrice)
-      //       newToken = response.data.vankey
-      //       approveJson = response.data
-      //     }
-      //     axios.post(`${config.cardTerminalApi}/payment/token/cancel`, {
-      //       amount: String(oldApprovePrice),
-      //       original_authorization_date: oldApproveAt,
-      //       original_authorization_number: oldApproveNo,
-      //       vankey_hash: oldToken,
-      //     }).then((canRes) => {
-      //       if (canRes.data.status == 'Y' && canRes.data.response_code == 0) console.log('[REPAY/CANCEL] repayment cancel is successful: ', canRes);
-      //     })
-      //   })
-      //   const ackPayload = JSON.stringify({
-      //     HEADER: {
-      //       IF_ID: "IF_09",
-      //       IF_SYSID: ifSysId,
-      //       IF_HOST: "CRKPNTCHAI",
-      //       IF_DATE: formatIfDate(),
-      //     },
-      //     //여기 마무리
-      //     DATA: {
-      //       device_idx: reqData.device_idx,
-      //       division_idx: reqData.division_idx,
-      //       payment_idx: reqData.payment_idx,
-      //       token_id: newToken,
-      //       org_token_id: oldToken,
-      //       payment_at: paymentAt,
-      //       request_type: "REPAY",
-      //       approve_at: newApproveAt,
-      //       approve_price: newApprovePrice,
-      //       approve_no: newApproveNo,
-      //       org_approve_at: oldApproveAt,
-      //       org_approve_price: oldApprovePrice,
-      //       org_approve_no: oldApproveNo,
-      //       result_cd: "S",
-      //       result_msg: "재결제가 완료되었습니다",
-      //     },
-      //   });
-
-      //   client.publish(repaymentPub, ackPayload, { qos: 1, retain: false }, (e) => {
-      //     if (e) console.error("[REPAY] Publish Error:", e.message);
-      //     else console.log("[REPAY] Success ACK sent");
-      //   });
-      // } else if (reqData.payment_mode == 'SAMSUNG') {
-      //   console.log('[REPAY] SamsungPay cannot use Repay system')
-
-      //   const ifSysId = payload.HEADER.IF_SYSID || uuidv4();
-
-      //   const ackPayload = JSON.stringify({
-      //     HEADER: {
-      //       IF_ID: "IF_09",
-      //       IF_SYSID: ifSysId,
-      //       IF_HOST: "CRKPNTCHAI",
-      //       IF_DATE: formatIfDate(),
-      //     },
-      //     DATA: {
-      //       device_idx: reqData.device_idx,
-      //       division_idx: reqData.division_idx,
-      //       payment_idx: reqData.payment_idx,
-      //       token_id: reqData.org_token_id,
-      //       request_type: "REPAY",
-      //       result_cd: "F",
-      //       result_msg: "[재결제] 삼성페이는 재결제가 불가합니다. 결제 취소를 이용해주세요.",
-      //     },
-      //   });
-
-      //   client.publish(repaymentPub, ackPayload, { qos: 1, retain: false }, (e) => {
-      //     if (e) console.error("[REPAY] Publish Error:", e.message);
-      //     else console.log("[REPAY] Busy ACK sent");
-      //   });
-      //   return;
-      // } else {
-      //   console.error("[CANCEL] Unknown Payment Method:", reqData.token_id);
-      //   return;
-      // }
     }
   });
 }

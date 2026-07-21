@@ -1,3 +1,10 @@
+// ============================================================
+// TrainingStore.js
+// 역할: 클라우드(PNT/CHAI) REST API IF_07(학습 진행 상태 전달) 호출 모듈.
+//  - product 별 training 상태(productMap + trainingStatus)를 product_list
+//    배열로 변환하여 /chai/training/store 에 POST 한다.
+//  - 인증은 config.jwtToken(Bearer) 사용.
+// ============================================================
 const axios = require("axios");
 const config = require("../../config/dev");
 const { v4: uuidv4 } = require("uuid");
@@ -5,6 +12,7 @@ const { divisionIdx } = require("../../config/prod");
 
 let currentTrainingStatus = null;
 
+// 현재 저장된 training 상태 반환
 function getTrainingStatus() {
   return currentTrainingStatus;
 }
@@ -42,7 +50,7 @@ async function TrainingStore(productMap, trainingStatus) {
         );
 
     try {
-        const token = process.env.JWT_TOKEN;
+        const token = config.jwtToken;
         if (!token) {
             throw new Error("JWT_TOKEN not set");
         }

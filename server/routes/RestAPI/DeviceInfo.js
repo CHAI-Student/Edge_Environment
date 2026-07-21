@@ -1,8 +1,15 @@
-// src/Service/DeviceService.js
+// ============================================================
+// DeviceInfo.js
+// 역할: 클라우드(PNT/CHAI) REST API IF_13(장비 정보 조회) 호출 모듈.
+//  - /chai/device/info 에 division_idx / device_idx 를 담아 POST 하고,
+//    성공(result_cd === "S") 시 device_list 배열을 반환한다.
+//  - 인증은 config.jwtToken(Bearer) 사용.
+// ============================================================
 const axios = require("axios");
 const config = require("../../config/key");
 const { v4: uuidv4 } = require("uuid");
 
+// IF 규격(YYYYMMDDHHMMSS)의 날짜 문자열 생성
 function formatIfDate(d = new Date()) {
     const pad = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`
@@ -21,7 +28,7 @@ const external = axios.create({
  * @param {string} deviceIdx - 장비코드 
  */
 async function DeviceInfo() {
-    const token = process.env.JWT_TOKEN;
+    const token = config.jwtToken;
     if (!token) {
         throw new Error("JWT_TOKEN not set");
     }

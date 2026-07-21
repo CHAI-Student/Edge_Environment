@@ -1,8 +1,16 @@
+// ============================================================
+// ModelBrunchEdit.js
+// 역할: 클라우드(PNT/CHAI) REST API IF_14(장비 정보 저장) 호출 모듈.
+//  - /chai/device/store 에 device_list(brunch_name, brunch_update,
+//    model_version, model_update_date)를 담아 POST 하여 장비의
+//    model brunch 정보를 갱신(edit)한다.
+//  - 인증은 config.jwtToken(Bearer) 사용.
+// ============================================================
 const axios = require("axios");
 const config = require("../../config/key");
 const { v4: uuidv4 } = require("uuid");
-const { devAutoLogin } = require("../auth");
 
+// IF 규격(YYYYMMDDHHMMSS)의 날짜 문자열 생성
 function formatIfDate(d = new Date()) {
     const pad = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`
@@ -16,12 +24,13 @@ const external = axios.create({
 });
 
 // 외부 API 호출 함수
+// [IF_14] 장비의 model brunch / model version 정보를 클라우드에 저장(갱신)
 async function ModelBrunchEdit({
   divisionIdx = config.divisionIdx,
   deviceIdx = null,
   productIdx = null,
 } = {}) {
-  const token = process.env.JWT_TOKEN;
+  const token = config.jwtToken;
   if (!token) {
     throw new Error("JWT_TOKEN not set");
   }
