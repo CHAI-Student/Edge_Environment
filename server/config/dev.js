@@ -20,7 +20,8 @@ module.exports = {
     // divisionIdx: 'DI17647205538493077',
     // 테스트용
     // divisionIdx: 'DI17790813642907755', // 냉장 학습용 (여의도점)
-    divisionIdx: 'DI17798460900133031', // 냉장 통테용 (부산점)
+    // divisionIdx: 'DI17798460900133031', // 냉장 통테용 (부산점)
+    divisionIdx: 'DI17792405367061726', // 냉장 포인트점
     // divisionIdx: 'DI17790813642907755', // 냉동 테스트용
     
     
@@ -29,7 +30,8 @@ module.exports = {
     // deviceIdx: 'DE17683631997086480',
     // 테스트용
     // deviceIdx: 'DE17790815108130388', // 냉장 학습용
-    deviceIdx: 'DE17798461293792881', // 냉장 통테용
+    // deviceIdx: 'DE17798461293792881', // 냉장 통테용
+    deviceIdx: 'DE17792408034444215', // 냉장 포인트점
     // deviceIdx: 'DE17815818605453073', // 냉동 테스트용 
     
     // PNT RestAPI 연결
