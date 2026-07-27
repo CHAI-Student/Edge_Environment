@@ -145,6 +145,11 @@ mqttModule.init().catch((e) => {
     console.error('[APP] MQTT init during server start failed:', e?.message || e);
 });
 
+// 로드셀 영점(zeroset) 자동화 초기화
+//  - 측정 보증 30분 경과 기준 주기 실행 + 기동 직후 1회
+//  - 세션 종료 후 1회는 Payments.js가 직접 발사
+require("./routes/RestAPI/LoadcellZeroset").init();
+
 // ============================================
 // 서버 시작
 // ============================================

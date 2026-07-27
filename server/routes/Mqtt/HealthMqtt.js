@@ -393,6 +393,10 @@ async function HealthMqtt() {
     // const CardTerminalStatus = '39'
 
     const publishOnce = async () => {
+      // 진행 중 로드셀 영점(calibrate)이 있으면 완료 후 조회 — calibrate의
+      // 시리얼 점유로 /health가 타임아웃돼 일시 오류가 클라우드로 보고되는
+      // 것을 방지한다 (순환 참조 방지를 위해 lazy require)
+      await require("../RestAPI/LoadcellZeroset").waitForIdle();
       let CardTerminalStatus = await CardTerminalStatusAPI();
       if (CardErrorState) {
         CardTerminalStatus = CardErrorState;
