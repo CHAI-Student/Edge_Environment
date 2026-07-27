@@ -1746,11 +1746,18 @@ async function AckCollect() {
   });
 }
 
+// 진행 중인 상품 수집 세션이 있는지 — 수집 중 로드셀 영점(calibrate)이
+// 실행되면 수집 데이터가 오염되므로 LoadcellZeroset 가드에서 사용한다
+function hasActiveCollectSession() {
+  return collectSessions.size > 0;
+}
+
 module.exports = {
   AckCollect,
   fetchCurrentDoorState,
   ProductCollectionHealth,
   notifyAiTrainingStore,
+  hasActiveCollectSession,
 };
 
 // const mqtt = require('mqtt');
@@ -2159,4 +2166,3 @@ module.exports = {
 // }
 
 // module.exports = { AckCollect };
-

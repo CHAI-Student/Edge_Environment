@@ -20,6 +20,7 @@ const fs = require("fs");
 const path = require("path");
 const { callApiToControlDeadbolt } = require('../Mqtt/DeadboltApiService');
 const { getProcessing, setProcessing } = require("./PaymentProcessing");
+const LoadcellZeroset = require("./LoadcellZeroset");
 const { EventSource } = require('eventsource');
 const { sendToPNT } = require("./PaymentStore");
 const { ModelBrunchCheck } = require("./ModelBrunchCheck");
@@ -521,6 +522,10 @@ async function startProcess(token, CardMethod) {
     // 2. 프로세스 잠금 (lock)
     setProcessing(true);
     try {
+      // 진행 중인 로드셀 영점(calibrate)이 있으면 완료까지 대기 —
+      // calibrate가 IO board 시리얼을 점유한 채 health check(GET /health,
+      // timeout 5s)에 들어가면 타임아웃으로 세션이 거절될 수 있다
+      await LoadcellZeroset.waitForIdle();
       const CameraStatus = await CameraStatusAPI()
       // let CardTerminalStatus = await CardTerminalStatusAPI()
       const CardTerminalStatus = '39'
@@ -671,6 +676,10 @@ async function Payments(token, CardMethod) {
         } catch (e) {
           console.error("[CAM] OFF failed:", e?.message || e);
         }
+        // 로드셀 영점 1회 (fire-and-forget) — 문 닫힘·녹화/카메라 종료로
+        // 로드셀 소비자가 없는 지점이며, calibrate 3~4초는 이후 추론 대기~
+        // 결제 승인 구간에 흡수된다. 측정 보증(30분) 타이머도 여기서 리셋.
+        LoadcellZeroset.fireAfterSession();
       } else {
         console.log("[DEADBOLT] Close event received but state not closed:", state);
       }
