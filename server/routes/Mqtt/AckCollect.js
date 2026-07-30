@@ -494,13 +494,70 @@ async function uploadFolderToMinio({
   };
 }
 
-async function getNextTrainProductIdx() {
-  const last = await ProductUpload.findOne({}, { trainProductIdx: 1 })
+// async function getNextTrainProductIdx() {
+//   const last = await ProductUpload.findOne({}, { trainProductIdx: 1 })
+//     .sort({ trainProductIdx: -1 })
+//     .lean();
+
+//   return Number(last?.trainProductIdx ?? 0) + 1;
+// }
+
+async function getNextTrainProductIdx(storageType) {
+  const normalizedStorageType = normalizeStorageType(storageType);
+  const range = TRAIN_PRODUCT_IDX_RANGE[normalizedStorageType];
+
+  if (!range) {
+    throw new Error(
+      `[AckCollect] Invalid storageType for trainProductIdx: ${storageType}`
+    );
+  }
+
+  const trainProductIdxCondition = {
+    $gte: range.start,
+  };
+
+  // 냉장은 100000까지만 사용
+  if (range.end !== null) {
+    trainProductIdxCondition.$lte = range.end;
+  }
+
+  const last = await ProductUpload.findOne(
+    {
+      trainProductIdx: trainProductIdxCondition,
+    },
+    {
+      trainProductIdx: 1,
+    }
+  )
     .sort({ trainProductIdx: -1 })
     .lean();
 
-  return Number(last?.trainProductIdx ?? 0) + 1;
+  const nextTrainProductIdx = last
+    ? Number(last.trainProductIdx) + 1
+    : range.start;
+
+  if (
+    range.end !== null &&
+    nextTrainProductIdx > range.end
+  ) {
+    throw new Error(
+      `[AckCollect] ${normalizedStorageType} trainProductIdx range exceeded`
+    );
+  }
+
+  return nextTrainProductIdx;
 }
+
+const TRAIN_PRODUCT_IDX_RANGE = Object.freeze({
+  COLD: {
+    start: 1,
+    end: 100000,
+  },
+  FROZEN: {
+    start: 100001,
+    end: null,
+  },
+});
 
 async function syncProductMetadata({
   productIdx,
@@ -875,7 +932,11 @@ async function syncDivisionAndDeviceTypeMapping({
       $set: {
         divisionIdx,
         deviceIdx: deviceIdxArr,
-        products: productMappings,
+        // 냉장 TRAINING 요청
+        // → DivisionUpload.products = 냉장 상품 목록
+        // 냉동 TRAINING 요청
+        // → DivisionUpload.products = 냉동 상품 목록으로 교체 문제 발생 가능 -> productMappings를 그대로 넣으면 냉장/냉동 섞여서 들어감
+        // products: productMappings,
       },
     },
     { upsert: true }
@@ -1081,7 +1142,7 @@ async function handleStartCollect(reqData, reqSysid) {
 
   if (!productDoc) {
 
-    trainProductIdx = await getNextTrainProductIdx();
+    trainProductIdx = await getNextTrainProductIdx(normalizedStorageType);
 
     console.log(`[AckCollect] new trainProductIdx: ${trainProductIdx}`);
 
@@ -1593,6 +1654,11 @@ async function handleCollectMessage(message) {
       return;
     }
 
+    if (collect_state === "TRAINING") {
+      await handleTrainingCollect(reqData, reqSysid);
+      return;
+    }
+
     throw new Error(`Unsupported collect_state: ${collect_state}`);
   } catch (error) {
     // local folder not found가 뜸
@@ -1616,6 +1682,213 @@ async function handleCollectMessage(message) {
       })
     );
   }
+}
+
+async function handleTrainingCollect(reqData, reqSysid) {
+  const {
+    device_idx,
+    division_idx,
+    product_idx,
+    collect_state,
+    product_eng_name,
+    category_idx,
+    is_new,
+    product_loadcell_weight,
+  } = reqData;
+
+  console.log("[AckCollect] TRAINING request:", {
+    device_idx,
+    division_idx,
+    product_idx,
+    product_eng_name,
+  });
+
+  await ensureMongoConnected();
+
+  /*
+   * IF04에서 미리 받은 저장 타입 사용
+   */
+  const option = getLatestCollectOption();
+  const normalizedStorageType =
+    normalizeStorageType(option.storageType);
+
+  if (normalizedStorageType === "UNKNOWN") {
+    throw new Error(
+      `[TRAINING] Invalid storageType: ${option.storageType}`
+    );
+  }
+
+  if (!product_idx || !product_eng_name) {
+    throw new Error(
+      "[TRAINING] product_idx and product_eng_name are required"
+    );
+  }
+
+  /*
+   * 1. 기존 학습 상품 확인
+   * 신규 ProductUpload는 생성하지 않는다.
+   */
+  let productDoc = await ProductUpload.findOne(
+    {
+      productIdx: product_idx,
+      productEngName: product_eng_name,
+    },
+    {
+      _id: 1,
+      productIdx: 1,
+      productEngName: 1,
+      trainProductIdx: 1,
+      trainingStatus: 1,
+      storageType: 1,
+    }
+  ).lean();
+
+  if (!productDoc) {
+    throw new Error(
+      `[TRAINING] Existing product not found: ` +
+      `productIdx=${product_idx}, ` +
+      `productEngName=${product_eng_name}`
+    );
+  }
+
+  /*
+   * 기존 상품의 냉장/냉동 타입 검증
+   */
+  const productStorageType =
+    normalizeStorageType(productDoc.storageType);
+
+  if (
+    productStorageType !== "UNKNOWN" &&
+    productStorageType !== normalizedStorageType
+  ) {
+    throw new Error(
+      `[TRAINING] Product storageType mismatch: ` +
+      `product=${productStorageType}, ` +
+      `request=${normalizedStorageType}`
+    );
+  }
+
+  /*
+   * syncDivisionAndDeviceTypeMapping()가
+   * trainingStatus="2" 상품만 조회하기 때문에 상태 보정
+   *
+   * 기존 데이터가 항상 "2"임이 보장되면 이 블록은 생략 가능
+   */
+  if (String(productDoc.trainingStatus) !== "2") {
+    await ProductUpload.updateOne(
+      {
+        _id: productDoc._id,
+      },
+      {
+        $set: {
+          trainingStatus: "2",
+          updateDate: new Date(),
+        },
+      }
+    );
+
+    productDoc = {
+      ...productDoc,
+      trainingStatus: "2",
+    };
+  }
+
+  /*
+   * 2. DivisionUpload / DeviceTypeUpload 상품 매핑
+   *
+   * DeviceTypeUpload.products[]에 다음 형태로 반영
+   * {
+   *   product: productDoc._id,
+   *   training_status: "2"
+   * }
+   */
+  const mappingResult =
+    await syncDivisionAndDeviceTypeMapping({
+      divisionIdx: division_idx,
+      deviceIdx: device_idx,
+      storageType: normalizedStorageType,
+      currentProductIdxList: [
+        String(product_idx),
+      ],
+    });
+
+  /*
+   * 실제 DeviceTypeUpload.products[] 반영 여부 검증
+   */
+  const mappedDeviceType =
+    await DeviceTypeUpload.findOne(
+      {
+        brunchName: mappingResult.brunchName,
+        products: {
+          $elemMatch: {
+            product: productDoc._id,
+            training_status: "2",
+          },
+        },
+      },
+      {
+        _id: 1,
+        brunchName: 1,
+      }
+    ).lean();
+
+  if (!mappedDeviceType) {
+    throw new Error(
+      `[TRAINING] DeviceType product mapping failed: ` +
+      `productIdx=${product_idx}, ` +
+      `brunchName=${mappingResult.brunchName}`
+    );
+  }
+
+  /*
+   * 3. 다음 IF04 CLOSE 요청에서 사용할
+   * 학습 대상 장비 정보 저장
+   */
+  setLatestTrainingTarget({
+    productIdx: product_idx,
+    divisionIdx: division_idx,
+    deviceIdx: device_idx,
+    storageType: normalizedStorageType,
+  });
+
+  /*
+   * notifyAiTrainingStore()는 호출하지 않는다.
+   * IF06 ACK만 발행
+   */
+  publishAck(
+    makeAckPayload({
+      reqSysid,
+      device_idx,
+      division_idx,
+      collectState: collect_state,
+      productIdx: product_idx,
+      productEngName: product_eng_name,
+      categoryIdx: category_idx,
+      isNew: is_new,
+      productLoadcellWeight:
+        product_loadcell_weight ?? null,
+      resultCd: "S",
+      resultMsg: "training target mapped",
+      extraData: {
+        train_product_idx:
+          productDoc.trainProductIdx,
+        brunch_name:
+          mappingResult.brunchName,
+      },
+    })
+  );
+
+  console.log(
+    "[AckCollect] TRAINING completed:",
+    {
+      productIdx: product_idx,
+      productOid: productDoc._id,
+      trainProductIdx:
+        productDoc.trainProductIdx,
+      brunchName:
+        mappingResult.brunchName,
+    }
+  );
 }
 
 // async function handleCollectMessage(message) {
