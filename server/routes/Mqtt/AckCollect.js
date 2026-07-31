@@ -1442,11 +1442,7 @@ async function handleEndCollect(reqData, reqSysid) {
     throw new Error(uploadResult.message || "MinIO upload failed");
   }
 
-  const finalLoadcellWeight =
-  product_loadcell_weight == null ||
-  product_loadcell_weight === ""
-    ? updateLoadcellWeight
-    : product_loadcell_weight;
+  const finalLoadcellWeight = updateLoadcellWeight || product_loadcell_weight;
 
   const productDoc = await syncProductMetadata({
     productIdx: product_idx,
