@@ -769,6 +769,7 @@ async function syncProductMetadata({
 //   };
 // }
 
+// 수집 완료 상품의 학습 상태와 실제 학습 대상 장비 정보를 IF07 서비스에 전달
 async function notifyAiTrainingStore(product) {
   console.log(
     '[notifyAiTrainingStore] product ======>',
@@ -789,11 +790,28 @@ async function notifyAiTrainingStore(product) {
     //   aiNotifyService.notifyTrainingStore.toString()
     // );
 
+    // const payload = {
+    //   productIdx: product.productIdx,
+    //   productEngName: product.productEngName,
+    //   trainingStatus: product.trainingStatus || "2",
+    // };
+
+    // config 장비 정보가 아닌 수집 세션의 학습 대상 장비 정보를 전달
     const payload = {
       productIdx: product.productIdx,
       productEngName: product.productEngName,
+      divisionIdx: product.divisionIdx,
+      deviceIdx: product.deviceIdx,
       trainingStatus: product.trainingStatus || "2",
     };
+
+    if (!payload.divisionIdx) {
+      console.log(`[IF07] training divisionIdx is required: productIdx=${payload.productIdx}`);
+    }
+
+    if (!payload.deviceIdx) {
+      console.log(`[IF07] training deviceIdx is required: productIdx=${payload.productIdx}`);
+    }
 
     console.log("[notifyAiTrainingStore -> service payload]", payload);
 
@@ -810,6 +828,8 @@ async function notifyAiTrainingStore(product) {
       {
         productIdx: product.productIdx,
         productEngName: product.productEngName,
+        divisionIdx: product.divisionIdx,
+        deviceIdx: product.deviceIdx,
         trainingStatus: product.trainingStatus || "2",
       },
     ]);
@@ -1571,9 +1591,14 @@ async function handleEndCollect(reqData, reqSysid) {
 
   try {
   const notifyResult = await notifyAiTrainingStore({
-      productIdx: product_idx,
-      productEngName: product_eng_name,
-      trainingStatus: "2",
+      // productIdx: product_idx,
+      // productEngName: product_eng_name,
+      // trainingStatus: "2",
+        productIdx: product_idx,
+        productEngName: product_eng_name,
+        divisionIdx: session.divisionIdx,
+        deviceIdx: session.deviceIdx,
+        trainingStatus: "2",
     });
 
     console.log("[AckCollect] sending to PNT:", notifyResult);

@@ -8,7 +8,7 @@
 const axios = require("axios");
 const config = require("../../config/dev");
 const { v4: uuidv4 } = require("uuid");
-const { divisionIdx } = require("../../config/prod");
+// const { divisionIdx } = require("../../config/prod");
 
 let currentTrainingStatus = null;
 
@@ -35,21 +35,42 @@ async function TrainingStore(productMap, trainingStatus) {
 
     const normalizedTrainingStatus = String(trainingStatus);
 
-    /*
-    * Map은 JSON으로 직접 전송할 수 없으므로
-    * product_list 배열로 변환합니다.
-    */
-    const productList = Array.from(productMap.values()).map(
-            (product) => ({
-                division_idx: config.divisionIdx,
-                device_idx: config.deviceIdx,
-                product_idx: String(product.product_idx),
-                product_eng_name:product.product_eng_name,
-                training_status:normalizedTrainingStatus,
-            })
-        );
+    // const productList = Array.from(productMap.values()).map(
+    //         (product) => ({
+    //             division_idx: config.divisionIdx,
+    //             device_idx: config.deviceIdx,
+    //             product_idx: String(product.product_idx),
+    //             product_eng_name:product.product_eng_name,
+    //             training_status:normalizedTrainingStatus,
+    //         })
+    //     );
 
     try {
+         /*
+        * Map은 JSON으로 직접 전송할 수 없으므로 배열로 변환합니다.
+        * division_idx, device_idx는 현재 서버 config가 아닌
+        * 실제 학습 대상 장비 정보를 사용합니다.
+        */
+        const productList = Array.from(productMap.values()).map((product) => {
+            const trainingDivisionIdx = product.division_idx ?? product.divisionIdx;
+            const trainingDeviceIdx = product.device_idx ?? product.deviceIdx;
+
+            if (!trainingDivisionIdx) {
+            throw new Error(`[IF07] training division_idx is required: product_idx=${product.product_idx}`);
+            }
+
+            if (!trainingDeviceIdx) {
+            throw new Error(`[IF07] training device_idx is required: product_idx=${product.product_idx}`);
+            }
+
+            return {
+            division_idx: String(trainingDivisionIdx),
+            device_idx: String(trainingDeviceIdx),
+            product_idx: String(product.product_idx),
+            product_eng_name: product.product_eng_name,
+            training_status: normalizedTrainingStatus,
+            };
+        });
         const token = config.jwtToken;
         if (!token) {
             throw new Error("JWT_TOKEN not set");
@@ -78,12 +99,15 @@ async function TrainingStore(productMap, trainingStatus) {
                 // }],
             }
         };
+
+        console.log("[IF07] request payload:", JSON.stringify(payload, null, 2));
         
         const response = await external.post(targetUrl, payload, {
             headers: {
                 Authorization: `Bearer ${token}`,
             },
         });
+        currentTrainingStatus = normalizedTrainingStatus;
         return response.data;
 
     } catch (error) {
