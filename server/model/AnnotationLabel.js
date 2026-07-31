@@ -17,7 +17,8 @@ const annotationLabelSchema = mongoose.Schema({
         type: String,
     },
     id: {
-        type: Number
+        type: Number,
+        unique: true,
     },
     color: {
         type: String

@@ -14,9 +14,13 @@ const { TrainingStore } = require("../../routes/RestAPI/TrainingStore");
 async function notifyTrainingStore({
   productIdx,
   productEngName,
+  divisionIdx,
+  deviceIdx,
   trainingStatus = "2",
 } = {}) {
   if (!productIdx) throw new Error("productIdx is required");
+  if (!divisionIdx) throw new Error("divisionIdx is required");
+  if (!deviceIdx) throw new Error("deviceIdx is required");
 
   // const res = await TrainingStore({
   //   productIdx,
@@ -26,9 +30,17 @@ async function notifyTrainingStore({
 
   const productMap = new Map();
 
+  // productMap.set(String(productIdx), {
+  //   product_idx: productIdx,
+  //   product_eng_name: productEngName,
+  // });
+
+  // IF07에 전달할 상품 및 학습 대상 장비 정보 구성
   productMap.set(String(productIdx), {
     product_idx: productIdx,
     product_eng_name: productEngName,
+    division_idx: divisionIdx,
+    device_idx: deviceIdx,
   });
 
   const res = await TrainingStore(productMap, trainingStatus);
@@ -50,12 +62,16 @@ async function notifyTrainingStoreMany(products = []) {
     const result = await notifyTrainingStore({
       productIdx: p.productIdx,
       productEngName: p.productEngName,
+      divisionIdx: p.divisionIdx,
+      deviceIdx: p.deviceIdx,
       trainingStatus: p.trainingStatus || "2",
     });
 
     results.push({
       productIdx: p.productIdx,
       productEngName: p.productEngName,
+      divisionIdx: p.divisionIdx,
+      deviceIdx: p.deviceIdx,
       success: result.success,
       raw: result.raw,
     });
