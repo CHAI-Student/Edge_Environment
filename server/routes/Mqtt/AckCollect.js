@@ -1197,7 +1197,8 @@ async function handleStartCollect(reqData, reqSysid) {
     storageType: normalizedStorageType,
   });
 
-  await cameraStartSampling(productFolder, [0, 2]);
+  // await cameraStartSampling(productFolder, [0, 2]);
+  await cameraStartSampling(productFolder, [0, 1]);
 
   const useLoadcell = hasLoadcell === "Y";
   console.log('Loadcell is', useLoadcell)
@@ -1410,6 +1411,7 @@ async function handleEndCollect(reqData, reqSysid) {
       const logs = await fetchRecordedLoadcellData();
       const weight = computeProductWeight(logs);
       updateLoadcellWeight = String(weight);
+      updateLoadcellWeight = Math.abs(updateLoadcellWeight)
       console.log(`[Loadcell] computed weight: ${updateLoadcellWeight} (snapshots=${logs.length})`);
     } catch (err) {
       console.error('[Loadcell] weight calculation failed:', err.message);
