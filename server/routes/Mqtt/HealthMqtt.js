@@ -395,7 +395,7 @@ async function HealthMqtt() {
       const EdgePCStatus = await EdgePCStatusAPI(DeadboltStatus, LoadcellStatus);
 
       // 센서 에러나면 20초에 한번씩 소리 나게
-      if (CardTerminalStatus == '30' || LoadcellStatus == '20' || CameraStatus == '00' || EdgePCStatus != '49') {
+      if (CardTerminalStatus !== '39' || LoadcellStatus !== '29' || DeadboltStatus !== '19' || CameraStatus !== '09' || EdgePCStatus !== '49') {
         if (!sensorErrorVoiceInterval) {
           playSensorErrorVoice();
           sensorErrorVoiceInterval = setInterval(() => {
