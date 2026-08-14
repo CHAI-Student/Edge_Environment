@@ -25,7 +25,7 @@ const config = require("../../config/key");
 const { DeviceInfo } = require("../RestAPI/DeviceInfo");
 const { ProductList } = require("../RestAPI/ProductList");
 const { TrainingStore } = require("../RestAPI/TrainingStore");
-const { getProcessing } = require("./PaymentProcessing");
+const { getProcessing } = require("../RestAPI/PaymentProcessing");
 
 // const {
 //   fetchCurrentDoorState,
