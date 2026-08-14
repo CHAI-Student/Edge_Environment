@@ -27,9 +27,9 @@ module.exports = {
     // 테스트용
     // divisionIdx: 'DI17790813642907755', // 냉장 학습용 (여의도점)
     // divisionIdx: 'DI17798460900133031', // 냉장 통테용 (부산점)
-    // divisionIdx: 'DI17790813642907755', // 냉동 테스트용
+    divisionIdx: 'DI17790813642907755', // 냉동 테스트용
     // divisionIdx: 'DI17846216186054023', // 냉동 테스트용 (한양대점)
-    divisionIdx: 'DI17866730866133136', // 냉동 테스트용 (ITBT점)
+    // divisionIdx: 'DI17866730866133136', // 냉동 테스트용 (ITBT점)
     
     
     
@@ -39,9 +39,9 @@ module.exports = {
     // 테스트용
     // deviceIdx: 'DE17790815108130388', // 냉장 학습용
     // deviceIdx: 'DE17798461293792881', // 냉장 통테용
-    // deviceIdx: 'DE17815818605453073', // 냉동 테스트용 
+    deviceIdx: 'DE17815818605453073', // 냉동 테스트용 
     // deviceIdx: 'DE17854776152298715', // 냉동 테스트용 (한양대점)
-    deviceIdx: 'DE17866731359563130', // 냉동 테스트용 (ITBT점)
+    // deviceIdx: 'DE17866731359563130', // 냉동 테스트용 (ITBT점)
     
     // PNT RestAPI 연결
     restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
