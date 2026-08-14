@@ -25,16 +25,17 @@ const config = require("../../config/key");
 const { DeviceInfo } = require("../RestAPI/DeviceInfo");
 const { ProductList } = require("../RestAPI/ProductList");
 const { TrainingStore } = require("../RestAPI/TrainingStore");
+const { getProcessing } = require("./PaymentProcessing");
 
-const {
-  fetchCurrentDoorState,
-} = require("./AckCollect");
+// const {
+//   fetchCurrentDoorState,
+// } = require("./AckCollect");
 
-const {
-  DeadboltStatusAPI,
-  LoadcellStatusAPI,
-  CameraStatusAPI,
-} = require("./HealthMqtt");
+// const {
+//   DeadboltStatusAPI,
+//   LoadcellStatusAPI,
+//   CameraStatusAPI,
+// } = require("./HealthMqtt");
 
 const ENV_FILE_PATH = path.resolve(__dirname, "../../.env");
 const REBOOT_FLAG = path.resolve(__dirname, "../../log/reboot.flag");
@@ -1520,6 +1521,28 @@ async function RebootMqtt() {
       let flagWritten = false;
 
       try {
+        /**
+         * 결제 진행 중에는 재부팅 금지
+         * ① 재부팅 명령 수신 직후
+         * → 이미 결제 중이면 바로 거절
+         */
+        if (getProcessing()) {
+          console.warn(
+            "[REBOOT] Payment is processing. Reboot rejected."
+          );
+
+          await publishRebootAck({
+            deviceIdx,
+            divisionIdx,
+            ifSysId,
+            rebootState: "REJECTED",
+            resultCd: "F",
+            resultMsg: "Payment is processing",
+          });
+
+          rebooting = false;
+          return;
+        }
         if (
           !["MANUAL", "EMBEDDING"]
             .includes(rebootMode)
@@ -1635,18 +1658,18 @@ async function RebootMqtt() {
             return;
           }
 
-          const healthOk =
-            await isDeviceSensorsHealthy();
-
-          console.log(
-            `[ModelEmbedding] health result: ` +
-            healthOk
-          );
-
           /*
            * 상태가 정상이 아닐 때 업데이트를
            * 중단하려면 아래 코드를 활성화합니다.
            */
+          // const healthOk =
+          //   await isDeviceSensorsHealthy();
+
+          // console.log(
+          //   `[ModelEmbedding] health result: ` +
+          //   healthOk
+          // );
+
           // if (!healthOk) {
           //   throw new Error(
           //     "Product collection health check failed"
@@ -1724,6 +1747,28 @@ async function RebootMqtt() {
           );
         }
 
+        /**
+         * 실제 재부팅 직전 결제 상태 재확인
+         * ② 실제 reboot.flag / ACCEPTED 직전
+         * → EMBEDDING 작업 도중 결제가 시작됐으면 거절
+         */
+        if (getProcessing()) {
+          console.warn(
+            "[REBOOT] Payment started during reboot preparation. Reboot rejected."
+          );
+
+          await publishRebootAck({
+            deviceIdx,
+            divisionIdx,
+            ifSysId,
+            rebootState: "REJECTED",
+            resultCd: "F",
+            resultMsg: "Payment is processing",
+          });
+
+          rebooting = false;
+          return;
+        }
         /**
          * MANUAL과 EMBEDDING 공통 처리
          */
