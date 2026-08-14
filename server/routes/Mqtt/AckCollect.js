@@ -1327,7 +1327,7 @@ async function handleCollectMessage(message) {
       return;
     }
 
-    if (collect_state === "TRAINING") {
+    if (collect_state === "training") {
       await handleTrainingCollect(reqData, reqSysid);
       return;
     }
