@@ -1046,26 +1046,27 @@ async function handleStartCollect(reqData, reqSysid) {
 
     // const health = await ProductCollectionHealth();
 
-    publishAck(
-    makeAckPayload({
-      reqSysid: reqSysid,
-      device_idx: device_idx,
-      division_idx: division_idx,
-      collectState: collect_state,
-      productIdx: product_idx,
-      productEngName: product_eng_name,
-      categoryIdx: category_idx,
-      isNew: is_new,
-      productLoadcellWeight: 'null',
-      resultCd: health.isSuccess ? "S" : "F",
-      resultMsg: health.resultMsg,
-      health,
-      extraData: {
-        collection_timestamp: timestamp,
-        local_path: productFolder,
-      },
-    })
-  );
+    // 카메라 전환은 하나의 START 수집 세션 안에서 처리하므로 IF06을 재발행하지 않는다.
+    // publishAck(
+    //   makeAckPayload({
+    //     reqSysid: reqSysid,
+    //     device_idx: device_idx,
+    //     division_idx: division_idx,
+    //     collectState: collect_state,
+    //     productIdx: product_idx,
+    //     productEngName: product_eng_name,
+    //     categoryIdx: category_idx,
+    //     isNew: is_new,
+    //     productLoadcellWeight: 'null',
+    //     resultCd: health.isSuccess ? "S" : "F",
+    //     resultMsg: health.resultMsg,
+    //     health,
+    //     extraData: {
+    //       collection_timestamp: timestamp,
+    //       local_path: productFolder,
+    //     },
+    //   })
+    // );
 
   await waitUntilDoorClosed({ intervalMs: 500 });
 
