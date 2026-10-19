@@ -17,7 +17,8 @@ module.exports = {
     // MQTT 브로커 접속
     mqttURL: 'mqtt://chaidev.atcrk.co.kr:1883',
     // 브로커 계정 정보는 고유해야함 -> 테스트 장비 매장
-    mqttID: 'pnt',
+    // mqttID: 'pnt',
+    mqttID: 'yesan', // 테스트용 브로커 ID
     mqttPW: 'chai',
 
     // 사원증(RFID) 매장 브로커ID
