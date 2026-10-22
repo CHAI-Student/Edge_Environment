@@ -17,8 +17,8 @@ module.exports = {
     // MQTT 브로커 접속
     mqttURL: 'mqtt://chaidev.atcrk.co.kr:1883',
     // 브로커 계정 정보는 고유해야함 -> 테스트 장비 매장
-    // mqttID: 'pnt',
-    mqttID: 'yesan', // 테스트용 브로커 ID
+    mqttID: 'pnt',
+    // mqttID: 'yesan', // 테스트용 브로커 ID
     mqttPW: 'chai',
 
     // 사원증(RFID) 매장 브로커ID
@@ -30,8 +30,8 @@ module.exports = {
     // divisionIdx: 'DI17798460900133031', // 냉장 통테용 (부산점)
     // divisionIdx: 'DI17790813642907755', // 냉동 테스트용
     // divisionIdx: 'DI17846216186054023', // 냉장 테스트용 (한양대점)
-    // divisionIdx: 'DI17866730866133136', // 냉장 테스트용 (ITBT점)
-    divisionIdx: 'DI17905727881347574', // 냉장 CJFW
+    divisionIdx: 'DI17866730866133136', // 냉장 테스트용 (ITBT점)
+    // divisionIdx: 'DI17905727881347574', // 냉장 CJFW
     
     
     // 냉장 장비 고유번호
@@ -42,8 +42,8 @@ module.exports = {
     // deviceIdx: 'DE17798461293792881', // 냉장 통테용
     // deviceIdx: 'DE17815818605453073', // 냉동 테스트용 
     // deviceIdx: 'DE17846226165932307',  // 냉장 테스트용 (한양대점)
-    // deviceIdx: 'DE17866760140506643',  // 냉장 테스트용 (ITBT점)
-    deviceIdx: 'DE17905728349982070', // 냉장 CJFW
+    deviceIdx: 'DE17866760140506643',  // 냉장 테스트용 (ITBT점)
+    // deviceIdx: 'DE17905728349982070', // 냉장 CJFW
     
     // PNT RestAPI 연결
     restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
