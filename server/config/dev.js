@@ -29,7 +29,8 @@ module.exports = {
     // divisionIdx: 'DI17798460900133031', // 냉장 통테용 (부산점)
     // divisionIdx: 'DI17790813642907755', // 냉동 테스트용
     // divisionIdx: 'DI17846216186054023',
-    divisionIdx: 'DI17866730866133136', // 한양대 ITBT
+    // divisionIdx: 'DI17866730866133136', // 한양대 ITBT
+    divisionIdx: 'DI17937564064174323', // 하림 냉동
     
     // 냉장 장비 고유번호
     // deviceIdx: 'DE17560868094789999',
@@ -39,8 +40,9 @@ module.exports = {
     // deviceIdx: 'DE17798461293792881', // 냉장 통테용
     // deviceIdx: 'DE17815818605453073', // 냉동 테스트용 
     // deviceIdx: 'DE17854776152298715',
-    deviceIdx: 'DE17866731359563130', // 한양대 ITBT 냉동
-    
+    // deviceIdx: 'DE17866731359563130', // 한양대 ITBT 냉동
+    deviceIdx: 'DE17937564287862254', // 하림 냉동
+
     // PNT RestAPI 연결
     restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
     // userId: 'chaitest',   // 냉장용
