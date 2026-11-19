@@ -19,9 +19,9 @@ const productUploadSchema = mongoose.Schema({
         type: String,
     },
     // //PNT에 등록된 상품 이름(한글)
-    // productName: {
-    //     type: String,
-    // },
+    productName: {
+        type: String,
+    },
     //PNT에 등록된 상품 카테고리
     categoryIdx: {
         type: String,
