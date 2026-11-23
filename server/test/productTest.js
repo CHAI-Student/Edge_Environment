@@ -13,7 +13,7 @@ const { devAutoLogin } = require("../routes/auth");
 const { ProductList } = require("../routes/RestAPI/ProductList");
 
 const external = axios.create({
-  baseURL: "https://apichaidev.atcrk.co.kr/api/v1", // https://apichaidev.atcrk.co.kr/api/v1
+  baseURL: "https://apipntdev.atcrk.co.kr/api/v1", // https://apipntdev.atcrk.co.kr/api/v1
   timeout: 10000,
   headers: { "Content-Type": "application/json" },
 });

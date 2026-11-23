@@ -14,21 +14,27 @@ module.exports = {
     minioSecretKey: 'CrkMinio2026',
     minioURL: '139.150.8.82',
     minioBucket: 'chaiimage',
-    // MQTT 브로커 접속
-    mqttURL: 'mqtt://chaidev.atcrk.co.kr:1883',
-    // 브로커 계정 정보는 고유해야함 -> 테스트 장비 매장
-    mqttID: 'pnt',
-    // mqttID: 'yesan', // 테스트용 브로커 ID
-    mqttPW: 'chai',
+    
+    // // MQTT 브로커 접속 (chai 개발계)
+    // mqttURL: 'mqtt://chaidev.atcrk.co.kr:1883',
+    // // 브로커 계정 정보는 고유해야함 -> 테스트 장비 매장
+    // mqttID: 'pnt',
+    // // mqttID: 'yesan', // 테스트용 브로커 ID
+    // mqttPW: 'chai',
 
-    // 사원증(RFID) 매장 브로커ID
+    // MQTT 브로커 접속 (pntdev 개발계)
+    mqttURL: 'mqtt://pntdev.atcrk.co.kr:1883',
+    // 브로커 계정 정보는 고유해야함 -> 테스트 장비 매장
+    mqttID: 'chaitest1',
+    // mqttID: 'yesan', // 테스트용 브로커 ID
+    mqttPW: 'chaitest1!',
 
     // 냉장 매장 고유번호
     // divisionIdx: 'DI17647205538493077',
     // 테스트용
     // divisionIdx: 'DI17790813642907755', // 냉장 학습용 (여의도점)
     // divisionIdx: 'DI17798460900133031', // 냉장 통테용 (부산점)
-    // divisionIdx: 'DI17790813642907755', // 냉동 테스트용
+    // divisionIdx: 'DI17790813642907755', // 냉동 테스트용 (여의도점)
     // divisionIdx: 'DI17846216186054023', // 냉장 테스트용 (한양대점)
     // divisionIdx: 'DI17866730866133136', // 냉장 테스트용 (ITBT점)
     divisionIdx: 'DI17905727881347574', // 냉장 CJFW
@@ -45,17 +51,24 @@ module.exports = {
     // deviceIdx: 'DE17866760140506643',  // 냉장 테스트용 (ITBT점)
     deviceIdx: 'DE17905728349982070', // 냉장 CJFW
     
-    // PNT RestAPI 연결
-    restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
-    userId: 'chaitest',   // 냉장용
-    // userId: 'chaitest2',   // 냉동용
-    userPassword: 'iljin123!',
+    // // PNT RestAPI 연결 (chai 개발계)
+    // restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
+    // userId: 'chaitest',   // 냉장용
+    // // userId: 'chaitest2',   // 냉동용
+    // userPassword: 'iljin123!',
+
+    // PNT RestAPI 연결 (pntdev 개발계)
+    restApi: 'https://apipntdev.atcrk.co.kr/api/v1',
+    userId: 'chaitest1',
+    userPassword: 'chaitest1!',
+
     get jwtToken() {
         return process.env.JWT_TOKEN;
     },
     get jwtTokenAt() {
         return process.env.JWT_TOKEN_AT;
     },
+
     ioboardApi: 'http://localhost:8000',
     // ioboardApi: 'http://192.168.0.20:8000',
     // 카메라 서버 API 설정
