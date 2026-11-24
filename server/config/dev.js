@@ -74,7 +74,7 @@ module.exports = {
     // PNT RestAPI 연결 (pnt 운영계)
     restApi: 'https://apipnt.atcrk.co.kr/api/v1',
     userId: 'crkaicold',
-    userPassword: 'crkaicold1!!',
+    userPassword: 'crkaicold1!',
 
     get jwtToken() {
         return process.env.JWT_TOKEN;
