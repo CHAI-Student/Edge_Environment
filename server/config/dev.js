@@ -22,8 +22,15 @@ module.exports = {
     // // mqttID: 'yesan', // 테스트용 브로커 ID
     // mqttPW: 'chai',
 
-    // MQTT 브로커 접속 (pntdev 개발계)
-    mqttURL: 'mqtt://pntdev.atcrk.co.kr:1883',
+    // // MQTT 브로커 접속 (pntdev 개발계)
+    // mqttURL: 'mqtt://pntdev.atcrk.co.kr:1883',
+    // // 브로커 계정 정보는 고유해야함 -> 테스트 장비 매장
+    // mqttID: 'chaitest1',
+    // // mqttID: 'yesan', // 테스트용 브로커 ID
+    // mqttPW: 'chaitest1!',
+
+    // MQTT 브로커 접속 (pnt 운영계)
+    mqttURL: 'mqtt://pnt.atcrk.co.kr:1883',
     // 브로커 계정 정보는 고유해야함 -> 테스트 장비 매장
     mqttID: 'chaitest1',
     // mqttID: 'yesan', // 테스트용 브로커 ID
@@ -57,8 +64,13 @@ module.exports = {
     // // userId: 'chaitest2',   // 냉동용
     // userPassword: 'iljin123!',
 
-    // PNT RestAPI 연결 (pntdev 개발계)
-    restApi: 'https://apipntdev.atcrk.co.kr/api/v1',
+    // // PNT RestAPI 연결 (pntdev 개발계)
+    // restApi: 'https://apipntdev.atcrk.co.kr/api/v1',
+    // userId: 'chaitest1',
+    // userPassword: 'chaitest1!',
+
+    // PNT RestAPI 연결 (pnt 운영계)
+    restApi: 'https://apipnt.atcrk.co.kr/api/v1',
     userId: 'chaitest1',
     userPassword: 'chaitest1!',
 
