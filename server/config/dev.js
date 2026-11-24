@@ -34,7 +34,7 @@ module.exports = {
     // 브로커 계정 정보는 고유해야함 -> 테스트 장비 매장
     mqttID: 'cjfwai',
     // mqttID: 'yesan', // 테스트용 브로커 ID
-    mqttPW: 'cjfwai001!!',
+    mqttPW: 'cjfwai001!',
 
     // 냉장 매장 고유번호
     // divisionIdx: 'DI17647205538493077',
