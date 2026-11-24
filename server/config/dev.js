@@ -32,9 +32,9 @@ module.exports = {
     // MQTT 브로커 접속 (pnt 운영계)
     mqttURL: 'mqtt://pnt.atcrk.co.kr:1883',
     // 브로커 계정 정보는 고유해야함 -> 테스트 장비 매장
-    mqttID: 'chaitest1',
+    mqttID: 'cjfwai',
     // mqttID: 'yesan', // 테스트용 브로커 ID
-    mqttPW: 'chaitest1!',
+    mqttPW: 'cjfwai001!!',
 
     // 냉장 매장 고유번호
     // divisionIdx: 'DI17647205538493077',
@@ -73,8 +73,8 @@ module.exports = {
 
     // PNT RestAPI 연결 (pnt 운영계)
     restApi: 'https://apipnt.atcrk.co.kr/api/v1',
-    userId: 'chaitest1',
-    userPassword: 'chaitest1!',
+    userId: 'crkaicold',
+    userPassword: 'crkaicold1!!',
 
     get jwtToken() {
         return process.env.JWT_TOKEN;
