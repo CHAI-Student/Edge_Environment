@@ -44,7 +44,8 @@ module.exports = {
     // divisionIdx: 'DI17790813642907755', // 냉동 테스트용 (여의도점)
     // divisionIdx: 'DI17846216186054023', // 냉장 테스트용 (한양대점)
     // divisionIdx: 'DI17866730866133136', // 냉장 테스트용 (ITBT점)
-    divisionIdx: 'DI17905727881347574', // 냉장 CJFW
+    // divisionIdx: 'DI17905727881347574', // 냉장 CJFW
+    divisionIdx: 'DI17954990489166080', // 냉장 CJFW (운영계용)
     
     
     // 냉장 장비 고유번호
@@ -56,7 +57,8 @@ module.exports = {
     // deviceIdx: 'DE17815818605453073', // 냉동 테스트용 
     // deviceIdx: 'DE17846226165932307',  // 냉장 테스트용 (한양대점)
     // deviceIdx: 'DE17866760140506643',  // 냉장 테스트용 (ITBT점)
-    deviceIdx: 'DE17905728349982070', // 냉장 CJFW
+    // deviceIdx: 'DE17905728349982070', // 냉장 CJFW
+    deviceIdx: 'DE17954994054858380', // 냉장 CJFW (운영계용)
     
     // // PNT RestAPI 연결 (chai 개발계)
     // restApi: 'https://apichaidev.atcrk.co.kr/api/v1',
