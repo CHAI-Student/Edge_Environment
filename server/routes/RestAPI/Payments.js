@@ -914,4 +914,4 @@ async function Payments(token, CardMethod) {
     }
 }
 
-module.exports = { Payments, router, init };
+module.exports = { Payments, router, init, waitForDeadboltClose };

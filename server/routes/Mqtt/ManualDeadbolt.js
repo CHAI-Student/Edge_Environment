@@ -12,6 +12,8 @@ const config = require("../../config/key");
 
 // 분리한 API 서비스 모듈을 가져옵니다.
 const { callApiToControlDeadbolt } = require("./DeadboltApiService");
+const LoadcellZeroset = require("../RestAPI/LoadcellZeroset");
+const { waitForDeadboltClose } = require("../RestAPI/Payments");
 
 // IF_DATE 형식(yyyyMMddHHmmss)의 timestamp 문자열 생성
 function formatIfDate(d = new Date()) {
@@ -97,6 +99,17 @@ async function ManualDeadbolt() {
       resultMsg = "API Error: " + err.message;
       // 실패 시 요청의 반대 상태(제어 미반영으로 가정)로 응답
       finalState = targetState === "OPEN" ? "CLOSE" : "OPEN";
+    }
+
+    // 수동 OPEN 후에는 CLOSE 명령 없이 문만 닫아 잠그므로, 문 닫힘을 기다렸다가
+    // 결제 세션 종료 때와 같은 로드셀 영점을 건다 (ack는 기다리지 않고 바로 전송).
+    // 수동 CLOSE 명령이 온 경우에는 바로 건다.
+    if (resultCd === "S" && finalState === "OPEN") {
+      waitForDeadboltClose()
+        .then(() => LoadcellZeroset.fireAfterSession())
+        .catch((e) => console.error("[DEADBOLT] Zeroset after manual door skipped:", e?.message || e));
+    } else if (resultCd === "S" && finalState === "CLOSE") {
+      LoadcellZeroset.fireAfterSession();
     }
 
     // ---------------------------------------------------------
