@@ -665,21 +665,25 @@ async function Payments(token, CardMethod) {
           stopDoorOpenMonitor("deadbolt closed");
           console.log("[DEADBOLT] Door closed detected:", closeEventData.state);
         // IO board 측 loadcell 기록 종료 (실패해도 결제 흐름은 계속)
+        let recordingStopped = false;
         try {
           await axios.post(`${config.ioboardApi}/recording/stop`, {});
+          recordingStopped = true;
           await delay(5000);
         } catch (error) {
           // recording stop 실패는 무시 (결제 흐름 지속)
         }
+        let cameraStopped = false;
         try {
-          await requestCameraOFF();
+          cameraStopped = Boolean(await requestCameraOFF());
         } catch (e) {
           console.error("[CAM] OFF failed:", e?.message || e);
         }
-        // 로드셀 영점 1회 (fire-and-forget) — 문 닫힘·녹화/카메라 종료로
-        // 로드셀 소비자가 없는 지점이며, calibrate 3~4초는 이후 추론 대기~
+        // 로드셀 영점 1회 + 확인 (fire-and-forget) — 문 닫힘·녹화/카메라
+        // 종료로 로드셀 소비자가 없는 지점이며, 영점·확인 시간은 이후 추론 대기~
         // 결제 승인 구간에 흡수된다. 측정 보증(30분) 타이머도 여기서 리셋.
-        LoadcellZeroset.fireAfterSession();
+        // 기록 중지·카메라 종료가 실패했으면 영점하지 않는다(주기 점검이 재시도).
+        LoadcellZeroset.fireAfterSession({ recordingStopped, cameraStopped });
       } else {
         console.log("[DEADBOLT] Close event received but state not closed:", state);
       }

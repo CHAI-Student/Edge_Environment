@@ -8,6 +8,8 @@
 // 부가: 센서 오류 시 경고 음성(mp3)을 주기적으로 재생하고,
 //   payment/deadbolt 쪽에서 넘어온 오류 코드를 1회성으로 override하여
 //   health check payload에 반영(CardTerminalErrorState/DeadboltTerminalErrorState).
+//   로드셀 영점 중 IO board 무응답은 IO board가 다시 응답할 때까지 loadcell '20'으로 보고
+//   (LoadcellZeroset.hasDeviceError).
 // ============================================================
 const config = require("../../config/key");
 const { getClient } = require("./MqttClient");
@@ -279,6 +281,12 @@ async function LoadcellStatusAPI() {
   // loadcell status check
   let LoadcellState = '20'
   try {
+    // 영점(calibrate) 중 IO board가 응답하지 않았으면 장비 이상 — 다음 영점 점검에서
+    // IO board가 다시 응답할 때까지 '20' 유지 (순환 참조 방지를 위해 lazy require)
+    if (require("../RestAPI/LoadcellZeroset").hasDeviceError()) {
+      console.log('[IO-BOARD/LOADCELL] zeroset device error (IO board no response)');
+      return LoadcellState;
+    }
     // IOBoardRes는 DeadboltStatusAPI()에서 이미 호출되었으므로 사용
     if (!IOBoardRes || !IOBoardRes.data) {
       // console.log('[LOADCELL] IOBoardRes is not available');
