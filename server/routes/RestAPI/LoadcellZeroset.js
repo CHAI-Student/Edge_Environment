@@ -36,7 +36,7 @@ const BOOT_DELAY_MS = 20 * 1000;
 // 모든 채널이 이 범위 안이면 영점 성공 (냉동 노이즈 5~15g)
 // 확인은 영점 응답 직후 바로 읽는다 — 영점 자체가 약 4초 걸리고, IO board가 영점
 // 후 로드셀 cache·sanitizer를 비우므로 다음 조회는 새 판독값이다.
-const ZERO_TOLERANCE_G = 15;
+const ZERO_TOLERANCE_G = 5;
 // 최초 영점 1회 + 확인 실패 시 재영점 1회
 const MAX_ATTEMPTS = 2;
 const READ_TIMEOUT_MS = 5 * 1000;
